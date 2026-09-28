@@ -1,0 +1,11 @@
+"""Shared Streamlit session-state keys."""
+
+UPLOADED_TABLE = "uploaded_table"
+UPLOAD_ERROR = "upload_error"
+STORED_TABLE = "stored_table"
+CHAT_MESSAGES = "chat_messages"
+DOCUMENT_RETRIEVER = "document_retriever"
+DOCUMENT_STATUS = "document_status"
+DOCUMENT_ERROR = "document_error"
+DOCUMENT_SIGNATURE = "document_signature"
+SESSION_MEMORY = "session_memory"

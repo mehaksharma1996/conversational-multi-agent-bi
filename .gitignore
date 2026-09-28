@@ -1,0 +1,36 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.env
+.venv/
+venv/
+
+data/raw/*
+data/processed/*
+data/sqlite/*
+data/vectorstore/*
+data/reports/*
+
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/sqlite/.gitkeep
+!data/vectorstore/.gitkeep
+!data/reports/.gitkeep
+
+.streamlit/secrets.toml
+work/test-dbs/
+work/test-vectors/
+work/pytest-tmp/
+
+# Generated application output
+outputs/
+work/*.log
+work/*.pid
+
+# Local editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db

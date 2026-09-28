@@ -1,0 +1,141 @@
+"""Tests for PDF ingestion, chunking, retrieval, and RAG."""
+
+from __future__ import annotations
+
+from io import BytesIO
+
+from reportlab.pdfgen import canvas
+
+from src.agents.rag_agent import answer_with_documents, build_rag_prompt
+from src.documents.chunker import DocumentChunk, chunk_document
+from src.documents.retriever import DocumentRetriever, RetrievalResult
+from src.documents.vector_store import ChromaDocumentStore, RetrievedChunk
+from src.ingestion.pdf_loader import load_pdf_file
+from src.llm.base import LLMResponse
+from tests.test_utils import isolated_vector_path
+
+
+class FakeEmbedder:
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        vectors = []
+        for text in texts:
+            lowered = text.lower()
+            vectors.append(
+                [
+                    1.0 if "refund" in lowered else 0.0,
+                    1.0 if "security" in lowered else 0.0,
+                    float(len(text)) / 1000.0,
+                ]
+            )
+        return vectors
+
+
+class FakeRetriever:
+    def retrieve(self, question: str, top_k: int = 4) -> RetrievalResult:
+        return RetrievalResult(
+            question=question,
+            chunks=[
+                RetrievedChunk(
+                    text="Refunds require manager approval.",
+                    metadata={"filename": "policy.pdf", "chunk_index": 0},
+                    distance=0.1,
+                )
+            ],
+        )
+
+
+class FakeLLM:
+    provider = "fake"
+    model = "fake-model"
+
+    def generate(self, prompt: str) -> LLMResponse:
+        self.last_prompt = prompt
+        return LLMResponse(
+            text="Refunds require manager approval. Source: policy.pdf chunk 0.",
+            model=self.model,
+            provider=self.provider,
+        )
+
+
+def test_load_pdf_file_extracts_text() -> None:
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.drawString(72, 720, "Refund policy requires manager approval.")
+    pdf.save()
+    buffer.seek(0)
+
+    document = load_pdf_file(buffer, "policy.pdf")
+
+    assert document.filename == "policy.pdf"
+    assert document.page_count == 1
+    assert "Refund policy" in document.text
+
+
+def test_chunk_document_creates_overlapping_chunks() -> None:
+    text = " ".join(f"word{i}" for i in range(80))
+
+    chunks = chunk_document(text, filename="policy.pdf", chunk_size=120, overlap=20)
+
+    assert len(chunks) > 1
+    assert chunks[0].metadata["filename"] == "policy.pdf"
+    assert chunks[0].metadata["chunk_index"] == 0
+    assert chunks[0].text
+
+
+def test_chroma_document_store_retrieves_relevant_chunk() -> None:
+    store = ChromaDocumentStore(
+        persist_dir=isolated_vector_path("documents"),
+        embedder=FakeEmbedder(),
+    )
+    store.reset()
+    store.add_chunks(
+        [
+            DocumentChunk(
+                id="refund",
+                text="Refunds require receipts and manager approval.",
+                metadata={"filename": "policy.pdf", "chunk_index": 0},
+            ),
+            DocumentChunk(
+                id="security",
+                text="Security incidents must be reported immediately.",
+                metadata={"filename": "security.pdf", "chunk_index": 0},
+            ),
+        ]
+    )
+
+    chunks = store.query("What is the refund policy?", top_k=1)
+
+    assert store.count() == 2
+    assert len(chunks) == 1
+    assert "Refunds" in chunks[0].text
+
+
+def test_build_rag_prompt_includes_sources() -> None:
+    prompt = build_rag_prompt(
+        question="What is the refund policy?",
+        chunks=[
+            RetrievedChunk(
+                text="Refunds require manager approval.",
+                metadata={"filename": "policy.pdf", "chunk_index": 2},
+                distance=0.2,
+            )
+        ],
+    )
+
+    assert "policy.pdf" in prompt
+    assert "chunk 2" in prompt
+    assert "What is the refund policy?" in prompt
+
+
+def test_answer_with_documents_uses_retrieved_context() -> None:
+    llm = FakeLLM()
+
+    answer = answer_with_documents(
+        question="What is the refund policy?",
+        retriever=FakeRetriever(),
+        llm_client=llm,
+    )
+
+    assert "manager approval" in answer.answer
+    assert answer.retrieved_chunks
+    assert "Refunds require manager approval" in llm.last_prompt
