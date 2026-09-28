@@ -13,10 +13,9 @@ from sklearn.preprocessing import StandardScaler
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 
-
 MIN_ROWS_FOR_MODEL = 8
 MAX_FLAGGED_ROWS = 20
-DEFAULT_CONTAMINATION = 0.1
+DEFAULT_CONTAMINATION = 0.05
 
 
 @dataclass(frozen=True)
@@ -36,9 +35,28 @@ def detect_anomalies(
     dataframe: pd.DataFrame,
     profile: DataProfile,
     schema_mapping: SchemaMapping,
+    feature_columns: list[str] | None = None,
+    contamination: float = DEFAULT_CONTAMINATION,
 ) -> AnomalyReport:
     """Detect numeric anomalies and attach simple row-level explanations."""
-    feature_columns = list(profile.numeric_columns)
+    if not 0 < contamination <= 0.5:
+        raise ValueError("contamination must be greater than 0 and at most 0.5.")
+
+    recommended_features = recommend_anomaly_features(profile, schema_mapping)
+    if feature_columns is None:
+        feature_columns = recommended_features
+    else:
+        invalid_features = [
+            column
+            for column in feature_columns
+            if column not in profile.numeric_columns or column not in dataframe.columns
+        ]
+        if invalid_features:
+            raise ValueError(
+                "Anomaly features must be numeric dataset columns: " + ", ".join(invalid_features)
+            )
+        feature_columns = list(dict.fromkeys(feature_columns))
+
     if not feature_columns:
         return AnomalyReport(
             enabled=False,
@@ -54,9 +72,7 @@ def detect_anomalies(
             method="IsolationForest",
             feature_columns=feature_columns,
             flagged_rows=pd.DataFrame(),
-            limitations=[
-                f"Anomaly detection requires at least {MIN_ROWS_FOR_MODEL} rows."
-            ],
+            limitations=[f"Anomaly detection requires at least {MIN_ROWS_FOR_MODEL} rows."],
         )
 
     model_input = dataframe[feature_columns]
@@ -67,7 +83,7 @@ def detect_anomalies(
             (
                 "model",
                 IsolationForest(
-                    contamination=_contamination(profile.row_count),
+                    contamination=contamination,
                     random_state=42,
                 ),
             ),
@@ -121,10 +137,33 @@ def detect_anomalies(
     )
 
 
-def _contamination(row_count: int) -> float:
-    if row_count < 20:
-        return 1 / row_count
-    return DEFAULT_CONTAMINATION
+def recommend_anomaly_features(
+    profile: DataProfile,
+    schema_mapping: SchemaMapping,
+) -> list[str]:
+    """Return numeric features while excluding identifiers and target labels."""
+    mapped_fields = schema_mapping.mapped_fields()
+    excluded = {
+        column
+        for column in (
+            mapped_fields.get("customer_id"),
+            mapped_fields.get("label"),
+        )
+        if column is not None
+    }
+    amount_column = mapped_fields.get("amount")
+
+    return [
+        column
+        for column in profile.numeric_columns
+        if column not in excluded
+        and (column == amount_column or not _looks_like_identifier(column))
+    ]
+
+
+def _looks_like_identifier(column_name: str) -> bool:
+    normalized = column_name.strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized == "id" or normalized.endswith("_id")
 
 
 def _explain_row(

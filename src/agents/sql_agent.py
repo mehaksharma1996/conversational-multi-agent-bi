@@ -8,7 +8,12 @@ from dataclasses import dataclass
 import pandas as pd
 
 from src.llm.base import LLMClient
-from src.storage.query_executor import execute_read_query, validate_read_query
+from src.storage.query_executor import (
+    QueryTimeoutError,
+    UnsafeQueryError,
+    execute_read_query,
+    validate_read_query,
+)
 from src.storage.sqlite_store import StoredTable
 
 
@@ -37,7 +42,19 @@ def answer_with_sql(
     llm_response = llm_client.generate(prompt)
     sql = extract_sql(llm_response.text)
     safe_sql = validate_read_query(sql)
-    result = execute_read_query(stored_table.database_path, safe_sql)
+    try:
+        result = execute_read_query(
+            stored_table.database_path,
+            safe_sql,
+            allowed_tables={stored_table.table_name},
+            allowed_columns={stored_table.table_name: set(stored_table.columns)},
+        )
+    except (UnsafeQueryError, QueryTimeoutError):
+        raise
+    except Exception as exc:
+        raise SQLAgentError(
+            "The generated SQL could not be executed against the uploaded table."
+        ) from exc
 
     return SQLAgentResult(
         question=question,

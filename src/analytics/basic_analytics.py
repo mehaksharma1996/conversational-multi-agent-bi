@@ -9,7 +9,6 @@ import pandas as pd
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 
-
 TOP_N = 10
 
 
@@ -95,12 +94,7 @@ def _categorical_breakdowns(
 
     for column in categorical_columns[:5]:
         counts = (
-            dataframe[column]
-            .fillna("Missing")
-            .astype(str)
-            .value_counts()
-            .head(TOP_N)
-            .reset_index()
+            dataframe[column].fillna("Missing").astype(str).value_counts().head(TOP_N).reset_index()
         )
         counts.columns = [column, "count"]
         breakdowns[column] = counts

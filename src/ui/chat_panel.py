@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
 
 from config.settings import Settings
+from src.agents.rag_agent import RAGAgentError
+from src.agents.sql_agent import SQLAgentError
 from src.llm.base import LLMConfigurationError, LLMGenerationError
 from src.llm.gemini_client import build_gemini_client
 from src.memory.session_keys import (
@@ -16,6 +20,9 @@ from src.memory.session_keys import (
 )
 from src.memory.session_memory import remember_question
 from src.orchestration.langgraph_orchestrator import QuestionOrchestrator
+from src.storage.query_executor import QueryTimeoutError, UnsafeQueryError
+
+LOGGER = logging.getLogger(__name__)
 
 
 def render_chat_panel(settings: Settings) -> None:
@@ -26,8 +33,8 @@ def render_chat_panel(settings: Settings) -> None:
             {
                 "role": "assistant",
                 "content": (
-                    "Ask a data question for safe read-only SQL, or ask a document "
-                    "question using the uploaded PDFs."
+                    "Ask about uploaded data, document guidance, or both. The "
+                    "workbench will show which specialized route handled the question."
                 ),
             }
         ]
@@ -35,6 +42,8 @@ def render_chat_panel(settings: Settings) -> None:
     for message in st.session_state[CHAT_MESSAGES]:
         with st.chat_message(message["role"]):
             st.write(message["content"])
+            if message.get("route"):
+                st.caption(f"Workflow route: {message['route']}")
             if message.get("sql"):
                 st.code(message["sql"], language="sql")
             if message.get("dataframe") is not None:
@@ -93,17 +102,33 @@ def _handle_question(prompt: str, settings: Settings) -> None:
                 "sql": result.sql,
                 "dataframe": result.dataframe,
                 "sources": result.sources,
+                "route": result.route,
             }
         )
-    except (LLMConfigurationError, LLMGenerationError, ValueError) as exc:
+    except (
+        LLMConfigurationError,
+        LLMGenerationError,
+        SQLAgentError,
+        RAGAgentError,
+        UnsafeQueryError,
+        QueryTimeoutError,
+        ValueError,
+    ) as exc:
         st.session_state[CHAT_MESSAGES].append(
             {"role": "assistant", "content": f"I could not answer safely: {exc}"}
         )
         st.rerun()
         return
     except Exception as exc:
+        LOGGER.exception("Unexpected conversational workflow failure", exc_info=exc)
         st.session_state[CHAT_MESSAGES].append(
-            {"role": "assistant", "content": f"The query failed: {exc}"}
+            {
+                "role": "assistant",
+                "content": (
+                    "The workflow encountered an unexpected internal error. "
+                    "Please review the server logs and try again."
+                ),
+            }
         )
         st.rerun()
         return

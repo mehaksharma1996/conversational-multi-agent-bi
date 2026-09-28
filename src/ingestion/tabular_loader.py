@@ -8,7 +8,6 @@ from typing import BinaryIO
 
 import pandas as pd
 
-
 SUPPORTED_TABULAR_EXTENSIONS = {".csv", ".xls", ".xlsx"}
 
 

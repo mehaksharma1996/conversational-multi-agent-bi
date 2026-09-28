@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-
 
 DEFAULT_TABLE_NAME = "uploaded_data"
 
@@ -35,13 +35,14 @@ class SQLiteStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         safe_table_name = validate_identifier(table_name)
 
-        with sqlite3.connect(self.database_path) as connection:
-            dataframe.to_sql(
-                safe_table_name,
-                connection,
-                if_exists="replace",
-                index=False,
-            )
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            with connection:
+                dataframe.to_sql(
+                    safe_table_name,
+                    connection,
+                    if_exists="replace",
+                    index=False,
+                )
 
         return StoredTable(
             database_path=self.database_path,
@@ -58,7 +59,7 @@ class SQLiteStore:
             FROM sqlite_master
             WHERE type = 'table' AND name = ?
         """
-        with sqlite3.connect(self.database_path) as connection:
+        with closing(sqlite3.connect(self.database_path)) as connection:
             result = connection.execute(query, (safe_table_name,)).fetchone()
         return result is not None
 

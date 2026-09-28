@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import pandas as pd
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
-
 DATE_SUCCESS_THRESHOLD = 0.8
 CATEGORY_MAX_UNIQUE_RATIO = 0.5
 CATEGORY_MAX_UNIQUE_VALUES = 50
@@ -53,9 +52,7 @@ def profile_dataframe(dataframe: pd.DataFrame) -> DataProfile:
         columns=columns,
         numeric_columns=[col.name for col in columns if col.inferred_type == "numeric"],
         date_columns=[col.name for col in columns if col.inferred_type == "date"],
-        categorical_columns=[
-            col.name for col in columns if col.inferred_type == "categorical"
-        ],
+        categorical_columns=[col.name for col in columns if col.inferred_type == "categorical"],
         boolean_columns=[col.name for col in columns if col.inferred_type == "boolean"],
         possible_id_columns=[
             col.name for col in columns if _is_possible_id(col.name, col.unique_ratio)
@@ -125,10 +122,7 @@ def _infer_column_type(series: pd.Series) -> str:
     unique_count = int(series.dropna().nunique())
     unique_ratio = unique_count / non_null_count if non_null_count else 0.0
 
-    if (
-        unique_count <= CATEGORY_MAX_UNIQUE_VALUES
-        or unique_ratio <= CATEGORY_MAX_UNIQUE_RATIO
-    ):
+    if unique_count <= CATEGORY_MAX_UNIQUE_VALUES or unique_ratio <= CATEGORY_MAX_UNIQUE_RATIO:
         return "categorical"
 
     return "text"

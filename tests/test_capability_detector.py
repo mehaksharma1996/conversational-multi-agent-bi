@@ -29,10 +29,10 @@ def test_capabilities_for_fraud_style_dataset() -> None:
     report = _capabilities_for(dataframe)
     available = set(report.available_capabilities())
 
-    assert "Fraud-style analysis" in available
+    assert "Fraud-analysis readiness" in available
     assert "Generic anomaly detection" in available
     assert "Trend analysis" in available
-    assert "Classification" in available
+    assert "Classification readiness" in available
 
 
 def test_numeric_only_dataset_supports_generic_anomaly_detection() -> None:
@@ -48,9 +48,9 @@ def test_numeric_only_dataset_supports_generic_anomaly_detection() -> None:
     unavailable = set(report.unavailable_capabilities())
 
     assert "Generic anomaly detection" in available
-    assert "Fraud-style analysis" in unavailable
+    assert "Fraud-analysis readiness" in unavailable
     assert "Trend analysis" in unavailable
-    assert "Classification" in unavailable
+    assert "Classification readiness" in unavailable
 
 
 def test_capability_report_explains_missing_fields() -> None:
@@ -60,7 +60,7 @@ def test_capability_report_explains_missing_fields() -> None:
     fraud_capability = next(
         capability
         for capability in report.capabilities
-        if capability.name == "Fraud-style analysis"
+        if capability.name == "Fraud-analysis readiness"
     )
 
     assert not fraud_capability.available

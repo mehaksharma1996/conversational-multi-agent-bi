@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage
+htmlcov/
 .mypy_cache/
 .ruff_cache/
 
@@ -13,6 +15,7 @@ data/processed/*
 data/sqlite/*
 data/vectorstore/*
 data/reports/*
+data/sessions/
 
 !data/raw/.gitkeep
 !data/processed/.gitkeep

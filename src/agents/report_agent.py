@@ -92,25 +92,27 @@ def _dataset_overview(profile: DataProfile) -> ReportSection:
             f"Date-like columns: {len(profile.date_columns)}",
             f"Categorical columns: {len(profile.categorical_columns)}",
             f"Possible ID columns: {', '.join(profile.possible_id_columns) or 'None detected'}",
-            f"Possible label columns: {', '.join(profile.possible_label_columns) or 'None detected'}",
+            "Possible label columns: "
+            f"{', '.join(profile.possible_label_columns) or 'None detected'}",
         ],
     )
 
 
 def _schema_section(schema_mapping: SchemaMapping) -> ReportSection:
     bullets = []
-    for field, mapping in schema_mapping.mappings.items():
+    for canonical_field, mapping in schema_mapping.mappings.items():
         source = mapping.source_column or "Not found"
         bullets.append(
-            f"{field}: {source} "
-            f"(confidence {mapping.confidence:.2f}; {mapping.reason})"
+            f"{canonical_field}: {source} (confidence {mapping.confidence:.2f}; {mapping.reason})"
         )
     return ReportSection(title="Canonical Schema Mapping", bullets=bullets)
 
 
 def _capabilities_section(capability_report: CapabilityReport) -> ReportSection:
     bullets = [
-        f"{capability.name}: {'Available' if capability.available else 'Unavailable'} - {capability.reason}"
+        f"{capability.name}: "
+        f"{'Available' if capability.available else 'Unavailable'} - "
+        f"{capability.reason}"
         for capability in capability_report.capabilities
     ]
     return ReportSection(title="Capability Detection", bullets=bullets)
@@ -124,11 +126,13 @@ def _analytics_section(analytics_report: AnalyticsReport) -> ReportSection:
         )
     if analytics_report.categorical_breakdowns:
         bullets.append(
-            f"Generated categorical breakdowns for {len(analytics_report.categorical_breakdowns)} column(s)."
+            "Generated categorical breakdowns for "
+            f"{len(analytics_report.categorical_breakdowns)} column(s)."
         )
     if analytics_report.amount_by_category:
         bullets.append(
-            f"Generated amount-by-category summaries for {len(analytics_report.amount_by_category)} column(s)."
+            "Generated amount-by-category summaries for "
+            f"{len(analytics_report.amount_by_category)} column(s)."
         )
     if analytics_report.trend is not None:
         bullets.append(f"Generated trend output with {len(analytics_report.trend)} period(s).")
@@ -146,9 +150,7 @@ def _anomaly_section(anomaly_report: AnomalyReport) -> ReportSection:
     if not anomaly_report.flagged_rows.empty:
         top_rows = anomaly_report.flagged_rows.head(5)
         for _, row in top_rows.iterrows():
-            bullets.append(
-                f"Row {row['source_row']} ranked {row['anomaly_rank']}: {row['reason']}"
-            )
+            bullets.append(f"Row {row['source_row']} ranked {row['anomaly_rank']}: {row['reason']}")
     return ReportSection(title="Anomaly Findings", bullets=bullets)
 
 
@@ -161,8 +163,7 @@ def _charts_section(chart_specs: list[ChartSpec]) -> ReportSection:
     return ReportSection(
         title="Chart Inventory",
         bullets=[
-            f"{chart.title} ({chart.chart_type}): {chart.description}"
-            for chart in chart_specs
+            f"{chart.title} ({chart.chart_type}): {chart.description}" for chart in chart_specs
         ],
     )
 

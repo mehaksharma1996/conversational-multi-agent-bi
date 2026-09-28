@@ -104,6 +104,29 @@ def test_route_question_uses_memory_for_follow_up_question() -> None:
     assert route == "memory"
 
 
+def test_route_question_uses_hybrid_for_document_and_data_question() -> None:
+    route = route_question(
+        question="Which transactions violate the uploaded policy?",
+        has_table=True,
+        has_documents=True,
+        has_memory=True,
+    )
+
+    assert route == "hybrid"
+
+
+def test_route_question_skips_memory_when_it_cannot_answer() -> None:
+    route = route_question(
+        question="How much fuel was used per merchant?",
+        has_table=True,
+        has_documents=False,
+        has_memory=True,
+        memory_answer_available=False,
+    )
+
+    assert route == "sql"
+
+
 def test_orchestrator_answers_sql_question() -> None:
     orchestrator = QuestionOrchestrator(
         llm_client=FakeLLM(
@@ -138,6 +161,21 @@ def test_orchestrator_answers_document_question() -> None:
     assert "Escalate" in result.answer
     assert result.sources
     assert "policy.pdf" in result.sources[0]
+
+
+def test_orchestrator_coordinates_document_and_sql_steps() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=FakeLLM(text="SELECT merchant, amount FROM uploaded_data ORDER BY amount DESC"),
+        stored_table=_stored_table(),
+        document_retriever=FakeRetriever(),
+    )
+
+    result = orchestrator.answer("Which transactions violate the uploaded policy?")
+
+    assert result.route == "hybrid"
+    assert result.sql is not None
+    assert result.dataframe is not None
+    assert result.sources
 
 
 def test_orchestrator_answers_memory_question() -> None:

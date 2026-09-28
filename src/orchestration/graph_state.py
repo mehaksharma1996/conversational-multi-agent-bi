@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-
-RouteName = Literal["memory", "sql", "rag", "unsupported"]
+RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported"]
 
 
 class QuestionGraphState(TypedDict, total=False):

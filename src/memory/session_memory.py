@@ -46,10 +46,7 @@ def build_session_memory(
     previous_memory: SessionMemory | None = None,
 ) -> SessionMemory:
     """Build or refresh memory from the latest deterministic analysis outputs."""
-    report_sections = {
-        section.title: list(section.bullets)
-        for section in business_report.sections
-    }
+    report_sections = {section.title: list(section.bullets) for section in business_report.sections}
 
     return SessionMemory(
         row_count=profile.row_count,
@@ -65,8 +62,7 @@ def build_session_memory(
         analytics_highlights=report_sections.get("Analytics Highlights", []),
         anomaly_findings=report_sections.get("Anomaly Findings", []),
         chart_summaries=[
-            f"{chart.title} ({chart.chart_type}): {chart.description}"
-            for chart in chart_specs
+            f"{chart.title} ({chart.chart_type}): {chart.description}" for chart in chart_specs
         ],
         report_sections=report_sections,
         document_summary=_document_summary(document_status),
@@ -157,8 +153,7 @@ def _capability_answer(memory: SessionMemory) -> str:
     if memory.unavailable_capabilities:
         lines.append("Unavailable analysis paths:")
         lines.extend(
-            f"- {name}: {reason}"
-            for name, reason in memory.unavailable_capabilities.items()
+            f"- {name}: {reason}" for name, reason in memory.unavailable_capabilities.items()
         )
     return "\n".join(lines)
 
@@ -183,17 +178,13 @@ def _report_answer(memory: SessionMemory) -> str:
     executive_summary = memory.report_sections.get("Executive Summary", [])
     if not executive_summary:
         return "No generated report summary is stored in session memory yet."
-    return "Current report summary:\n" + "\n".join(
-        f"- {bullet}" for bullet in executive_summary
-    )
+    return "Current report summary:\n" + "\n".join(f"- {bullet}" for bullet in executive_summary)
 
 
 def _document_answer(memory: SessionMemory) -> str:
     if not memory.document_summary:
         return "No PDF document summary is stored in session memory yet."
-    return "Document context:\n" + "\n".join(
-        f"- {summary}" for summary in memory.document_summary
-    )
+    return "Document context:\n" + "\n".join(f"- {summary}" for summary in memory.document_summary)
 
 
 def _document_summary(document_status: dict | None) -> list[str]:

@@ -39,3 +39,13 @@ Create and activate a virtual environment before installing dependencies.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+```
+
+Run quality checks with:
+
+```powershell
+python -m pytest
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy config src tests
+```

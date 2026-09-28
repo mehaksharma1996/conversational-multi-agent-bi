@@ -24,18 +24,10 @@ class CapabilityReport:
     capabilities: list[Capability]
 
     def available_capabilities(self) -> list[str]:
-        return [
-            capability.name
-            for capability in self.capabilities
-            if capability.available
-        ]
+        return [capability.name for capability in self.capabilities if capability.available]
 
     def unavailable_capabilities(self) -> list[str]:
-        return [
-            capability.name
-            for capability in self.capabilities
-            if not capability.available
-        ]
+        return [capability.name for capability in self.capabilities if not capability.available]
 
 
 def detect_capabilities(
@@ -47,12 +39,10 @@ def detect_capabilities(
 
     capabilities = [
         _build_capability(
-            name="Fraud-style analysis",
+            name="Fraud-analysis readiness",
             required_fields=["amount", "date", "customer_id", "merchant"],
             mapped_fields=mapped_fields,
-            success_reason=(
-                "Amount, date, customer, and merchant fields are available."
-            ),
+            success_reason=("Amount, date, customer, and merchant fields are available."),
         ),
         _generic_anomaly_capability(profile),
         _build_capability(
@@ -96,9 +86,7 @@ def _build_capability(
     mapped_fields: dict[str, str],
     success_reason: str,
 ) -> Capability:
-    missing_fields = [
-        field for field in required_fields if field not in mapped_fields
-    ]
+    missing_fields = [field for field in required_fields if field not in mapped_fields]
     available = not missing_fields
 
     return Capability(
@@ -142,7 +130,7 @@ def _classification_capability(
         missing_fields.append("at least one feature column")
 
     return Capability(
-        name="Classification",
+        name="Classification readiness",
         available=has_label and has_features,
         required_fields=required_fields,
         missing_fields=missing_fields,

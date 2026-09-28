@@ -5,31 +5,48 @@ from __future__ import annotations
 import streamlit as st
 
 from config.settings import Settings
-from src.analytics.anomaly_detection import AnomalyReport, detect_anomalies
-from src.analytics.basic_analytics import AnalyticsReport, run_basic_analytics
-from src.agents.report_agent import BusinessReport, generate_business_report, report_to_markdown
-from src.charts.chart_builder import ChartSpec, build_charts
+from src.agents.report_agent import BusinessReport, report_to_markdown
+from src.analytics.anomaly_detection import (
+    DEFAULT_CONTAMINATION,
+    AnomalyReport,
+    recommend_anomaly_features,
+)
+from src.analytics.basic_analytics import AnalyticsReport
+from src.analytics.pipeline import AnalysisBundle, build_analysis_bundle
+from src.charts.chart_builder import ChartSpec
 from src.memory.session_keys import (
+    ANALYSIS_CACHE,
+    DOCUMENT_SIGNATURE,
     DOCUMENT_STATUS,
+    PDF_BYTES,
+    PDF_SIGNATURE,
+    PROFILE_CACHE,
     SESSION_MEMORY,
     STORED_TABLE,
-    UPLOADED_TABLE,
+    STORED_TABLE_SIGNATURE,
+    TABULAR_SIGNATURE,
     UPLOAD_ERROR,
+    UPLOADED_TABLE,
 )
 from src.memory.session_memory import SessionMemory, build_session_memory
 from src.profiling.capability_detector import (
     CapabilityReport,
     capability_report_to_dataframe,
-    detect_capabilities,
 )
 from src.profiling.data_profiler import DataProfile, profile_dataframe, profile_to_dataframe
 from src.profiling.schema_mapper import (
+    CANONICAL_FIELDS,
+    REQUIRED_TYPES,
     SchemaMapping,
     map_schema,
     schema_mapping_to_dataframe,
 )
 from src.reporting.pdf_report import build_report_pdf
-from src.storage.query_executor import UnsafeQueryError, execute_read_query
+from src.storage.query_executor import (
+    QueryTimeoutError,
+    UnsafeQueryError,
+    execute_read_query,
+)
 from src.storage.sqlite_store import DEFAULT_TABLE_NAME, SQLiteStore, StoredTable
 
 
@@ -46,28 +63,39 @@ def render_dashboard(settings: Settings) -> None:
         return
 
     dataframe = loaded_table.dataframe
-    stored_table = _store_uploaded_dataframe(settings, dataframe)
-    profile = profile_dataframe(dataframe)
-    schema_mapping = map_schema(profile)
-    capability_report = detect_capabilities(profile, schema_mapping)
-    analytics_report = run_basic_analytics(dataframe, profile, schema_mapping)
-    anomaly_report = detect_anomalies(dataframe, profile, schema_mapping)
-    chart_specs = build_charts(
+    data_signature = st.session_state.get(TABULAR_SIGNATURE, loaded_table.filename)
+    profile = _cached_profile(dataframe, data_signature)
+    suggested_mapping = map_schema(profile)
+    schema_mapping = _render_schema_controls(
+        profile=profile,
+        suggested_mapping=suggested_mapping,
+        data_signature=data_signature,
+    )
+    anomaly_features, anomaly_contamination = _render_anomaly_controls(
+        profile=profile,
+        schema_mapping=schema_mapping,
+        data_signature=data_signature,
+    )
+    stored_table = _store_uploaded_dataframe(
+        settings,
+        dataframe,
+        data_signature,
+    )
+    bundle = _cached_analysis(
         dataframe=dataframe,
+        data_signature=data_signature,
         profile=profile,
         schema_mapping=schema_mapping,
-        analytics_report=analytics_report,
-        anomaly_report=anomaly_report,
-    )
-    business_report = generate_business_report(
-        profile=profile,
-        schema_mapping=schema_mapping,
-        capability_report=capability_report,
-        analytics_report=analytics_report,
-        anomaly_report=anomaly_report,
-        chart_specs=chart_specs,
+        anomaly_features=tuple(anomaly_features),
+        anomaly_contamination=anomaly_contamination,
         document_status=st.session_state.get(DOCUMENT_STATUS),
+        document_signature=st.session_state.get(DOCUMENT_SIGNATURE),
     )
+    capability_report = bundle.capability_report
+    analytics_report = bundle.analytics_report
+    anomaly_report = bundle.anomaly_report
+    chart_specs = bundle.chart_specs
+    business_report = bundle.business_report
     st.session_state[SESSION_MEMORY] = build_session_memory(
         profile=profile,
         schema_mapping=schema_mapping,
@@ -98,7 +126,16 @@ def render_dashboard(settings: Settings) -> None:
         document_status=st.session_state.get(DOCUMENT_STATUS),
     )
 
-    preview_tab, profile_tab, capabilities_tab, analytics_tab, charts_tab, anomaly_tab, report_tab, sql_tab = st.tabs(
+    (
+        preview_tab,
+        profile_tab,
+        capabilities_tab,
+        analytics_tab,
+        charts_tab,
+        anomaly_tab,
+        report_tab,
+        sql_tab,
+    ) = st.tabs(
         [
             "Preview",
             "Profile",
@@ -134,12 +171,22 @@ def render_dashboard(settings: Settings) -> None:
         _render_anomaly_report(anomaly_report)
 
     with report_tab:
-        _render_business_report(business_report, chart_specs)
+        report_signature = (
+            data_signature,
+            repr(schema_mapping.mapped_fields()),
+            tuple(anomaly_features),
+            anomaly_contamination,
+            st.session_state.get(DOCUMENT_SIGNATURE),
+        )
+        _render_business_report(business_report, chart_specs, report_signature)
 
     with sql_tab:
         _render_sql_workspace(stored_table)
 
-    st.success("Workflow ready: analytics, charts, report export, SQL, RAG, and follow-up memory are available when their inputs are present.")
+    st.success(
+        "Workflow ready: analytics, charts, report export, SQL, RAG, and "
+        "follow-up memory are available when their inputs are present."
+    )
 
 
 def _render_empty_state() -> None:
@@ -223,6 +270,70 @@ def _render_schema_mapping(schema_mapping: SchemaMapping) -> None:
         st.warning("Missing canonical fields: " + ", ".join(missing))
     else:
         st.success("All canonical fields were mapped.")
+
+
+def _render_schema_controls(
+    profile: DataProfile,
+    suggested_mapping: SchemaMapping,
+    data_signature: str,
+) -> SchemaMapping:
+    st.write("Schema review")
+    st.caption("Confirm or correct the business meaning of each column before analysis.")
+    overrides: dict[str, str | None] = {}
+    columns = st.columns(2)
+    for index, field in enumerate(CANONICAL_FIELDS):
+        options = [
+            None,
+            *[
+                column.name
+                for column in profile.columns
+                if column.inferred_type in REQUIRED_TYPES[field]
+            ],
+        ]
+        suggested = suggested_mapping.mappings[field].source_column
+        default_index = options.index(suggested) if suggested in options else 0
+        overrides[field] = columns[index % 2].selectbox(
+            field.replace("_", " ").title(),
+            options=options,
+            index=default_index,
+            format_func=lambda value: "Not mapped" if value is None else value,
+            key=f"schema_{data_signature}_{field}",
+        )
+
+    try:
+        return map_schema(profile, overrides=overrides)
+    except ValueError as exc:
+        st.error(f"Schema mapping needs attention: {exc}")
+        return suggested_mapping
+
+
+def _render_anomaly_controls(
+    profile: DataProfile,
+    schema_mapping: SchemaMapping,
+    data_signature: str,
+) -> tuple[list[str], float]:
+    recommended = recommend_anomaly_features(profile, schema_mapping)
+    with st.expander("Anomaly model settings", expanded=False):
+        features = st.multiselect(
+            "Numeric features",
+            options=profile.numeric_columns,
+            default=recommended,
+            key=f"anomaly_features_{data_signature}",
+            help="Identifier and target-like columns are excluded by default.",
+        )
+        contamination = st.slider(
+            "Expected anomaly fraction",
+            min_value=0.01,
+            max_value=0.25,
+            value=DEFAULT_CONTAMINATION,
+            step=0.01,
+            key=f"anomaly_contamination_{data_signature}",
+            help=(
+                "This controls model sensitivity; flagged rows are review "
+                "candidates, not confirmed fraud."
+            ),
+        )
+    return features, contamination
 
 
 def _render_capability_report(report: CapabilityReport) -> None:
@@ -310,19 +421,37 @@ def _render_anomaly_report(report: AnomalyReport) -> None:
         for limitation in report.limitations:
             st.warning(limitation)
 
+    st.caption(
+        "Anomaly flags indicate unusual numeric patterns for review; they are not "
+        "proof of fraud, misconduct, or business risk."
+    )
+
 
 def _render_business_report(
     report: BusinessReport,
     chart_specs: list[ChartSpec],
+    report_signature: tuple,
 ) -> None:
     st.write("Generated report")
     markdown = report_to_markdown(report)
     st.markdown(markdown)
 
-    try:
-        pdf_bytes = build_report_pdf(report, chart_specs=chart_specs)
-    except Exception as exc:
-        st.warning(f"Could not generate PDF report: {exc}")
+    if st.session_state.get(PDF_SIGNATURE) != report_signature:
+        st.session_state.pop(PDF_BYTES, None)
+        st.session_state.pop(PDF_SIGNATURE, None)
+
+    if st.button("Prepare PDF report"):
+        try:
+            with st.spinner("Rendering the report and chart images..."):
+                st.session_state[PDF_BYTES] = _cached_pdf(report, chart_specs)
+                st.session_state[PDF_SIGNATURE] = report_signature
+        except Exception as exc:
+            st.warning(f"Could not generate PDF report: {exc}")
+            return
+
+    pdf_bytes = st.session_state.get(PDF_BYTES)
+    if pdf_bytes is None:
+        st.caption("Prepare the PDF only when needed to keep dashboard reruns fast.")
         return
 
     st.download_button(
@@ -333,7 +462,17 @@ def _render_business_report(
     )
 
 
-def _store_uploaded_dataframe(settings: Settings, dataframe) -> StoredTable | None:
+def _store_uploaded_dataframe(
+    settings: Settings,
+    dataframe,
+    data_signature: str,
+) -> StoredTable | None:
+    if (
+        st.session_state.get(STORED_TABLE_SIGNATURE) == data_signature
+        and STORED_TABLE in st.session_state
+    ):
+        return st.session_state[STORED_TABLE]
+
     try:
         stored_table = SQLiteStore(settings.sqlite_db_path).save_dataframe(
             dataframe,
@@ -345,6 +484,7 @@ def _store_uploaded_dataframe(settings: Settings, dataframe) -> StoredTable | No
         return None
 
     st.session_state[STORED_TABLE] = stored_table
+    st.session_state[STORED_TABLE_SIGNATURE] = data_signature
     return stored_table
 
 
@@ -358,7 +498,7 @@ def _render_sql_workspace(stored_table: StoredTable | None) -> None:
     table_cols[0].metric("Table", stored_table.table_name)
     table_cols[1].metric("Rows", f"{stored_table.row_count:,}")
     table_cols[2].metric("Columns", f"{stored_table.column_count:,}")
-    st.caption(f"Database: {stored_table.database_path}")
+    st.caption("Stored in a session-isolated, read-only query workspace.")
 
     with st.expander("Columns", expanded=False):
         st.write(", ".join(stored_table.columns))
@@ -373,8 +513,13 @@ def _render_sql_workspace(stored_table: StoredTable | None) -> None:
 
     if st.button("Run query", type="primary"):
         try:
-            result = execute_read_query(stored_table.database_path, query)
-        except UnsafeQueryError as exc:
+            result = execute_read_query(
+                stored_table.database_path,
+                query,
+                allowed_tables={stored_table.table_name},
+                allowed_columns={stored_table.table_name: set(stored_table.columns)},
+            )
+        except (UnsafeQueryError, QueryTimeoutError) as exc:
             st.error(str(exc))
             return
         except Exception as exc:
@@ -383,3 +528,50 @@ def _render_sql_workspace(stored_table: StoredTable | None) -> None:
 
         st.success(f"Returned {len(result):,} row(s).")
         st.dataframe(result, use_container_width=True)
+
+
+def _cached_profile(dataframe, data_signature: str) -> DataProfile:
+    cached = st.session_state.get(PROFILE_CACHE)
+    if cached is not None and cached[0] == data_signature:
+        return cached[1]
+
+    profile = profile_dataframe(dataframe)
+    st.session_state[PROFILE_CACHE] = (data_signature, profile)
+    return profile
+
+
+def _cached_analysis(
+    dataframe,
+    data_signature: str,
+    profile: DataProfile,
+    schema_mapping: SchemaMapping,
+    anomaly_features: tuple[str, ...],
+    anomaly_contamination: float,
+    document_status: dict | None,
+    document_signature: tuple | None,
+) -> AnalysisBundle:
+    cache_key = (
+        data_signature,
+        tuple(schema_mapping.mapped_fields().items()),
+        anomaly_features,
+        anomaly_contamination,
+        document_signature,
+    )
+    cached = st.session_state.get(ANALYSIS_CACHE)
+    if cached is not None and cached[0] == cache_key:
+        return cached[1]
+
+    bundle = build_analysis_bundle(
+        dataframe=dataframe,
+        profile=profile,
+        schema_mapping=schema_mapping,
+        anomaly_features=list(anomaly_features),
+        anomaly_contamination=anomaly_contamination,
+        document_status=document_status,
+    )
+    st.session_state[ANALYSIS_CACHE] = (cache_key, bundle)
+    return bundle
+
+
+def _cached_pdf(report: BusinessReport, chart_specs: list[ChartSpec]) -> bytes:
+    return build_report_pdf(report, chart_specs=chart_specs)

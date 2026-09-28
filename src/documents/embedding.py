@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Protocol
 
-
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 

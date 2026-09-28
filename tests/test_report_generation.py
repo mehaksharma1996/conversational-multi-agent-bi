@@ -29,8 +29,26 @@ def _sample_report_and_charts():
             ],
             "amount": [10, 12, 11, 13, 12, 14, 11, 999],
             "merchant": ["A", "A", "B", "A", "B", "A", "B", "Z"],
-            "city": ["Toronto", "Toronto", "Montreal", "Toronto", "Montreal", "Toronto", "Montreal", "Vancouver"],
-            "label": ["normal", "normal", "normal", "normal", "normal", "normal", "normal", "review"],
+            "city": [
+                "Toronto",
+                "Toronto",
+                "Montreal",
+                "Toronto",
+                "Montreal",
+                "Toronto",
+                "Montreal",
+                "Vancouver",
+            ],
+            "label": [
+                "normal",
+                "normal",
+                "normal",
+                "normal",
+                "normal",
+                "normal",
+                "normal",
+                "review",
+            ],
         }
     )
     profile = profile_dataframe(dataframe)

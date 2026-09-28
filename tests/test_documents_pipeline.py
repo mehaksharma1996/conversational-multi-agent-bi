@@ -8,7 +8,7 @@ from reportlab.pdfgen import canvas
 
 from src.agents.rag_agent import answer_with_documents, build_rag_prompt
 from src.documents.chunker import DocumentChunk, chunk_document
-from src.documents.retriever import DocumentRetriever, RetrievalResult
+from src.documents.retriever import RetrievalResult
 from src.documents.vector_store import ChromaDocumentStore, RetrievedChunk
 from src.ingestion.pdf_loader import load_pdf_file
 from src.llm.base import LLMResponse
@@ -69,6 +69,7 @@ def test_load_pdf_file_extracts_text() -> None:
     assert document.filename == "policy.pdf"
     assert document.page_count == 1
     assert "Refund policy" in document.text
+    assert document.pages[0].page_number == 1
 
 
 def test_chunk_document_creates_overlapping_chunks() -> None:
@@ -80,6 +81,19 @@ def test_chunk_document_creates_overlapping_chunks() -> None:
     assert chunks[0].metadata["filename"] == "policy.pdf"
     assert chunks[0].metadata["chunk_index"] == 0
     assert chunks[0].text
+
+
+def test_chunk_document_uses_document_and_page_identity() -> None:
+    chunks = chunk_document(
+        "A short policy page.",
+        filename="policy.pdf",
+        page_number=3,
+        document_id="abc123",
+    )
+
+    assert chunks[0].id == "abc123-p3-c0"
+    assert chunks[0].metadata["page_number"] == 3
+    assert chunks[0].metadata["document_id"] == "abc123"
 
 
 def test_chroma_document_store_retrieves_relevant_chunk() -> None:
@@ -108,6 +122,7 @@ def test_chroma_document_store_retrieves_relevant_chunk() -> None:
     assert store.count() == 2
     assert len(chunks) == 1
     assert "Refunds" in chunks[0].text
+    assert chunks[0].relevance_score is not None
 
 
 def test_build_rag_prompt_includes_sources() -> None:

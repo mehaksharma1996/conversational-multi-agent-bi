@@ -79,8 +79,7 @@ def test_extract_sql_ignores_prose_after_query() -> None:
     sql = extract_sql(text)
 
     assert sql == (
-        "SELECT merchant, SUM(amount) AS total_amount "
-        "FROM uploaded_data GROUP BY merchant LIMIT 5"
+        "SELECT merchant, SUM(amount) AS total_amount FROM uploaded_data GROUP BY merchant LIMIT 5"
     )
 
 

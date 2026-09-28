@@ -67,11 +67,7 @@ def build_report_pdf(
 
 
 def _escape_text(value: str) -> str:
-    return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _chart_to_image(chart: ChartSpec) -> Image | None:

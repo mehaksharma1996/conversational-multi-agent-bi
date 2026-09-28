@@ -8,7 +8,6 @@ from typing import Any
 from config.settings import Settings
 from src.llm.base import LLMConfigurationError, LLMGenerationError, LLMResponse
 
-
 GEMINI_PROVIDER = "gemini"
 
 

@@ -8,7 +8,6 @@ import pandas as pd
 
 from src.profiling.data_profiler import ColumnProfile, DataProfile
 
-
 CANONICAL_FIELDS = (
     "amount",
     "date",
@@ -111,24 +110,53 @@ class SchemaMapping:
         }
 
     def missing_fields(self) -> list[str]:
-        return [
-            field
-            for field, mapping in self.mappings.items()
-            if mapping.source_column is None
-        ]
+        return [field for field, mapping in self.mappings.items() if mapping.source_column is None]
 
 
-def map_schema(profile: DataProfile) -> SchemaMapping:
+def map_schema(
+    profile: DataProfile,
+    overrides: dict[str, str | None] | None = None,
+) -> SchemaMapping:
     """Map profiled columns to canonical fields using conservative heuristics."""
     available_columns = {column.name for column in profile.columns}
+    columns_by_name = {column.name: column for column in profile.columns}
     mappings: dict[str, FieldMapping] = {}
 
+    if overrides is not None:
+        unknown_fields = set(overrides).difference(CANONICAL_FIELDS)
+        if unknown_fields:
+            raise ValueError("Unknown canonical field(s): " + ", ".join(sorted(unknown_fields)))
+        chosen_columns = [column for column in overrides.values() if column is not None]
+        if len(chosen_columns) != len(set(chosen_columns)):
+            raise ValueError("A source column can only map to one canonical field.")
+
     for field in CANONICAL_FIELDS:
+        if overrides is not None and field in overrides:
+            source_column = overrides[field]
+            if source_column is None:
+                mappings[field] = FieldMapping(
+                    canonical_field=field,
+                    source_column=None,
+                    confidence=0.0,
+                    reason="Not mapped by the user.",
+                )
+                continue
+            if source_column not in available_columns:
+                raise ValueError(f"Column '{source_column}' is unavailable or already mapped.")
+            if columns_by_name[source_column].inferred_type not in REQUIRED_TYPES[field]:
+                raise ValueError(f"Column '{source_column}' is not compatible with {field}.")
+            mappings[field] = FieldMapping(
+                canonical_field=field,
+                source_column=source_column,
+                confidence=1.0,
+                reason="Confirmed by the user.",
+            )
+            available_columns.discard(source_column)
+            continue
+
         mapping = _best_mapping_for_field(
             field=field,
-            columns=[
-                column for column in profile.columns if column.name in available_columns
-            ],
+            columns=[column for column in profile.columns if column.name in available_columns],
         )
         mappings[field] = mapping
         if mapping.source_column is not None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.analytics.anomaly_detection import detect_anomalies
+from src.analytics.anomaly_detection import detect_anomalies, recommend_anomaly_features
 from src.profiling.data_profiler import profile_dataframe
 from src.profiling.schema_mapper import map_schema
 
@@ -60,3 +60,19 @@ def test_anomaly_detection_reports_too_few_rows() -> None:
     assert not report.enabled
     assert report.flagged_rows.empty
     assert any("at least 8 rows" in item for item in report.limitations)
+
+
+def test_anomaly_features_exclude_identifiers_and_numeric_labels() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "transaction_id": list(range(10)),
+            "amount": [10, 11, 10, 12, 11, 10, 12, 10, 11, 100],
+            "is_fraud": [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        }
+    )
+    profile = profile_dataframe(dataframe)
+    mapping = map_schema(profile)
+
+    features = recommend_anomaly_features(profile, mapping)
+
+    assert features == ["amount"]

@@ -13,10 +13,17 @@ class PDFLoadError(ValueError):
 
 
 @dataclass(frozen=True)
+class DocumentPage:
+    page_number: int
+    text: str
+
+
+@dataclass(frozen=True)
 class LoadedDocument:
     filename: str
     text: str
     page_count: int
+    pages: list[DocumentPage]
 
 
 def load_pdf_file(file: BinaryIO, filename: str) -> LoadedDocument:
@@ -24,11 +31,16 @@ def load_pdf_file(file: BinaryIO, filename: str) -> LoadedDocument:
     try:
         file.seek(0)
         reader = PdfReader(file)
-        pages = [page.extract_text() or "" for page in reader.pages]
+        extracted_pages = [page.extract_text() or "" for page in reader.pages]
     except Exception as exc:
         raise PDFLoadError(f"Could not load PDF '{filename}': {exc}") from exc
 
-    text = "\n\n".join(page.strip() for page in pages if page.strip()).strip()
+    pages = [
+        DocumentPage(page_number=index, text=text.strip())
+        for index, text in enumerate(extracted_pages, start=1)
+        if text.strip()
+    ]
+    text = "\n\n".join(page.text for page in pages).strip()
     if not text:
         raise PDFLoadError(f"PDF '{filename}' did not contain extractable text.")
 
@@ -36,4 +48,5 @@ def load_pdf_file(file: BinaryIO, filename: str) -> LoadedDocument:
         filename=filename,
         text=text,
         page_count=len(reader.pages),
+        pages=pages,
     )

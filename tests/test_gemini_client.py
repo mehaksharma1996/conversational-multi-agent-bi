@@ -14,7 +14,7 @@ class FakeModels:
     def __init__(self, text: str | None = "hello", error: Exception | None = None) -> None:
         self.text = text
         self.error = error
-        self.calls = []
+        self.calls: list[dict[str, str]] = []
 
     def generate_content(self, model: str, contents: str):
         self.calls.append({"model": model, "contents": contents})
@@ -56,9 +56,7 @@ def test_gemini_client_generates_text_with_injected_client() -> None:
     assert response.text == "A concise answer."
     assert response.model == "gemini-2.5-flash"
     assert response.provider == "gemini"
-    assert fake_models.calls == [
-        {"model": "gemini-2.5-flash", "contents": "What changed?"}
-    ]
+    assert fake_models.calls == [{"model": "gemini-2.5-flash", "contents": "What changed?"}]
 
 
 def test_gemini_client_wraps_provider_errors() -> None:

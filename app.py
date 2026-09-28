@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import streamlit as st
 
 from config.settings import get_settings
+from src.memory.session_keys import SESSION_ID
 from src.ui.chat_panel import render_chat_panel
 from src.ui.dashboard import render_dashboard
 from src.ui.upload_panel import render_upload_panel
@@ -21,11 +24,14 @@ def configure_page() -> None:
 
 def main() -> None:
     configure_page()
-    settings = get_settings()
+    if SESSION_ID not in st.session_state:
+        st.session_state[SESSION_ID] = uuid4().hex
+    settings = get_settings().for_session(st.session_state[SESSION_ID])
 
-    st.title("Conversational Multi-Agent Business Intelligence Platform")
+    st.title("Conversational Business Intelligence Workbench")
     st.caption(
-        "Upload business data and PDFs, then explore analytics, charts, reports, SQL, RAG, and follow-up questions."
+        "Upload business data and PDFs, then coordinate deterministic analytics, "
+        "read-only SQL, document retrieval, and report workflows."
     )
 
     with st.sidebar:
