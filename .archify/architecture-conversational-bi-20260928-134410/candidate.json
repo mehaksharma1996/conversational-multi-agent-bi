@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Conversational BI Workbench",
+    "locale": "en",
+    "output": ".archify/architecture-conversational-bi-20260928-134410/conversational-bi.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/mehaksharma1996/conversational-multi-agent-bi.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "ac55f3fcfe98f7a41d13cec68a76596d4b5f98ba"
+    }
+  },
+  "components": [
+    {
+      "id": "analyst",
+      "type": "external",
+      "label": "Business Analyst",
+      "sublabel": "Uploads data and asks questions",
+      "pos": [30, 320],
+      "size": [160, 72],
+      "sources": [
+        { "path": "src/ui/upload_panel.py", "line": 39, "end_line": 100, "label": "Upload controls" },
+        { "path": "src/ui/chat_panel.py", "line": 89, "end_line": 101, "label": "Question handling" }
+      ]
+    },
+    {
+      "id": "streamlit",
+      "type": "frontend",
+      "label": "Streamlit Workbench",
+      "sublabel": "Uploads, dashboard, chat, exports",
+      "pos": [280, 320],
+      "size": [200, 76],
+      "sources": [
+        { "path": "app.py", "line": 26, "end_line": 50, "label": "Application entry point" },
+        { "path": "src/ui/dashboard.py", "line": 53, "end_line": 175, "label": "Dashboard workflow" }
+      ]
+    },
+    {
+      "id": "tabular",
+      "type": "backend",
+      "label": "Tabular Analytics",
+      "sublabel": "Profile, map, analyze, chart, report",
+      "pos": [280, 80],
+      "size": [220, 84],
+      "sources": [
+        { "path": "src/ui/dashboard.py", "line": 60, "end_line": 110, "label": "Analysis assembly" },
+        { "path": "src/analytics/pipeline.py", "line": 27, "end_line": 59, "label": "Deterministic pipeline" },
+        { "path": "src/agents/report_agent.py", "line": 28, "end_line": 47, "label": "Business report" }
+      ]
+    },
+    {
+      "id": "pdf_indexing",
+      "type": "backend",
+      "label": "PDF Indexing",
+      "sublabel": "Pages, chunks, local embeddings",
+      "pos": [280, 560],
+      "size": [220, 84],
+      "sources": [
+        { "path": "src/ui/upload_panel.py", "line": 182, "end_line": 249, "label": "PDF ingestion" },
+        { "path": "src/documents/embedding.py", "line": 19, "end_line": 45, "label": "SentenceTransformer" }
+      ]
+    },
+    {
+      "id": "orchestrator",
+      "type": "backend",
+      "label": "LangGraph Orchestrator",
+      "sublabel": "Memory, SQL, RAG, hybrid routes",
+      "pos": [620, 316],
+      "size": [220, 84],
+      "sources": [
+        { "path": "src/orchestration/langgraph_orchestrator.py", "line": 87, "end_line": 150, "label": "Graph construction" },
+        { "path": "src/orchestration/langgraph_orchestrator.py", "line": 152, "end_line": 185, "label": "Route selection" },
+        { "path": "src/orchestration/langgraph_orchestrator.py", "line": 226, "end_line": 326, "label": "Route execution" }
+      ]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "Session SQLite",
+      "sublabel": "Uploaded table in isolated workspace",
+      "pos": [950, 76],
+      "size": [220, 82],
+      "sources": [
+        { "path": "config/settings.py", "line": 44, "end_line": 55, "label": "Session paths" },
+        { "path": "src/storage/sqlite_store.py", "line": 33, "end_line": 64, "label": "DataFrame persistence" },
+        { "path": "src/storage/query_executor.py", "line": 92, "end_line": 106, "label": "Read-only connection" }
+      ]
+    },
+    {
+      "id": "sql_workflow",
+      "type": "security",
+      "label": "Guarded SQL Workflow",
+      "sublabel": "Generate, validate, limit, execute",
+      "pos": [950, 224],
+      "size": [220, 80],
+      "sources": [
+        { "path": "src/agents/sql_agent.py", "line": 32, "end_line": 73, "label": "SQL agent" },
+        { "path": "src/storage/query_executor.py", "line": 75, "end_line": 106, "label": "Execution guardrails" }
+      ]
+    },
+    {
+      "id": "rag_workflow",
+      "type": "backend",
+      "label": "Document RAG Workflow",
+      "sublabel": "Retrieve evidence and ground answer",
+      "pos": [950, 412],
+      "size": [220, 80],
+      "sources": [
+        { "path": "src/agents/rag_agent.py", "line": 23, "end_line": 43, "label": "Grounded answer" },
+        { "path": "src/documents/retriever.py", "line": 23, "end_line": 61, "label": "Hybrid ranking" }
+      ]
+    },
+    {
+      "id": "chroma",
+      "type": "database",
+      "label": "Session ChromaDB",
+      "sublabel": "PDF chunks, metadata, vectors",
+      "pos": [950, 560],
+      "size": [220, 82],
+      "sources": [
+        { "path": "config/settings.py", "line": 44, "end_line": 55, "label": "Session paths" },
+        { "path": "src/documents/vector_store.py", "line": 27, "end_line": 75, "label": "Persistent index" },
+        { "path": "src/documents/vector_store.py", "line": 77, "end_line": 90, "label": "Vector query" }
+      ]
+    },
+    {
+      "id": "gemini",
+      "type": "external",
+      "label": "Gemini API",
+      "sublabel": "Routing, SQL, and grounded answers",
+      "pos": [1280, 316],
+      "size": [200, 84],
+      "sources": [
+        { "path": "src/llm/gemini_client.py", "line": 46, "end_line": 75, "label": "External generation" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Local Streamlit process and session-scoped workspace",
+      "wraps": [
+        "streamlit",
+        "tabular",
+        "pdf_indexing",
+        "orchestrator",
+        "sqlite",
+        "sql_workflow",
+        "rag_workflow",
+        "chroma"
+      ],
+      "pad": 28
+    }
+  ],
+  "connections": [
+    { "id": "analyst_uses_ui", "from": "analyst", "to": "streamlit", "label": "uses", "variant": "emphasis" },
+    { "id": "ui_to_tabular", "from": "streamlit", "to": "tabular", "label": "CSV / Excel", "fromSide": "top", "toSide": "bottom" },
+    { "id": "tabular_to_sqlite", "from": "tabular", "to": "sqlite", "label": "profiled table" },
+    { "id": "ui_to_pdf", "from": "streamlit", "to": "pdf_indexing", "label": "PDF files", "fromSide": "bottom", "toSide": "top" },
+    { "id": "pdf_to_chroma", "from": "pdf_indexing", "to": "chroma", "label": "chunks + vectors" },
+    { "id": "ui_to_orchestrator", "from": "streamlit", "to": "orchestrator", "label": "question + session state", "variant": "emphasis" },
+    { "id": "route_to_sql", "from": "orchestrator", "to": "sql_workflow", "label": "SQL route" },
+    { "id": "route_to_rag", "from": "orchestrator", "to": "rag_workflow", "label": "RAG / hybrid route" },
+    { "id": "sql_reads_sqlite", "from": "sql_workflow", "to": "sqlite", "label": "read-only SQL", "variant": "security", "fromSide": "top", "toSide": "bottom" },
+    { "id": "rag_reads_chroma", "from": "rag_workflow", "to": "chroma", "label": "top-k retrieval", "fromSide": "bottom", "toSide": "top" },
+    { "id": "sql_to_gemini", "from": "sql_workflow", "to": "gemini", "label": "question + schema" },
+    { "id": "rag_to_gemini", "from": "rag_workflow", "to": "gemini", "label": "question + excerpts" },
+    { "id": "router_to_gemini", "from": "orchestrator", "to": "gemini", "label": "route + hybrid criteria", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Deterministic layer",
+      "items": [
+        "Profiling, analytics, anomaly detection, charts, and report structure run locally",
+        "Session memory is rebuilt from reviewed analysis outputs"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Safety boundaries",
+      "items": [
+        "SQLite queries are validated, row-limited, authorized, timed, and opened read-only",
+        "Each browser session receives isolated SQLite and ChromaDB paths"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "External data flow",
+      "items": [
+        "Gemini receives questions plus schema context for SQL generation",
+        "Document answers send the question and retrieved PDF excerpts to Gemini"
+      ]
+    }
+  ]
+}

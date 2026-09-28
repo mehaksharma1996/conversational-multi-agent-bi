@@ -22,16 +22,13 @@ application is a decision-support workbench, not an autonomous decision maker.
 
 ## Architecture
 
-```text
-CSV / Excel ──> profile ──> reviewed schema ──> analytics/charts/anomalies
-      │                                      └─> session SQLite ──> SQL workflow
-      │
-PDFs ──> page chunks ──> local embeddings ──> session ChromaDB ──> RAG workflow
-                                                                    │
-Question ──> LangGraph router ──> memory / SQL / RAG / hybrid ──────┘
-                                      │
-                                      └─> displayed evidence + on-demand report
-```
+[![Conversational BI Workbench architecture](docs/architecture/conversational-bi-architecture.png)](.archify/architecture-conversational-bi-20260928-134410/conversational-bi.html)
+
+The diagram is generated from repository-backed source evidence with Archify.
+Download and open the [interactive architecture artifact](.archify/architecture-conversational-bi-20260928-134410/conversational-bi.html)
+locally to inspect components, trace routes, switch themes, and follow source
+references. Its [typed diagram specification](.archify/architecture-conversational-bi-20260928-134410/candidate.json)
+is versioned alongside the rendered artifact.
 
 The SQL and RAG components are specialized workflows coordinated by a router.
 For questions that explicitly combine uploaded transactions with document

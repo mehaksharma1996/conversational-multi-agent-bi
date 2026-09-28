@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "c2b3ae6b-0718-4808-a7d7-d24e9784148e",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\mehak\\Documents\\Codex\\2026-06-12\\conversational-multi-agent-bi\\.archify\\architecture-conversational-bi-20260928-134410\\candidate.json",
+  "output": "C:\\Users\\mehak\\Documents\\Codex\\2026-06-12\\conversational-multi-agent-bi\\.archify\\architecture-conversational-bi-20260928-134410\\conversational-bi.html",
+  "specification": {
+    "sha256": "2aebbd7ab3c865ce15ece79dc99c5b366c9ea0be34f087e81e2adbaa2f72fc6b",
+    "bytes": 8011
+  },
+  "artifact": {
+    "sha256": "2bb53755fe795b9a9ab32439ce892b3a4ddc237c14297b156b19d221f0b62a90",
+    "bytes": 776453
+  }
+}
