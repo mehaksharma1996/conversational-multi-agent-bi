@@ -31,6 +31,14 @@ outputs/
 work/*.log
 work/*.pid
 
+# Local agent tooling and generated Archify validation evidence
+.agents/
+.archify/**/*.browser-check.json
+.archify/**/*.delivery.json
+.archify/**/*.finalize.json
+.archify/**/*.finalize-summary.json
+.archify/**/readme-capture/
+
 # Local editor and OS files
 .vscode/
 .DS_Store

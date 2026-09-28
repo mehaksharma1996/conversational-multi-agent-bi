@@ -1,1 +1,4 @@
 *.pdf binary
+
+# Exclude generated interactive diagrams from GitHub language statistics.
+.archify/**/*.html linguist-generated
