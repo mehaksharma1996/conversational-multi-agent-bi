@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+from io import BytesIO
 
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from config.settings import Settings
@@ -39,7 +42,7 @@ def render_chat_panel(settings: Settings) -> None:
             }
         ]
 
-    for message in st.session_state[CHAT_MESSAGES]:
+    for message_index, message in enumerate(st.session_state[CHAT_MESSAGES]):
         with st.chat_message(message["role"]):
             st.write(message["content"])
             if message.get("route"):
@@ -47,7 +50,12 @@ def render_chat_panel(settings: Settings) -> None:
             if message.get("sql"):
                 st.code(message["sql"], language="sql")
             if message.get("dataframe") is not None:
-                st.dataframe(message["dataframe"], use_container_width=True)
+                dataframe = message["dataframe"]
+                st.dataframe(dataframe, use_container_width=True)
+                figure = _build_result_chart(dataframe)
+                if figure is not None:
+                    st.plotly_chart(figure, use_container_width=True)
+                _render_result_downloads(dataframe, message_index=message_index)
             if message.get("sources"):
                 with st.expander("Retrieved document sources", expanded=False):
                     for source in message["sources"]:
@@ -68,11 +76,12 @@ def render_chat_panel(settings: Settings) -> None:
 
 
 def _disabled_reason(settings: Settings) -> str | None:
-    if not settings.gemini_configured:
+    has_memory = SESSION_MEMORY in st.session_state
+    if not settings.gemini_configured and not has_memory:
         return "Set GEMINI_API_KEY in .env before asking LLM-backed questions."
     has_data = UPLOADED_TABLE in st.session_state and STORED_TABLE in st.session_state
     has_documents = DOCUMENT_RETRIEVER in st.session_state
-    if not has_data and not has_documents:
+    if not has_data and not has_documents and not has_memory:
         return "Upload CSV/Excel data or PDF documents before asking questions."
     return None
 
@@ -81,14 +90,15 @@ def _handle_question(prompt: str, settings: Settings) -> None:
     st.session_state[CHAT_MESSAGES].append({"role": "user", "content": prompt})
 
     try:
-        llm_client = build_gemini_client(settings)
-        orchestrator = QuestionOrchestrator(
-            llm_client=llm_client,
-            stored_table=st.session_state.get(STORED_TABLE),
-            document_retriever=st.session_state.get(DOCUMENT_RETRIEVER),
-            session_memory=st.session_state.get(SESSION_MEMORY),
-        )
-        result = orchestrator.answer(prompt)
+        with st.spinner("Analyzing your question..."):
+            llm_client = build_gemini_client(settings)
+            orchestrator = QuestionOrchestrator(
+                llm_client=llm_client,
+                stored_table=st.session_state.get(STORED_TABLE),
+                document_retriever=st.session_state.get(DOCUMENT_RETRIEVER),
+                session_memory=st.session_state.get(SESSION_MEMORY),
+            )
+            result = orchestrator.answer(prompt)
         if SESSION_MEMORY in st.session_state:
             st.session_state[SESSION_MEMORY] = remember_question(
                 memory=st.session_state[SESSION_MEMORY],
@@ -134,3 +144,48 @@ def _handle_question(prompt: str, settings: Settings) -> None:
         return
 
     st.rerun()
+
+
+def _build_result_chart(dataframe: pd.DataFrame):
+    if dataframe.empty or len(dataframe.columns) < 2:
+        return None
+    numeric_columns = list(dataframe.select_dtypes(include="number").columns)
+    if not numeric_columns:
+        return None
+    measure = numeric_columns[0]
+    dimensions = [column for column in dataframe.columns if column != measure]
+    if not dimensions:
+        return None
+    dimension = dimensions[0]
+
+    parsed_dates = pd.to_datetime(dataframe[dimension], errors="coerce", format="mixed")
+    if parsed_dates.notna().mean() >= 0.8:
+        chart_data = dataframe[[dimension, measure]].copy()
+        chart_data[dimension] = parsed_dates
+        return px.line(chart_data.sort_values(dimension), x=dimension, y=measure, markers=True)
+
+    if dataframe[dimension].nunique(dropna=False) <= 30:
+        chart_data = dataframe[[dimension, measure]].head(100)
+        return px.bar(chart_data, x=dimension, y=measure)
+    return None
+
+
+def _render_result_downloads(dataframe: pd.DataFrame, message_index: int) -> None:
+    csv_bytes = dataframe.to_csv(index=False).encode("utf-8")
+    excel_buffer = BytesIO()
+    dataframe.to_excel(excel_buffer, index=False)
+    csv_column, excel_column = st.columns(2)
+    csv_column.download_button(
+        "Download CSV",
+        data=csv_bytes,
+        file_name="query_result.csv",
+        mime="text/csv",
+        key=f"query_csv_{message_index}",
+    )
+    excel_column.download_button(
+        "Download Excel",
+        data=excel_buffer.getvalue(),
+        file_name="query_result.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"query_excel_{message_index}",
+    )

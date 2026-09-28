@@ -41,7 +41,7 @@ from src.profiling.schema_mapper import (
     map_schema,
     schema_mapping_to_dataframe,
 )
-from src.reporting.pdf_report import build_report_pdf
+from src.reporting.pdf_report import build_report_pdf, chart_export_error
 from src.storage.query_executor import (
     QueryTimeoutError,
     UnsafeQueryError,
@@ -80,6 +80,7 @@ def render_dashboard(settings: Settings) -> None:
         settings,
         dataframe,
         data_signature,
+        schema_mapping,
     )
     bundle = _cached_analysis(
         dataframe=dataframe,
@@ -124,47 +125,37 @@ def render_dashboard(settings: Settings) -> None:
         anomaly_report=anomaly_report,
         session_memory=st.session_state.get(SESSION_MEMORY),
         document_status=st.session_state.get(DOCUMENT_STATUS),
+        report_available=bool(business_report.sections),
+        sql_available=stored_table is not None,
     )
 
     (
-        preview_tab,
-        profile_tab,
-        capabilities_tab,
+        overview_tab,
         analytics_tab,
-        charts_tab,
         anomaly_tab,
         report_tab,
         sql_tab,
     ) = st.tabs(
         [
-            "Preview",
-            "Profile",
-            "Capabilities",
+            "Overview",
             "Analytics",
-            "Charts",
             "Anomalies",
             "Report",
             "SQL",
         ]
     )
 
-    with preview_tab:
+    with overview_tab:
         st.write("First 25 rows")
         st.dataframe(dataframe.head(25), use_container_width=True)
-
-    with profile_tab:
         _render_profile_summary(profile)
         st.write("Column profile")
         st.dataframe(profile_to_dataframe(profile), use_container_width=True)
-
-    with capabilities_tab:
         _render_schema_mapping(schema_mapping)
         _render_capability_report(capability_report)
 
     with analytics_tab:
         _render_analytics_report(analytics_report)
-
-    with charts_tab:
         _render_charts(chart_specs)
 
     with anomaly_tab:
@@ -183,10 +174,10 @@ def render_dashboard(settings: Settings) -> None:
     with sql_tab:
         _render_sql_workspace(stored_table)
 
-    st.success(
-        "Workflow ready: analytics, charts, report export, SQL, RAG, and "
-        "follow-up memory are available when their inputs are present."
-    )
+    available_workflows = ["analytics", "charts", "report", "SQL", "memory"]
+    if st.session_state.get(DOCUMENT_STATUS):
+        available_workflows.extend(["RAG", "hybrid questions"])
+    st.success("Ready workflows: " + ", ".join(available_workflows) + ".")
 
 
 def _render_empty_state() -> None:
@@ -203,6 +194,8 @@ def _render_workflow_status(
     anomaly_report: AnomalyReport,
     session_memory: SessionMemory | None,
     document_status: dict | None,
+    report_available: bool,
+    sql_available: bool,
 ) -> None:
     st.write("Workflow status")
     status_cols = st.columns(6)
@@ -233,9 +226,10 @@ def _render_workflow_status(
     )
     status_cols[5].metric(
         "Report",
-        "Ready",
+        "Ready" if report_available else "Unavailable",
         help="A deterministic report and PDF export are available in the Report tab.",
     )
+    st.caption("SQL workspace: " + ("ready" if sql_available else "unavailable"))
 
 
 def _render_profile_summary(profile: DataProfile) -> None:
@@ -277,28 +271,28 @@ def _render_schema_controls(
     suggested_mapping: SchemaMapping,
     data_signature: str,
 ) -> SchemaMapping:
-    st.write("Schema review")
-    st.caption("Confirm or correct the business meaning of each column before analysis.")
     overrides: dict[str, str | None] = {}
-    columns = st.columns(2)
-    for index, field in enumerate(CANONICAL_FIELDS):
-        options = [
-            None,
-            *[
-                column.name
-                for column in profile.columns
-                if column.inferred_type in REQUIRED_TYPES[field]
-            ],
-        ]
-        suggested = suggested_mapping.mappings[field].source_column
-        default_index = options.index(suggested) if suggested in options else 0
-        overrides[field] = columns[index % 2].selectbox(
-            field.replace("_", " ").title(),
-            options=options,
-            index=default_index,
-            format_func=lambda value: "Not mapped" if value is None else value,
-            key=f"schema_{data_signature}_{field}",
-        )
+    with st.expander("Review schema mapping", expanded=False):
+        st.caption("Confirm or correct the business meaning of each column before analysis.")
+        columns = st.columns(2)
+        for index, field in enumerate(CANONICAL_FIELDS):
+            options = [
+                None,
+                *[
+                    column.name
+                    for column in profile.columns
+                    if column.inferred_type in REQUIRED_TYPES[field]
+                ],
+            ]
+            suggested = suggested_mapping.mappings[field].source_column
+            default_index = options.index(suggested) if suggested in options else 0
+            overrides[field] = columns[index % 2].selectbox(
+                field.replace("_", " ").title(),
+                options=options,
+                index=default_index,
+                format_func=lambda value: "Not mapped" if value is None else value,
+                key=f"schema_{data_signature}_{field}",
+            )
 
     try:
         return map_schema(profile, overrides=overrides)
@@ -435,12 +429,21 @@ def _render_business_report(
     st.write("Generated report")
     markdown = report_to_markdown(report)
     st.markdown(markdown)
+    st.download_button(
+        label="Download Markdown report",
+        data=markdown.encode("utf-8"),
+        file_name="business_intelligence_report.md",
+        mime="text/markdown",
+    )
 
     if st.session_state.get(PDF_SIGNATURE) != report_signature:
         st.session_state.pop(PDF_BYTES, None)
         st.session_state.pop(PDF_SIGNATURE, None)
 
     if st.button("Prepare PDF report"):
+        export_problem = chart_export_error(chart_specs)
+        if export_problem:
+            st.warning(export_problem)
         try:
             with st.spinner("Rendering the report and chart images..."):
                 st.session_state[PDF_BYTES] = _cached_pdf(report, chart_specs)
@@ -466,9 +469,11 @@ def _store_uploaded_dataframe(
     settings: Settings,
     dataframe,
     data_signature: str,
+    schema_mapping: SchemaMapping,
 ) -> StoredTable | None:
+    storage_signature = (data_signature, tuple(schema_mapping.mapped_fields().items()))
     if (
-        st.session_state.get(STORED_TABLE_SIGNATURE) == data_signature
+        st.session_state.get(STORED_TABLE_SIGNATURE) == storage_signature
         and STORED_TABLE in st.session_state
     ):
         return st.session_state[STORED_TABLE]
@@ -477,6 +482,7 @@ def _store_uploaded_dataframe(
         stored_table = SQLiteStore(settings.sqlite_db_path).save_dataframe(
             dataframe,
             table_name=DEFAULT_TABLE_NAME,
+            canonical_mapping=schema_mapping.mapped_fields(),
         )
     except Exception as exc:
         st.session_state.pop(STORED_TABLE, None)
@@ -484,7 +490,7 @@ def _store_uploaded_dataframe(
         return None
 
     st.session_state[STORED_TABLE] = stored_table
-    st.session_state[STORED_TABLE_SIGNATURE] = data_signature
+    st.session_state[STORED_TABLE_SIGNATURE] = storage_signature
     return stored_table
 
 

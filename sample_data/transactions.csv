@@ -1,0 +1,9 @@
+transaction_date,customer_id,merchant,region,amount,status
+2026-01-05,C001,Northwind Market,East,125.50,approved
+2026-01-12,C002,Contoso Supplies,West,899.00,approved
+2026-02-03,C001,Northwind Market,East,142.75,approved
+2026-02-18,C003,Fabrikam Services,Central,2350.00,review
+2026-03-02,C004,Adventure Works,West,75.25,approved
+2026-03-21,C002,Contoso Supplies,West,1200.00,review
+2026-04-07,C005,Wide World Importers,East,310.40,approved
+2026-04-22,C003,Fabrikam Services,Central,2480.00,approved

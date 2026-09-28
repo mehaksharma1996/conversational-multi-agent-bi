@@ -37,7 +37,7 @@ def run_basic_analytics(
 
     categorical_breakdowns = _categorical_breakdowns(
         dataframe=dataframe,
-        categorical_columns=profile.categorical_columns,
+        categorical_columns=_rank_breakdown_columns(profile, schema_mapping),
     )
     if not categorical_breakdowns:
         limitations.append("No categorical columns were available for breakdowns.")
@@ -45,7 +45,7 @@ def run_basic_analytics(
     amount_by_category = _amount_by_category(
         dataframe=dataframe,
         amount_column=mapped_fields.get("amount"),
-        categorical_columns=profile.categorical_columns,
+        categorical_columns=_rank_breakdown_columns(profile, schema_mapping),
     )
     if not amount_by_category:
         limitations.append(
@@ -145,10 +145,47 @@ def _trend(
     if trend_data.empty:
         return None
 
-    trend_data["period"] = trend_data[date_column].dt.date
+    date_span_days = (trend_data[date_column].max() - trend_data[date_column].min()).days
+    if date_span_days <= 60:
+        trend_data["period"] = trend_data[date_column].dt.date
+    elif date_span_days <= 730:
+        trend_data["period"] = trend_data[date_column].dt.to_period("W").dt.start_time.dt.date
+    else:
+        trend_data["period"] = trend_data[date_column].dt.to_period("M").dt.start_time.dt.date
     return (
         trend_data.groupby("period")[amount_column]
         .agg(["count", "sum", "mean"])
         .reset_index()
         .sort_values("period")
     )
+
+
+def _rank_breakdown_columns(
+    profile: DataProfile,
+    schema_mapping: SchemaMapping,
+) -> list[str]:
+    mapped = schema_mapping.mapped_fields()
+    priority_columns = {
+        column: score
+        for score, column in enumerate(
+            (
+                mapped.get("merchant"),
+                mapped.get("location"),
+                mapped.get("label"),
+                mapped.get("customer_id"),
+            ),
+            start=4,
+        )
+        if column is not None
+    }
+    profiles = {column.name: column for column in profile.columns}
+
+    def relevance(column: str) -> tuple[float, float]:
+        column_profile = profiles[column]
+        useful_cardinality = 1.0 / max(column_profile.unique_count, 1)
+        return (
+            float(priority_columns.get(column, 0)) + useful_cardinality,
+            -column_profile.missing_ratio,
+        )
+
+    return sorted(profile.categorical_columns, key=relevance, reverse=True)[:5]

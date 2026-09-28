@@ -121,21 +121,41 @@ def _capabilities_section(capability_report: CapabilityReport) -> ReportSection:
 def _analytics_section(analytics_report: AnalyticsReport) -> ReportSection:
     bullets = []
     if not analytics_report.numeric_summary.empty:
-        bullets.append(
-            f"Generated numeric summaries for {len(analytics_report.numeric_summary)} column(s)."
-        )
+        for _, row in analytics_report.numeric_summary.head(3).iterrows():
+            bullets.append(
+                f"{row['column']}: total {row['mean'] * row['count']:,.2f}, "
+                f"average {row['mean']:,.2f}, range {row['min']:,.2f} to {row['max']:,.2f}."
+            )
     if analytics_report.categorical_breakdowns:
-        bullets.append(
-            "Generated categorical breakdowns for "
-            f"{len(analytics_report.categorical_breakdowns)} column(s)."
-        )
+        for column, breakdown in list(analytics_report.categorical_breakdowns.items())[:3]:
+            if not breakdown.empty:
+                top = breakdown.iloc[0]
+                bullets.append(f"Top {column}: {top[column]} with {int(top['count']):,} row(s).")
     if analytics_report.amount_by_category:
-        bullets.append(
-            "Generated amount-by-category summaries for "
-            f"{len(analytics_report.amount_by_category)} column(s)."
-        )
+        for column, breakdown in list(analytics_report.amount_by_category.items())[:3]:
+            if breakdown.empty:
+                continue
+            top = breakdown.iloc[0]
+            total = float(breakdown["sum"].sum())
+            concentration = float(top["sum"]) / total if total else 0.0
+            bullets.append(
+                f"Largest {column} by amount: {top[column]} at {float(top['sum']):,.2f} "
+                f"({concentration:.1%} of the displayed top groups)."
+            )
     if analytics_report.trend is not None:
-        bullets.append(f"Generated trend output with {len(analytics_report.trend)} period(s).")
+        trend = analytics_report.trend
+        if len(trend) >= 2:
+            previous = float(trend.iloc[-2]["sum"])
+            latest = float(trend.iloc[-1]["sum"])
+            change = (latest - previous) / abs(previous) if previous else 0.0
+            bullets.append(
+                f"Latest period total was {latest:,.2f}, a {change:+.1%} change "
+                "from the prior period."
+            )
+        elif not trend.empty:
+            bullets.append(
+                f"Observed one period with a total of {float(trend.iloc[0]['sum']):,.2f}."
+            )
     if not bullets:
         bullets.append("No analytics outputs were available.")
     return ReportSection(title="Analytics Highlights", bullets=bullets)

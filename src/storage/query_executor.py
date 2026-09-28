@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 from time import monotonic
 
 import pandas as pd
+import sqlparse
+from sqlparse import tokens as sql_tokens
 
 
 class UnsafeQueryError(ValueError):
@@ -28,7 +29,6 @@ BLOCKED_KEYWORDS = {
     "drop",
     "insert",
     "pragma",
-    "replace",
     "update",
     "vacuum",
 }
@@ -41,6 +41,8 @@ ALLOWED_FUNCTIONS = {
     "date",
     "datetime",
     "ifnull",
+    "iif",
+    "instr",
     "julianday",
     "length",
     "lower",
@@ -49,15 +51,24 @@ ALLOWED_FUNCTIONS = {
     "min",
     "nullif",
     "printf",
+    "replace",
     "round",
     "rtrim",
     "strftime",
     "substr",
     "sum",
+    "group_concat",
     "total",
     "trim",
     "typeof",
     "upper",
+    "glob",
+    "like",
+    "row_number",
+    "rank",
+    "dense_rank",
+    "lag",
+    "lead",
 }
 
 
@@ -107,25 +118,37 @@ def execute_read_query(
 
 
 def validate_read_query(query: str) -> str:
-    """Return a normalized query if it is a single read-only SELECT."""
+    """Return a normalized query if it is one read-only SELECT or CTE query.
+
+    The statement is parsed so literal and comment contents cannot trigger
+    separator or keyword checks. SQLite's authorizer remains the final safeguard
+    at execution time.
+    """
     normalized = query.strip()
     if not normalized:
         raise UnsafeQueryError("Query cannot be empty.")
 
-    without_trailing_semicolon = normalized[:-1].strip() if normalized.endswith(";") else normalized
-    if ";" in without_trailing_semicolon:
+    split_statements = [statement for statement in sqlparse.split(normalized) if statement.strip()]
+    if len(split_statements) != 1:
         raise UnsafeQueryError("Only one SQL statement is allowed.")
 
-    lowered = _strip_sql_comments(without_trailing_semicolon).lower().strip()
-    if re.match(r"^select\b", lowered) is None:
-        raise UnsafeQueryError("Only SELECT queries are allowed.")
+    statement_text = split_statements[0].strip()
+    parsed_statements = sqlparse.parse(statement_text)
+    if len(parsed_statements) != 1 or parsed_statements[0].get_type() != "SELECT":
+        raise UnsafeQueryError("Only SELECT queries and read-only CTEs are allowed.")
 
-    tokens = set(re.findall(r"[a-zA-Z_]+", lowered))
-    blocked = sorted(tokens.intersection(BLOCKED_KEYWORDS))
+    keyword_values = {
+        token.normalized.lower()
+        for token in parsed_statements[0].flatten()
+        if token.ttype in sql_tokens.Keyword
+        and token.ttype not in sql_tokens.Literal.String
+        and token.ttype not in sql_tokens.Comment
+    }
+    blocked = sorted(keyword_values.intersection(BLOCKED_KEYWORDS))
     if blocked:
         raise UnsafeQueryError("Query contains blocked keyword(s): " + ", ".join(blocked) + ".")
 
-    return without_trailing_semicolon
+    return statement_text[:-1].rstrip() if statement_text.endswith(";") else statement_text
 
 
 def _build_authorizer(
@@ -164,9 +187,3 @@ def _build_authorizer(
         return sqlite3.SQLITE_OK
 
     return authorize
-
-
-def _strip_sql_comments(query: str) -> str:
-    query = re.sub(r"--.*?$", "", query, flags=re.MULTILINE)
-    query = re.sub(r"/\*.*?\*/", "", query, flags=re.DOTALL)
-    return query

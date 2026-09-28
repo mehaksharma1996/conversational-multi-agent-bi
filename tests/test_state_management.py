@@ -50,7 +50,7 @@ def test_clear_document_state_preserves_table() -> None:
 
     assert DOCUMENT_RETRIEVER not in state
     assert DOCUMENT_SIGNATURE not in state
-    assert CHAT_MESSAGES not in state
+    assert CHAT_MESSAGES in state
     assert UPLOADED_TABLE in state
 
 

@@ -7,10 +7,10 @@ from io import BytesIO
 from reportlab.pdfgen import canvas
 
 from src.agents.rag_agent import answer_with_documents, build_rag_prompt
-from src.documents.chunker import DocumentChunk, chunk_document
+from src.documents.chunker import DocumentChunk, chunk_document, chunk_document_pages
 from src.documents.retriever import RetrievalResult
 from src.documents.vector_store import ChromaDocumentStore, RetrievedChunk
-from src.ingestion.pdf_loader import load_pdf_file
+from src.ingestion.pdf_loader import DocumentPage, load_pdf_file
 from src.llm.base import LLMResponse
 from tests.test_utils import isolated_vector_path
 
@@ -94,6 +94,24 @@ def test_chunk_document_uses_document_and_page_identity() -> None:
     assert chunks[0].id == "abc123-p3-c0"
     assert chunks[0].metadata["page_number"] == 3
     assert chunks[0].metadata["document_id"] == "abc123"
+
+
+def test_chunk_document_pages_can_span_page_boundaries() -> None:
+    chunks = chunk_document_pages(
+        [
+            DocumentPage(1, "First page ends with important context."),
+            DocumentPage(2, "Second page continues that context."),
+        ],
+        filename="policy.pdf",
+        chunk_size=100,
+        overlap=10,
+        document_id="abc123",
+    )
+
+    assert len(chunks) == 1
+    assert "First page" in chunks[0].text
+    assert "Second page" in chunks[0].text
+    assert chunks[0].metadata["page_number"] == "1-2"
 
 
 def test_chroma_document_store_retrieves_relevant_chunk() -> None:

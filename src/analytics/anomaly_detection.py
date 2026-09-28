@@ -95,9 +95,11 @@ def detect_anomalies(
     anomaly_scores = -model.score_samples(transformed)
 
     result = dataframe.copy()
-    result.insert(0, "source_row", dataframe.index)
+    result.insert(0, "source_row", range(2, len(dataframe) + 2))
     result["anomaly_score"] = anomaly_scores
-    result["is_anomaly"] = predictions == -1
+    rule_reasons = _rule_based_reasons(dataframe, schema_mapping)
+    result["rule_reason"] = rule_reasons
+    result["is_anomaly"] = (predictions == -1) | rule_reasons.astype(bool)
 
     flagged = result[result["is_anomaly"]].copy()
     if flagged.empty:
@@ -117,6 +119,7 @@ def detect_anomalies(
             dataframe=dataframe,
             feature_columns=feature_columns,
             schema_mapping=schema_mapping,
+            rule_reason=str(row["rule_reason"]),
         ),
         axis=1,
     )
@@ -171,8 +174,9 @@ def _explain_row(
     dataframe: pd.DataFrame,
     feature_columns: list[str],
     schema_mapping: SchemaMapping,
+    rule_reason: str = "",
 ) -> str:
-    reasons: list[str] = []
+    reasons: list[str] = [rule_reason] if rule_reason else []
     mapped_fields = schema_mapping.mapped_fields()
     amount_column = mapped_fields.get("amount")
 
@@ -180,6 +184,15 @@ def _explain_row(
         reason = _amount_reason(row=row, dataframe=dataframe, amount_column=amount_column)
         if reason:
             reasons.append(reason)
+
+        customer_reason = _customer_relative_reason(
+            row=row,
+            dataframe=dataframe,
+            amount_column=amount_column,
+            customer_column=mapped_fields.get("customer_id"),
+        )
+        if customer_reason:
+            reasons.append(customer_reason)
 
     numeric_reasons = _numeric_outlier_reasons(
         row=row,
@@ -239,3 +252,54 @@ def _numeric_outlier_reasons(
             reasons.append(f"{column} is far from the median.")
 
     return reasons[:3]
+
+
+def _customer_relative_reason(
+    row: pd.Series,
+    dataframe: pd.DataFrame,
+    amount_column: str,
+    customer_column: str | None,
+) -> str | None:
+    if customer_column is None or customer_column not in dataframe.columns:
+        return None
+    customer_rows = dataframe[dataframe[customer_column] == row[customer_column]][amount_column]
+    if len(customer_rows) < 3:
+        return None
+    median = customer_rows.median()
+    amount = row[amount_column]
+    if median > 0 and amount >= median * 3:
+        return f"{amount_column} is high relative to this {customer_column}'s usual value."
+    return None
+
+
+def _rule_based_reasons(
+    dataframe: pd.DataFrame,
+    schema_mapping: SchemaMapping,
+) -> pd.Series:
+    reasons: list[list[str]] = [[] for _ in range(len(dataframe))]
+    duplicate_mask = dataframe.duplicated(keep=False).to_numpy()
+    for position, duplicated in enumerate(duplicate_mask):
+        if duplicated:
+            reasons[position].append("The row duplicates another uploaded row.")
+
+    mapped = schema_mapping.mapped_fields()
+    amount_column = mapped.get("amount")
+    if amount_column and amount_column in dataframe.columns:
+        amounts = pd.to_numeric(dataframe[amount_column], errors="coerce")
+        median = amounts.median()
+        round_mask = (
+            amounts.notna() & (amounts.abs() >= max(abs(median), 100)) & (amounts % 100 == 0)
+        )
+        for position, is_round in enumerate(round_mask.to_numpy()):
+            if is_round:
+                reasons[position].append("The amount is an unusually round value.")
+
+    date_column = mapped.get("date")
+    if date_column and date_column in dataframe.columns:
+        dates = pd.to_datetime(dataframe[date_column], errors="coerce", format="mixed")
+        off_hours = dates.notna() & ((dates.dt.hour < 6) | (dates.dt.hour >= 22))
+        for position, is_off_hours in enumerate(off_hours.to_numpy()):
+            if is_off_hours:
+                reasons[position].append("The event occurred during off-hours.")
+
+    return pd.Series((" ".join(row_reasons) for row_reasons in reasons), index=dataframe.index)

@@ -7,7 +7,12 @@ from dataclasses import dataclass
 import pandas as pd
 import pytest
 
-from src.agents.sql_agent import answer_with_sql, build_sql_prompt, extract_sql
+from src.agents.sql_agent import (
+    answer_with_sql,
+    build_sql_prompt,
+    extract_sql,
+    summarize_sql_result,
+)
 from src.llm.base import LLMResponse
 from src.storage.query_executor import UnsafeQueryError
 from src.storage.sqlite_store import SQLiteStore
@@ -93,6 +98,9 @@ def test_build_sql_prompt_includes_table_and_columns() -> None:
     assert "- amount" in prompt
     assert "Top merchants?" in prompt
     assert "Return SQL only" in prompt
+    assert "Row count: 3" in prompt
+    assert "samples:" in prompt
+    assert "Double-quote every table and column identifier" in prompt
 
 
 def test_answer_with_sql_executes_safe_generated_query() -> None:
@@ -119,3 +127,37 @@ def test_answer_with_sql_rejects_unsafe_generated_query() -> None:
 
     with pytest.raises(UnsafeQueryError):
         answer_with_sql("Delete the table", stored_table, llm)
+
+
+def test_answer_with_sql_retries_once_with_database_error() -> None:
+    stored_table = _stored_table()
+
+    class CorrectingLLM:
+        provider = "fake"
+        model = "fake-model"
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def generate(self, prompt: str) -> LLMResponse:
+            self.prompts.append(prompt)
+            sql = (
+                "SELECT missing_column FROM uploaded_data"
+                if len(self.prompts) == 1
+                else "SELECT merchant FROM uploaded_data ORDER BY merchant"
+            )
+            return LLMResponse(text=sql, model=self.model, provider=self.provider)
+
+    llm = CorrectingLLM()
+    result = answer_with_sql("List merchants", stored_table, llm)
+
+    assert result.result["merchant"].tolist() == ["A", "A", "B"]
+    assert len(llm.prompts) == 2
+    assert "SQLite error:" in llm.prompts[1]
+
+
+def test_summarize_sql_result_includes_single_row_values() -> None:
+    summary = summarize_sql_result(pd.DataFrame({"total": [60.0]}))
+
+    assert "1 row" in summary
+    assert "total=60.0" in summary

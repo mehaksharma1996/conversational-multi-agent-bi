@@ -17,13 +17,19 @@ def test_sqlite_store_saves_dataframe() -> None:
         }
     )
 
-    stored_table = SQLiteStore(database_path).save_dataframe(dataframe)
+    stored_table = SQLiteStore(database_path).save_dataframe(
+        dataframe,
+        canonical_mapping={"amount": "amount"},
+    )
 
     assert stored_table.database_path == database_path
     assert stored_table.table_name == DEFAULT_TABLE_NAME
     assert stored_table.row_count == 2
     assert stored_table.column_count == 2
     assert stored_table.columns == ["amount", "merchant"]
+    assert stored_table.column_types == {"amount": "float64", "merchant": "str"}
+    assert stored_table.sample_values["merchant"] == ["Store A", "Store B"]
+    assert stored_table.canonical_mapping == {"amount": "amount"}
     assert SQLiteStore(database_path).table_exists(DEFAULT_TABLE_NAME)
 
 

@@ -83,3 +83,11 @@ def test_schema_mapper_rejects_duplicate_manual_sources() -> None:
 
     with pytest.raises(ValueError, match="only map to one"):
         map_schema(profile, overrides={"amount": "value", "label": "value"})
+
+
+def test_bare_id_does_not_partially_match_customer_id() -> None:
+    profile = profile_dataframe(pd.DataFrame({"id": [1, 2, 3], "amount": [10.0, 20.0, 30.0]}))
+
+    mapping = map_schema(profile)
+
+    assert mapping.mappings["customer_id"].source_column is None

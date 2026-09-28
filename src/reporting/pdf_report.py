@@ -28,12 +28,12 @@ def build_report_pdf(
         bottomMargin=48,
     )
     styles = getSampleStyleSheet()
-    story = [Paragraph(report.title, styles["Title"]), Spacer(1, 12)]
+    story = [Paragraph(_escape_text(report.title), styles["Title"]), Spacer(1, 12)]
 
     for section in report.sections:
-        story.append(Paragraph(section.title, styles["Heading2"]))
+        story.append(Paragraph(_escape_text(section.title), styles["Heading2"]))
         if section.body:
-            story.append(Paragraph(section.body, styles["BodyText"]))
+            story.append(Paragraph(_escape_text(section.body), styles["BodyText"]))
             story.append(Spacer(1, 6))
         if section.bullets:
             items = [
@@ -86,3 +86,20 @@ def _chart_to_image(chart: ChartSpec) -> Image | None:
     image.drawWidth = 500
     image.drawHeight = 278
     return image
+
+
+def chart_export_error(chart_specs: list[ChartSpec]) -> str | None:
+    """Return a user-facing chart export problem, if one is detected."""
+    if not chart_specs:
+        return None
+    try:
+        pio.to_image(chart_specs[0].figure, format="png", width=100, height=60, scale=1)
+    except Exception as exc:
+        message = str(exc)
+        if "chrome" in message.lower() or "kaleido" in message.lower():
+            return (
+                "Chart images cannot be embedded because Kaleido/Chrome is unavailable. "
+                "The PDF will still contain the report text."
+            )
+        return f"Chart images cannot be embedded in this environment: {message}"
+    return None

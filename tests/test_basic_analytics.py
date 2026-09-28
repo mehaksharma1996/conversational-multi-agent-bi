@@ -65,3 +65,21 @@ def test_basic_analytics_handles_no_categorical_columns() -> None:
     assert not report.numeric_summary.empty
     assert report.categorical_breakdowns == {}
     assert any("No categorical columns" in item for item in report.limitations)
+
+
+def test_basic_analytics_groups_long_date_ranges_by_month() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "transaction_date": ["2023-01-01", "2024-01-01", "2025-01-01"],
+            "amount": [10.0, 20.0, 30.0],
+        }
+    )
+
+    report = _analytics_for(dataframe)
+
+    assert report.trend is not None
+    assert [str(value) for value in report.trend["period"]] == [
+        "2023-01-01",
+        "2024-01-01",
+        "2025-01-01",
+    ]

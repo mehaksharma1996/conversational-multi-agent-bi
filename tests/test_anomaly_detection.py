@@ -29,9 +29,9 @@ def test_anomaly_detection_flags_large_numeric_outlier() -> None:
     assert report.enabled
     assert report.feature_columns == ["amount", "quantity"]
     assert report.flagged_count >= 1
-    assert 9 in report.flagged_rows["source_row"].tolist()
+    assert 11 in report.flagged_rows["source_row"].tolist()
     flagged_reason = report.flagged_rows.loc[
-        report.flagged_rows["source_row"] == 9,
+        report.flagged_rows["source_row"] == 11,
         "reason",
     ].iloc[0]
     assert "amount is high" in flagged_reason
@@ -76,3 +76,28 @@ def test_anomaly_features_exclude_identifiers_and_numeric_labels() -> None:
     features = recommend_anomaly_features(profile, mapping)
 
     assert features == ["amount"]
+
+
+def test_anomaly_detection_adds_rule_based_reasons_and_spreadsheet_rows() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "transaction_date": [
+                "2026-01-01 23:30:00",
+                "2026-01-02 12:00:00",
+                "2026-01-03 12:00:00",
+                "2026-01-04 12:00:00",
+                "2026-01-05 12:00:00",
+                "2026-01-06 12:00:00",
+                "2026-01-07 12:00:00",
+                "2026-01-08 12:00:00",
+            ],
+            "amount": [100, 11, 12, 13, 14, 15, 16, 17],
+            "merchant": ["A", "B", "C", "D", "E", "F", "G", "H"],
+        }
+    )
+
+    report = _anomalies_for(dataframe)
+
+    first_row = report.flagged_rows.loc[report.flagged_rows["source_row"] == 2].iloc[0]
+    assert "round value" in first_row["reason"]
+    assert "off-hours" in first_row["reason"]

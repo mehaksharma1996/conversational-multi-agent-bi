@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gc
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import chromadb
 
@@ -35,8 +37,8 @@ class ChromaDocumentStore:
         self.embedder = embedder
         self.collection_name = collection_name
         self.persist_dir.mkdir(parents=True, exist_ok=True)
-        self._client = chromadb.PersistentClient(path=str(self.persist_dir))
-        self._collection = self._client.get_or_create_collection(
+        self._client: Any = chromadb.PersistentClient(path=str(self.persist_dir))
+        self._collection: Any = self._client.get_or_create_collection(
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"},
         )
@@ -120,3 +122,9 @@ class ChromaDocumentStore:
 
     def count(self) -> int:
         return int(self._collection.count())
+
+    def close(self) -> None:
+        """Release Chroma references before session storage is removed on Windows."""
+        self._collection = None
+        self._client = None
+        gc.collect()

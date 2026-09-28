@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+import pytest
 
 from src.documents.retriever import RetrievalResult
 from src.documents.vector_store import RetrievedChunk
@@ -125,6 +126,30 @@ def test_route_question_skips_memory_when_it_cannot_answer() -> None:
     )
 
     assert route == "sql"
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_route"),
+    [
+        ("Give me a summary of sales by region", "sql"),
+        ("Which customers are missing an email?", "sql"),
+        ("Show the risk score distribution by customer", "sql"),
+        ("What analysis was possible?", "memory"),
+        ("Show the SQL used for the previous question", "memory"),
+        ("According to the policy, what needs review?", "rag"),
+        ("Which transactions violate the policy?", "hybrid"),
+    ],
+)
+def test_labelled_routing_examples(question: str, expected_route: str) -> None:
+    route = route_question(
+        question=question,
+        has_table=True,
+        has_documents=True,
+        has_memory=True,
+        memory_answer_available=(expected_route == "memory"),
+    )
+
+    assert route == expected_route
 
 
 def test_orchestrator_answers_sql_question() -> None:

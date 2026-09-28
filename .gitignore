@@ -24,9 +24,7 @@ data/sessions/
 !data/reports/.gitkeep
 
 .streamlit/secrets.toml
-work/test-dbs/
-work/test-vectors/
-work/pytest-tmp/
+work/
 
 # Generated application output
 outputs/

@@ -12,3 +12,4 @@ chromadb==1.5.9
 sentence-transformers==6.1.0
 pypdf==6.19.0
 reportlab==5.0.1
+sqlparse==0.5.3

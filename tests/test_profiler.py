@@ -62,3 +62,9 @@ def test_profile_handles_empty_dataframe_columns() -> None:
     assert profile.numeric_columns == []
     assert profile.date_columns == []
     assert [column.inferred_type for column in profile.columns] == ["empty", "empty"]
+
+
+def test_unique_float_measure_is_not_flagged_as_identifier() -> None:
+    profile = profile_dataframe(pd.DataFrame({"price": [10.1, 20.2, 30.3, 40.4]}))
+
+    assert "price" not in profile.possible_id_columns

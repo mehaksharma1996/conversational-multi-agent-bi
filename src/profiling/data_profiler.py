@@ -55,7 +55,7 @@ def profile_dataframe(dataframe: pd.DataFrame) -> DataProfile:
         categorical_columns=[col.name for col in columns if col.inferred_type == "categorical"],
         boolean_columns=[col.name for col in columns if col.inferred_type == "boolean"],
         possible_id_columns=[
-            col.name for col in columns if _is_possible_id(col.name, col.unique_ratio)
+            col.name for col in columns if _is_possible_id(col.name, col.unique_ratio, col.dtype)
         ],
         possible_label_columns=[
             col.name for col in columns if _is_possible_label(col.name, col.unique_count)
@@ -138,10 +138,11 @@ def _is_date_like(series: pd.Series) -> bool:
     return success_ratio >= DATE_SUCCESS_THRESHOLD
 
 
-def _is_possible_id(column_name: str, unique_ratio: float) -> bool:
+def _is_possible_id(column_name: str, unique_ratio: float, dtype: str) -> bool:
     normalized = column_name.lower().replace("-", "_").replace(" ", "_")
     name_hint = normalized == "id" or normalized.endswith("_id")
-    return name_hint or unique_ratio >= ID_MIN_UNIQUE_RATIO
+    identifier_dtype = dtype.startswith(("int", "uint", "string", "object", "category"))
+    return name_hint or (identifier_dtype and unique_ratio >= ID_MIN_UNIQUE_RATIO)
 
 
 def _is_possible_label(column_name: str, unique_count: int) -> bool:

@@ -204,6 +204,7 @@ def _best_mapping_for_field(
 
 def _score_column_for_field(field: str, column: ColumnProfile) -> FieldMapping:
     normalized = _normalize(column.name)
+    normalized_tokens = set(normalized.split("_"))
     aliases = FIELD_ALIASES[field]
 
     if normalized in aliases:
@@ -215,7 +216,8 @@ def _score_column_for_field(field: str, column: ColumnProfile) -> FieldMapping:
         )
 
     for alias in aliases:
-        if alias in normalized or normalized in alias:
+        alias_tokens = set(alias.split("_"))
+        if alias_tokens.issubset(normalized_tokens):
             return FieldMapping(
                 canonical_field=field,
                 source_column=column.name,

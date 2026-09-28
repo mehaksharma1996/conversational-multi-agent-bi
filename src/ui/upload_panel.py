@@ -8,12 +8,16 @@ from io import BytesIO
 import streamlit as st
 
 from config.settings import Settings
-from src.documents.chunker import chunk_document
+from src.documents.chunker import chunk_document_pages
 from src.documents.embedding import EmbeddingError, SentenceTransformerEmbedder
 from src.documents.retriever import DocumentRetriever
 from src.documents.vector_store import ChromaDocumentStore
 from src.ingestion.pdf_loader import PDFLoadError, load_pdf_file
-from src.ingestion.tabular_loader import TabularLoadError, load_tabular_file
+from src.ingestion.tabular_loader import (
+    TabularLoadError,
+    list_excel_sheets,
+    load_tabular_file,
+)
 from src.memory.session_keys import (
     DOCUMENT_ERROR,
     DOCUMENT_RETRIEVER,
@@ -31,18 +35,12 @@ from src.memory.state_management import (
 )
 from src.utils.hashing import sha256_bytes
 
-MAX_TABULAR_UPLOAD_BYTES = 50 * 1024 * 1024
-MAX_TABULAR_ROWS = 1_000_000
-MAX_PDF_UPLOAD_BYTES = 25 * 1024 * 1024
-MAX_TOTAL_PDF_BYTES = 50 * 1024 * 1024
-MAX_PDF_PAGES = 500
-MAX_DOCUMENT_CHUNKS = 5_000
-
 
 def render_upload_panel(settings: Settings) -> None:
     st.header("Inputs")
     generation = int(st.session_state.get(UPLOADER_GENERATION, 0))
     if st.button("Reset session data", use_container_width=True):
+        _close_active_document_store()
         clear_all_workflow_state(st.session_state)
         st.session_state[UPLOADER_GENERATION] = generation + 1
         try:
@@ -61,7 +59,8 @@ def render_upload_panel(settings: Settings) -> None:
 
     if uploaded_file is not None:
         payload = uploaded_file.getvalue()
-        table_signature = sha256_bytes(payload)
+        sheet_name = _select_excel_sheet(payload, uploaded_file.name)
+        table_signature = f"{sha256_bytes(payload)}:{sheet_name or ''}"
         if st.session_state.get(TABULAR_SIGNATURE) != table_signature:
             _remove_table_storage(settings)
             clear_table_state(st.session_state)
@@ -69,6 +68,8 @@ def render_upload_panel(settings: Settings) -> None:
                 payload=payload,
                 filename=uploaded_file.name,
                 signature=table_signature,
+                sheet_name=sheet_name,
+                settings=settings,
             )
         elif UPLOADED_TABLE in st.session_state:
             loaded_table = st.session_state[UPLOADED_TABLE]
@@ -93,6 +94,7 @@ def render_upload_panel(settings: Settings) -> None:
         uploads = [(pdf_file.name, pdf_file.getvalue()) for pdf_file in pdf_files]
         document_signature = _pdf_signature(uploads)
         if st.session_state.get(DOCUMENT_SIGNATURE) != document_signature:
+            _close_active_document_store()
             _reset_document_store(settings)
             clear_document_state(st.session_state)
             _handle_pdf_uploads(uploads, settings, document_signature)
@@ -103,6 +105,7 @@ def render_upload_panel(settings: Settings) -> None:
                 f"into {status['chunk_count']} chunk(s)."
             )
     elif DOCUMENT_SIGNATURE in st.session_state:
+        _close_active_document_store()
         _reset_document_store(settings)
         clear_document_state(st.session_state)
 
@@ -117,9 +120,17 @@ def render_upload_panel(settings: Settings) -> None:
         st.caption("Set GEMINI_API_KEY in .env before using LLM-backed agents.")
 
 
-def _handle_tabular_upload(payload: bytes, filename: str, signature: str) -> None:
-    if len(payload) > MAX_TABULAR_UPLOAD_BYTES:
-        st.session_state[UPLOAD_ERROR] = "Tabular uploads are limited to 50 MB."
+def _handle_tabular_upload(
+    payload: bytes,
+    filename: str,
+    signature: str,
+    settings: Settings,
+    sheet_name: str | None = None,
+) -> None:
+    st.session_state[TABULAR_SIGNATURE] = signature
+    if len(payload) > settings.max_tabular_upload_bytes:
+        limit_mb = settings.max_tabular_upload_bytes / (1024 * 1024)
+        st.session_state[UPLOAD_ERROR] = f"Tabular uploads are limited to {limit_mb:g} MB."
         st.error(st.session_state[UPLOAD_ERROR])
         return
 
@@ -127,6 +138,8 @@ def _handle_tabular_upload(payload: bytes, filename: str, signature: str) -> Non
         loaded_table = load_tabular_file(
             file=BytesIO(payload),
             filename=filename,
+            max_rows=settings.max_tabular_rows + 1,
+            sheet_name=sheet_name or 0,
         )
     except TabularLoadError as exc:
         st.session_state.pop(UPLOADED_TABLE, None)
@@ -134,20 +147,36 @@ def _handle_tabular_upload(payload: bytes, filename: str, signature: str) -> Non
         st.error(str(exc))
         return
 
-    if loaded_table.row_count > MAX_TABULAR_ROWS:
+    if loaded_table.row_count > settings.max_tabular_rows:
         st.session_state[UPLOAD_ERROR] = (
             f"The upload contains {loaded_table.row_count:,} rows; the current "
-            f"limit is {MAX_TABULAR_ROWS:,}."
+            f"limit is {settings.max_tabular_rows:,}."
         )
         st.error(st.session_state[UPLOAD_ERROR])
         return
 
     st.session_state[UPLOADED_TABLE] = loaded_table
-    st.session_state[TABULAR_SIGNATURE] = signature
     st.session_state.pop(UPLOAD_ERROR, None)
     st.success("File loaded successfully.")
     st.write("Rows:", loaded_table.row_count)
     st.write("Columns:", loaded_table.column_count)
+
+
+def _select_excel_sheet(payload: bytes, filename: str) -> str | None:
+    if not filename.lower().endswith((".xls", ".xlsx")):
+        return None
+    try:
+        sheet_names = list_excel_sheets(BytesIO(payload))
+    except TabularLoadError as exc:
+        st.error(str(exc))
+        return None
+    if not sheet_names:
+        return None
+    return st.selectbox(
+        "Excel sheet",
+        options=sheet_names,
+        key=f"excel_sheet_{sha256_bytes(payload)}",
+    )
 
 
 def _handle_pdf_uploads(
@@ -155,12 +184,17 @@ def _handle_pdf_uploads(
     settings: Settings,
     signature: tuple[tuple[str, str], ...],
 ) -> None:
-    oversized = [filename for filename, payload in uploads if len(payload) > MAX_PDF_UPLOAD_BYTES]
+    st.session_state[DOCUMENT_SIGNATURE] = signature
+    oversized = [
+        filename for filename, payload in uploads if len(payload) > settings.max_pdf_upload_bytes
+    ]
     if oversized:
-        st.error("Each PDF is limited to 25 MB: " + ", ".join(oversized))
+        limit_mb = settings.max_pdf_upload_bytes / (1024 * 1024)
+        st.error(f"Each PDF is limited to {limit_mb:g} MB: " + ", ".join(oversized))
         return
-    if sum(len(payload) for _, payload in uploads) > MAX_TOTAL_PDF_BYTES:
-        st.error("The combined PDF upload is limited to 50 MB.")
+    if sum(len(payload) for _, payload in uploads) > settings.max_total_pdf_bytes:
+        limit_mb = settings.max_total_pdf_bytes / (1024 * 1024)
+        st.error(f"The combined PDF upload is limited to {limit_mb:g} MB.")
         return
 
     try:
@@ -172,21 +206,23 @@ def _handle_pdf_uploads(
             for filename, payload in uploads
         ]
         total_pages = sum(document.page_count for document, _ in documents)
-        if total_pages > MAX_PDF_PAGES:
-            raise ValueError(f"PDF uploads are limited to {MAX_PDF_PAGES:,} combined pages.")
+        if total_pages > settings.max_pdf_pages:
+            raise ValueError(
+                f"PDF uploads are limited to {settings.max_pdf_pages:,} combined pages."
+            )
         chunks = [
             chunk
             for document, document_id in documents
-            for page in document.pages
-            for chunk in chunk_document(
-                page.text,
+            for chunk in chunk_document_pages(
+                document.pages,
                 document.filename,
-                page_number=page.page_number,
                 document_id=document_id,
             )
         ]
-        if len(chunks) > MAX_DOCUMENT_CHUNKS:
-            raise ValueError(f"Document indexing is limited to {MAX_DOCUMENT_CHUNKS:,} chunks.")
+        if len(chunks) > settings.max_document_chunks:
+            raise ValueError(
+                f"Document indexing is limited to {settings.max_document_chunks:,} chunks."
+            )
         store = ChromaDocumentStore(
             persist_dir=settings.chroma_persist_dir,
             embedder=_get_embedder(settings.embedding_model),
@@ -206,14 +242,17 @@ def _handle_pdf_uploads(
         st.error(st.session_state[DOCUMENT_ERROR])
         return
 
-    st.session_state[DOCUMENT_RETRIEVER] = DocumentRetriever(store)
+    st.session_state[DOCUMENT_RETRIEVER] = DocumentRetriever(
+        store,
+        max_distance=settings.retrieval_max_distance,
+        default_top_k=settings.retrieval_top_k,
+    )
     st.session_state[DOCUMENT_STATUS] = {
         "document_count": len(documents),
         "chunk_count": len(chunks),
         "filenames": [document.filename for document, _ in documents],
         "document_hashes": [document_id for _, document_id in documents],
     }
-    st.session_state[DOCUMENT_SIGNATURE] = signature
     st.session_state.pop(DOCUMENT_ERROR, None)
     st.success(f"Indexed {len(documents)} PDF document(s) into {len(chunks)} chunk(s).")
 
@@ -237,6 +276,14 @@ def _reset_document_store(settings: Settings) -> None:
         embedder=_get_embedder(settings.embedding_model),
     )
     store.reset()
+    store.close()
+
+
+def _close_active_document_store() -> None:
+    retriever = st.session_state.get(DOCUMENT_RETRIEVER)
+    close = getattr(retriever, "close", None)
+    if callable(close):
+        close()
 
 
 def _remove_session_storage(settings: Settings) -> None:

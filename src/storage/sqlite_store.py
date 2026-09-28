@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -19,6 +19,9 @@ class StoredTable:
     row_count: int
     column_count: int
     columns: list[str]
+    column_types: dict[str, str] = field(default_factory=dict)
+    sample_values: dict[str, list[str]] = field(default_factory=dict)
+    canonical_mapping: dict[str, str] = field(default_factory=dict)
 
 
 class SQLiteStore:
@@ -31,6 +34,7 @@ class SQLiteStore:
         self,
         dataframe: pd.DataFrame,
         table_name: str = DEFAULT_TABLE_NAME,
+        canonical_mapping: dict[str, str] | None = None,
     ) -> StoredTable:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         safe_table_name = validate_identifier(table_name)
@@ -50,6 +54,14 @@ class SQLiteStore:
             row_count=len(dataframe),
             column_count=len(dataframe.columns),
             columns=[str(column) for column in dataframe.columns],
+            column_types={
+                str(column): str(dataframe[column].dtype) for column in dataframe.columns
+            },
+            sample_values={
+                str(column): [str(value) for value in dataframe[column].dropna().unique()[:5]]
+                for column in dataframe.columns
+            },
+            canonical_mapping=dict(canonical_mapping or {}),
         )
 
     def table_exists(self, table_name: str = DEFAULT_TABLE_NAME) -> bool:

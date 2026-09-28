@@ -75,7 +75,7 @@ def clear_table_state(state: MutableMapping[str, Any]) -> None:
 
 def clear_document_state(state: MutableMapping[str, Any]) -> None:
     """Remove state derived from the current document upload."""
-    clear_keys(state, DOCUMENT_STATE_KEYS | CONVERSATION_STATE_KEYS)
+    clear_keys(state, DOCUMENT_STATE_KEYS)
 
 
 def clear_all_workflow_state(state: MutableMapping[str, Any]) -> None:

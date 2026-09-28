@@ -33,6 +33,69 @@ def test_execute_read_query_allows_select() -> None:
     assert result["merchant"].tolist() == ["B", "C"]
 
 
+def test_execute_read_query_allows_like_and_glob() -> None:
+    database_path = isolated_database_path("query_allows_like_glob")
+    SQLiteStore(database_path).save_dataframe(pd.DataFrame({"status": ["open", "closed"]}))
+
+    like_result = execute_read_query(
+        database_path,
+        "SELECT status FROM uploaded_data WHERE status LIKE 'o%'",
+    )
+    glob_result = execute_read_query(
+        database_path,
+        "SELECT status FROM uploaded_data WHERE status GLOB 'c*'",
+    )
+
+    assert like_result["status"].tolist() == ["open"]
+    assert glob_result["status"].tolist() == ["closed"]
+
+
+def test_execute_read_query_allows_read_only_cte() -> None:
+    database_path = isolated_database_path("query_allows_cte")
+    SQLiteStore(database_path).save_dataframe(pd.DataFrame({"amount": [10, 20]}))
+
+    result = execute_read_query(
+        database_path,
+        "WITH totals AS (SELECT SUM(amount) AS total FROM uploaded_data) SELECT total FROM totals",
+        allowed_tables={"uploaded_data"},
+    )
+
+    assert result["total"].tolist() == [30]
+
+
+def test_execute_read_query_ignores_keywords_and_semicolons_in_literals() -> None:
+    database_path = isolated_database_path("query_literal_safety")
+    SQLiteStore(database_path).save_dataframe(pd.DataFrame({"status": ["update", "a;b", "other"]}))
+
+    update_result = execute_read_query(
+        database_path,
+        "SELECT status FROM uploaded_data WHERE status = 'update'",
+    )
+    semicolon_result = execute_read_query(
+        database_path,
+        "SELECT status FROM uploaded_data WHERE status = 'a;b'",
+    )
+
+    assert update_result["status"].tolist() == ["update"]
+    assert semicolon_result["status"].tolist() == ["a;b"]
+
+
+def test_execute_read_query_allows_common_and_window_functions() -> None:
+    database_path = isolated_database_path("query_common_functions")
+    SQLiteStore(database_path).save_dataframe(
+        pd.DataFrame({"merchant": ["A", "B"], "amount": [10, 20]})
+    )
+
+    result = execute_read_query(
+        database_path,
+        "SELECT replace(merchant, 'A', 'Alpha') AS merchant, "
+        "row_number() OVER (ORDER BY amount) AS row_num FROM uploaded_data",
+    )
+
+    assert result["merchant"].tolist() == ["Alpha", "B"]
+    assert result["row_num"].tolist() == [1, 2]
+
+
 def test_execute_read_query_rejects_write_statement() -> None:
     database_path = isolated_database_path("query_rejects_write_statement")
     SQLiteStore(database_path).save_dataframe(pd.DataFrame({"amount": [10.5]}))

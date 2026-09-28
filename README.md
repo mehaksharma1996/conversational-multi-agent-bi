@@ -62,6 +62,16 @@ API key.
 
 The first PDF upload may download the configured SentenceTransformer model.
 
+To try the dashboard immediately, upload `sample_data/transactions.csv` and
+`sample_data/review_policy.pdf`.
+
+Resource and retention limits can be configured with `MAX_TABULAR_UPLOAD_BYTES`,
+`MAX_TABULAR_ROWS`, `MAX_PDF_UPLOAD_BYTES`, `MAX_TOTAL_PDF_BYTES`,
+`MAX_PDF_PAGES`, `MAX_DOCUMENT_CHUNKS`, `RETRIEVAL_TOP_K`,
+`RETRIEVAL_MAX_DISTANCE`, and `SESSION_RETENTION_HOURS`. `SQLITE_DB_PATH` and
+`CHROMA_PERSIST_DIR` define the non-session defaults; browser sessions are
+intentionally stored below `APP_DATA_DIR/sessions/<session-id>` for isolation.
+
 ## Quality Checks
 
 ```powershell
