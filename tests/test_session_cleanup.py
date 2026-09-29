@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from src.storage import session_cleanup
 from src.storage.session_cleanup import (
@@ -13,6 +14,16 @@ from src.storage.session_cleanup import (
     maybe_run_periodic_cleanup,
 )
 from tests.test_utils import isolated_directory_path
+
+
+def _resolved(paths: list[Path]) -> list[Path]:
+    """Compare directories by canonical location.
+
+    Cleanup resolves tenant directories before deleting, so it reports canonical
+    paths. A temp directory reached through a junction, symlink, or Windows 8.3
+    short name is equal by location but not by string.
+    """
+    return [path.resolve() for path in paths]
 
 
 def test_cleanup_stale_sessions_removes_only_expired_session_directories() -> None:
@@ -36,7 +47,7 @@ def test_cleanup_stale_sessions_removes_only_expired_session_directories() -> No
         now=old_time + 7_200,
     )
 
-    assert removed == [expired]
+    assert _resolved(removed) == _resolved([expired])
     assert not expired.exists()
     assert current.exists()
     assert unrelated.exists()
@@ -80,7 +91,7 @@ def test_cleanup_stale_sessions_never_crosses_tenant_boundaries() -> None:
         now=old_time + 7_200,
     )
 
-    assert removed == [tenant_a_session]
+    assert _resolved(removed) == _resolved([tenant_a_session])
     assert not tenant_a_session.exists()
     assert tenant_b_session.exists()
 
@@ -120,7 +131,7 @@ def test_cleanup_stale_sessions_removes_when_heartbeat_is_also_stale() -> None:
 
     removed = cleanup_stale_sessions(tmp_path, max_age_hours=1, now=old_time + 7_200)
 
-    assert removed == [idle]
+    assert _resolved(removed) == _resolved([idle])
     assert not idle.exists()
 
 
@@ -146,7 +157,7 @@ def test_cleanup_stale_sessions_retries_transient_rmtree_failures(monkeypatch) -
 
     removed = cleanup_stale_sessions(tmp_path, max_age_hours=1, now=old_time + 7_200)
 
-    assert removed == [expired]
+    assert _resolved(removed) == _resolved([expired])
     assert not expired.exists()
     assert call_count["n"] == 2
 
@@ -206,7 +217,7 @@ def test_maybe_run_periodic_cleanup_throttles_repeat_calls() -> None:
     now = old_time + 7_200
 
     first = maybe_run_periodic_cleanup(tmp_path, max_age_hours=1, interval_seconds=600, now=now)
-    assert first == [expired]
+    assert _resolved(first) == _resolved([expired])
     assert not expired.exists()
 
     expired.mkdir(parents=True)
@@ -220,7 +231,7 @@ def test_maybe_run_periodic_cleanup_throttles_repeat_calls() -> None:
     third = maybe_run_periodic_cleanup(
         tmp_path, max_age_hours=1, interval_seconds=600, now=now + 700
     )
-    assert third == [expired]
+    assert _resolved(third) == _resolved([expired])
     assert not expired.exists()
 
 
