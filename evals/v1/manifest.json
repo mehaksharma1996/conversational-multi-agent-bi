@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "dataset_version": "v1",
+  "dataset_revision": "2026-09-29.1",
+  "description": "Synthetic, offline fixtures for route selection, guarded text-to-SQL, document RAG, hybrid provenance, memory, unsupported requests, and PII redaction. All values are invented; none derive from real user data.",
+  "retrieval": {
+    "chunk_size": 300,
+    "overlap": 40,
+    "top_k": 4,
+    "max_distance": 0.9,
+    "embedder": "hashing-bow-1024-v1"
+  }
+}

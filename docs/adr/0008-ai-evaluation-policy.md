@@ -33,6 +33,13 @@ token usage, and outcome.
   strict enough to block merges.
 - Sensitive production content cannot be copied into evaluation fixtures.
 
+## Implementation status (Phase 6)
+
+Implemented: versioned fixtures in `evals/v1/`, a deterministic offline harness (`packages/evaluation/`), critical hard-fail checks,
+per-capability thresholds with required waivers, a committed baseline with drift detection, JSON reports, and an opt-in live run
+(`RUN_LIVE_EVALS=1`). Not implemented: real-model calibration sets and anomaly-quality evaluation.
+See [the evaluation guide](../governance/evaluation.md).
+
 ## Invariants
 
 - Safety enforcement tests never depend on a live model.

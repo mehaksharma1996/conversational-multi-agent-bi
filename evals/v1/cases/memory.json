@@ -1,0 +1,55 @@
+[
+  {
+    "id": "memory-last-sql-is-answered-deterministically",
+    "capability": "memory",
+    "question": "Show the SQL used for the previous question.",
+    "rationale": "A supported question about earlier generated SQL is answered from session memory with no model generation call.",
+    "context": {
+      "dataset": "transactions",
+      "memory": {
+        "last_sql": "SELECT COUNT(*) FROM \"uploaded_data\"",
+        "last_sql_question": "How many rows are there?"
+      }
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "memory",
+      "llm_generation_calls": {"exact": 0},
+      "answer_contains": ["SELECT COUNT(*)"]
+    }
+  },
+  {
+    "id": "memory-limitations-are-answered-deterministically",
+    "capability": "memory",
+    "question": "What limitations or unavailable analysis apply here?",
+    "rationale": "Stored limitations are returned verbatim from memory rather than generated.",
+    "context": {
+      "dataset": "transactions",
+      "memory": {
+        "missing_fields": ["location"],
+        "limitations": ["No location column was mapped."]
+      }
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "memory",
+      "llm_generation_calls": {"exact": 0},
+      "answer_contains": ["location"]
+    }
+  },
+  {
+    "id": "memory-unanswerable-question-falls-through-to-sql",
+    "capability": "memory",
+    "question": "Which transactions were generated in January?",
+    "rationale": "A question that only resembles a memory question, but memory cannot answer, must reach guarded SQL instead of returning a vague memory reply.",
+    "context": {"dataset": "transactions", "memory": {}},
+    "script": {
+      "sql": ["SELECT \"transaction_id\", \"transaction_date\" FROM \"uploaded_data\" WHERE \"transaction_date\" LIKE '2026-01%'"]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "sql",
+      "sql": {"required_fragments": ["like '2026-01%'"], "row_count": 8}
+    }
+  }
+]

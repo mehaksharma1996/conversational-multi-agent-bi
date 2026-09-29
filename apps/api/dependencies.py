@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from apps.api.observability import ApiObservability
 from apps.api.repository import LocalResourceRepository
 from config.settings import Settings
 from packages.analytics import TabularApplicationService
@@ -27,6 +28,10 @@ def get_identity() -> IdentityContext:
 
 def get_repository(request: Request) -> LocalResourceRepository:
     return request.app.state.repository
+
+
+def get_observability(request: Request) -> ApiObservability:
+    return request.app.state.observability
 
 
 def get_tabular_service(request: Request) -> TabularApplicationService:

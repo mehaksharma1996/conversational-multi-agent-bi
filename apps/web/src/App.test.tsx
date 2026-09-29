@@ -108,6 +108,8 @@ describe("tabular analysis journey", () => {
 
     expect(await screen.findByText(messageFixture.answer)).toBeVisible();
     expect(screen.getByText("hybrid route")).toBeVisible();
+    expect(screen.getByText("Request ID: req-fixture-0001")).toBeVisible();
+    expect(screen.getByText(/Decision support only/)).toBeVisible();
     await user.click(screen.getByText("Retrieved document sources"));
     expect(screen.getByText("policy.pdf, page 2")).toBeVisible();
     expect(createConversation).toHaveBeenCalledWith("workspace-1", null, "documents-1");

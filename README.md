@@ -77,6 +77,19 @@ downloads Markdown/PDF reports and spreadsheet-safe CSV/Excel results, and
 resets the full local workspace. Tenant checks and sliding retention apply to
 the new API resources; Streamlit remains available as a compatibility surface.
 
+Phase 6 adds [evaluation, governance, and observability](docs/architecture/evaluation-governance-observability.md):
+a deterministic offline evaluation suite with hard-fail safety gates and a
+committed baseline (`evals/v1/`, `python -m scripts.run_evaluations`),
+allowlist-only structured telemetry with request-ID correlation
+(`packages/observability/`), append-only, hash-chained, per-tenant audit events
+for consequential API operations (`packages/governance/`), and user-visible
+route, grounding, and provenance status in the web client. See the
+[responsible-AI notes](docs/governance/responsible-ai.md),
+[evaluation guide](docs/governance/evaluation.md),
+[audit and observability behavior](docs/governance/audit-and-observability.md),
+and [incident runbook](docs/operations/incident-debugging.md). There is still no
+production telemetry exporter, and API resource metadata remains process-local.
+
 ## Local Setup
 
 Python 3.12 through 3.14 is supported. The current verified environment uses
@@ -154,6 +167,16 @@ npm run test
 npm run build
 npm run test:e2e
 ```
+
+The offline evaluation suite runs under `pytest` and can also be run directly
+(no API key or network needed). It writes a machine-readable JSON report and
+exits non-zero if a safety check fails, a case regresses, or the baseline is out of date:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -m scripts.run_evaluations --output evals/results/latest.json
+```
+
+See [the evaluation guide](docs/governance/evaluation.md) for adding cases and updating the baseline.
 
 CI runs the same Python and frontend checks on pushes and pull requests. The
 frontend job also verifies that its generated client matches the committed
@@ -260,15 +283,20 @@ By default, server logs record only the route, elapsed time, and
 question/SQL length for each answered question — never the raw question or
 generated SQL text. Set `DEBUG_LOG_RAW_CONTENT=true` to additionally log raw
 content at `DEBUG` level for local troubleshooting; leave it unset in any
-shared or hosted deployment.
+shared or hosted deployment. It affects only the orchestrator's debug log; the
+API's structured telemetry and audit events never contain raw content
+regardless of this setting. Its risks are described in
+[audit and observability behavior](docs/governance/audit-and-observability.md#debug_log_raw_content).
 
 The same privacy-safe structured logging covers retrieval rejection counts,
 LLM failures and query timeouts (each with a correlation ID, see "Data and
 Security Boundaries" below), storage usage in bytes, and cleanup deletion
 failures — all as counts and identifiers, never question or document
-content. There is no metrics exporter (e.g. Prometheus); these are plain log
-lines intended for a log-based metrics pipeline (CloudWatch Logs Insights,
-Datadog, Grafana Loki, etc.) if one is available in your deployment.
+content. The FastAPI service additionally writes one JSON telemetry line per
+request and workflow step (correlated by `X-Request-ID`) and an append-only
+audit file per tenant under `APP_DATA_DIR/audit/`. There is no metrics exporter
+(e.g. Prometheus) or tracing backend; these are plain log lines and files
+intended for a log-based pipeline if one is available in your deployment.
 
 ## Data and Security Boundaries
 
@@ -355,6 +383,12 @@ those controls before hosting it for untrusted users.
 - `packages/analytics/`: framework-neutral tabular workflow commands and service.
 - `packages/connectors/`: provider, identity, audit, and persistence ports.
 - `packages/retrieval/`: framework-neutral PDF indexing application service.
+- `packages/observability/`: request-ID context, allowlist telemetry, error categories.
+- `packages/governance/`: audit vocabulary, sanitization, and append-only audit sinks.
+- `packages/evaluation/`: deterministic evaluation harness, gates, and baseline tooling.
+- `evals/`: versioned synthetic evaluation fixtures, thresholds, and baseline.
+- `docs/governance/`: responsible-AI, evaluation, and audit/observability documentation.
+- `docs/operations/`: incident and debugging runbook.
 - `openapi/`: generated, reproducibility-checked API contract.
 - `tests/`: unit and Streamlit integration tests.
 
@@ -368,3 +402,9 @@ those controls before hosting it for untrusted users.
 - PDF reports use a bundled Unicode font covering Latin Extended, Greek, and
   Cyrillic scripts, but not CJK, Arabic, or other non-alphabetic scripts.
 - Gemini availability, quotas, and responses are external dependencies.
+- The evaluation suite checks safeguards against scripted model behavior; it does
+  not measure real-model accuracy or PII-redaction recall on real data.
+- API resource metadata is process-local: restarting the API loses workspaces and
+  leaves their directories orphaned under `APP_DATA_DIR/api/`.
+- Audit files are tamper-evident on one node but are not immutable, rotated, or
+  access-controlled beyond filesystem permissions.

@@ -1115,8 +1115,15 @@
             "title": "Id",
             "type": "string"
           },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceResponse"
+          },
           "question": {
             "title": "Question",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
             "type": "string"
           },
           "role": {
@@ -1179,9 +1186,69 @@
           "sql",
           "rows",
           "sources",
+          "provenance",
+          "request_id",
           "created_at"
         ],
         "title": "MessageResponse",
+        "type": "object"
+      },
+      "ProvenanceResponse": {
+        "additionalProperties": false,
+        "description": "Content-free description of how an answer was checked.\n\nThese are structural checks (citation numbers, verbatim quotes, literal\ncriteria overlap), not proof that the answer is correct.",
+        "properties": {
+          "citation_count": {
+            "title": "Citation Count",
+            "type": "integer"
+          },
+          "criteria_provenance": {
+            "enum": [
+              "not_applicable",
+              "traced",
+              "unreferenced",
+              "no_structured_criteria",
+              "excerpt_fallback"
+            ],
+            "title": "Criteria Provenance",
+            "type": "string"
+          },
+          "grounding_status": {
+            "enum": [
+              "not_applicable",
+              "checked_no_issues",
+              "uncited",
+              "warnings"
+            ],
+            "title": "Grounding Status",
+            "type": "string"
+          },
+          "hybrid_fell_back_to_documents": {
+            "title": "Hybrid Fell Back To Documents",
+            "type": "boolean"
+          },
+          "invalid_citation_count": {
+            "title": "Invalid Citation Count",
+            "type": "integer"
+          },
+          "source_count": {
+            "title": "Source Count",
+            "type": "integer"
+          },
+          "unverified_quote_count": {
+            "title": "Unverified Quote Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "grounding_status",
+          "source_count",
+          "citation_count",
+          "invalid_citation_count",
+          "unverified_quote_count",
+          "criteria_provenance",
+          "hybrid_fell_back_to_documents"
+        ],
+        "title": "ProvenanceResponse",
         "type": "object"
       },
       "ReportCreateRequest": {
@@ -1533,7 +1600,7 @@
   "info": {
     "summary": "Versioned local API for conversational business intelligence workflows.",
     "title": "Conversational BI API",
-    "version": "0.5.0"
+    "version": "0.6.0"
   },
   "openapi": "3.1.0",
   "paths": {

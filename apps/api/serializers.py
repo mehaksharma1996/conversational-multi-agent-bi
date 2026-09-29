@@ -22,6 +22,7 @@ from apps.api.models import (
     FieldMappingResponse,
     MessageListResponse,
     MessageResponse,
+    ProvenanceResponse,
     ReportResponse,
     ReportSectionResponse,
     SchemaMappingResponse,
@@ -198,6 +199,16 @@ def message_response(record: MessageRecord) -> MessageResponse:
         sql=record.sql,
         rows=_records(record.dataframe) if record.dataframe is not None else None,
         sources=[SourceResponse(citation=source) for source in record.sources],
+        provenance=ProvenanceResponse(
+            grounding_status=record.diagnostics.grounding_status,
+            source_count=record.diagnostics.source_count,
+            citation_count=record.diagnostics.citation_count,
+            invalid_citation_count=record.diagnostics.invalid_citation_count,
+            unverified_quote_count=record.diagnostics.unverified_quote_count,
+            criteria_provenance=record.diagnostics.criteria_provenance,
+            hybrid_fell_back_to_documents=record.diagnostics.hybrid_fell_back_to_documents,
+        ),
+        request_id=record.request_id,
         created_at=record.created_at,
     )
 

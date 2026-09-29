@@ -11,7 +11,12 @@ export function StatusBanner({ kind, children, requestId }: StatusBannerProps) {
   return (
     <div className={`status-banner status-banner--${kind}`} role={role}>
       <div>{children}</div>
-      {requestId ? <small>Request ID: {requestId}</small> : null}
+      {requestId ? (
+        <small>
+          Request ID: {requestId}
+          {kind === "error" ? " (quote this when asking for help)" : ""}
+        </small>
+      ) : null}
     </div>
   );
 }

@@ -788,8 +788,11 @@ export interface components {
             created_at: string;
             /** Id */
             id: string;
+            provenance: components["schemas"]["ProvenanceResponse"];
             /** Question */
             question: string;
+            /** Request Id */
+            request_id: string;
             /**
              * Role
              * @constant
@@ -808,6 +811,35 @@ export interface components {
             sources: components["schemas"]["SourceResponse"][];
             /** Sql */
             sql: string | null;
+        };
+        /**
+         * ProvenanceResponse
+         * @description Content-free description of how an answer was checked.
+         *
+         *     These are structural checks (citation numbers, verbatim quotes, literal
+         *     criteria overlap), not proof that the answer is correct.
+         */
+        ProvenanceResponse: {
+            /** Citation Count */
+            citation_count: number;
+            /**
+             * Criteria Provenance
+             * @enum {string}
+             */
+            criteria_provenance: "not_applicable" | "traced" | "unreferenced" | "no_structured_criteria" | "excerpt_fallback";
+            /**
+             * Grounding Status
+             * @enum {string}
+             */
+            grounding_status: "not_applicable" | "checked_no_issues" | "uncited" | "warnings";
+            /** Hybrid Fell Back To Documents */
+            hybrid_fell_back_to_documents: boolean;
+            /** Invalid Citation Count */
+            invalid_citation_count: number;
+            /** Source Count */
+            source_count: number;
+            /** Unverified Quote Count */
+            unverified_quote_count: number;
         };
         /** ReportCreateRequest */
         ReportCreateRequest: {

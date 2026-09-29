@@ -43,6 +43,16 @@ export const messageFixture = {
   sql: null,
   rows: null,
   sources: [{ citation: "policy.pdf, page 2" }],
+  provenance: {
+    grounding_status: "checked_no_issues",
+    source_count: 1,
+    citation_count: 1,
+    invalid_citation_count: 0,
+    unverified_quote_count: 0,
+    criteria_provenance: "not_applicable",
+    hybrid_fell_back_to_documents: false,
+  },
+  request_id: "req-e2e-0001",
   created_at: createdAt,
 };
 

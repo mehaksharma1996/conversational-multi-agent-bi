@@ -239,6 +239,28 @@ class SourceResponse(StrictModel):
     citation: str
 
 
+class ProvenanceResponse(StrictModel):
+    """Content-free description of how an answer was checked.
+
+    These are structural checks (citation numbers, verbatim quotes, literal
+    criteria overlap), not proof that the answer is correct.
+    """
+
+    grounding_status: Literal["not_applicable", "checked_no_issues", "uncited", "warnings"]
+    source_count: int
+    citation_count: int
+    invalid_citation_count: int
+    unverified_quote_count: int
+    criteria_provenance: Literal[
+        "not_applicable",
+        "traced",
+        "unreferenced",
+        "no_structured_criteria",
+        "excerpt_fallback",
+    ]
+    hybrid_fell_back_to_documents: bool
+
+
 class MessageResponse(StrictModel):
     id: str
     conversation_id: str
@@ -249,6 +271,8 @@ class MessageResponse(StrictModel):
     sql: str | None
     rows: list[dict[str, Any]] | None
     sources: list[SourceResponse]
+    provenance: ProvenanceResponse
+    request_id: str
     created_at: datetime
 
 

@@ -1,0 +1,15 @@
+{
+  "critical_failures_allowed": 0,
+  "capability_min_pass_rate": {
+    "routing": 1.0,
+    "text_to_sql": 1.0,
+    "document_rag": 1.0,
+    "hybrid": 1.0,
+    "memory": 1.0,
+    "unsupported": 1.0,
+    "privacy_redaction": 1.0,
+    "prompt_injection": 1.0,
+    "tenant_isolation": 1.0
+  },
+  "waivers": {}
+}

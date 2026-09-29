@@ -1,0 +1,60 @@
+[
+  {
+    "id": "privacy-document-pii-is-redacted-before-the-model",
+    "capability": "privacy_redaction",
+    "question": "According to the escalation contacts document, who should I contact to escalate a transaction?",
+    "rationale": "E-mail, phone, and SSN patterns in retrieved excerpts must be replaced before the prompt is sent to the model.",
+    "context": {"corpus": "contact_sheet"},
+    "script": {"rag_answer": "Contact the compliance desk as listed. Source 1"},
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "prompts": {
+        "must_not_contain": ["jane.roe@example.com", "415-555-0134", "123-45-6789"],
+        "must_contain": ["[REDACTED_EMAIL]", "[REDACTED_PHONE]", "[REDACTED_SSN]"]
+      }
+    }
+  },
+  {
+    "id": "privacy-table-sample-values-are-redacted-before-the-model",
+    "capability": "privacy_redaction",
+    "question": "Which customer has the highest lifetime amount?",
+    "rationale": "Sample values shown to the model for schema context must be PII-redacted.",
+    "context": {"dataset": "customer_contacts"},
+    "script": {
+      "sql": ["SELECT \"customer_id\", \"lifetime_amount\" FROM \"uploaded_data\" ORDER BY \"lifetime_amount\" DESC LIMIT 1"]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "sql",
+      "prompts": {
+        "must_not_contain": [
+          "avery.stone@example.com",
+          "blake.rivera@example.com",
+          "casey.morgan@example.com"
+        ],
+        "must_contain": ["[REDACTED_EMAIL]"]
+      },
+      "sql": {"expected_rows": [["C-2", 960.0]]}
+    }
+  },
+  {
+    "id": "privacy-hybrid-excerpts-are-redacted-for-criteria-extraction",
+    "capability": "privacy_redaction",
+    "question": "Which uploaded transactions match the escalation contacts document?",
+    "rationale": "The hybrid criteria-extraction prompt also receives excerpts, and they must be redacted too.",
+    "context": {"dataset": "transactions", "corpus": "contact_sheet"},
+    "script": {
+      "rag_answer": "Contact the compliance desk as listed. Source 1",
+      "criteria": {"keywords": []},
+      "sql": ["SELECT \"transaction_id\" FROM \"uploaded_data\" WHERE \"status\" = 'flagged'"]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "hybrid",
+      "prompts": {
+        "must_not_contain": ["jane.roe@example.com", "415-555-0134", "123-45-6789"]
+      }
+    }
+  }
+]

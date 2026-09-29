@@ -111,6 +111,13 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--cyan); }
 .message-meta { display: flex; align-items: center; gap: .6rem; }
 .route-badge { padding: .25rem .5rem; border: 1px solid rgba(167, 139, 250, .55); border-radius: 999px; color: #d8ccff; background: rgba(167, 139, 250, .1); font-size: .67rem; }
 .answer-text { white-space: pre-wrap; }
+.provenance { display: grid; gap: .45rem; margin: .8rem 0; padding: .75rem .9rem; border: 1px solid #2b3d55; border-radius: .6rem; background: rgba(5, 11, 20, .5); font-size: .88rem; line-height: 1.5; }
+.provenance p { margin: 0; }
+.provenance-route { color: var(--muted); }
+.provenance-note--info { color: #c8e8f5; }
+.provenance-note--warning { padding: .5rem .65rem; border-left: 3px solid #ffb454; color: #ffe2b8; background: rgba(255, 180, 84, .1); }
+.provenance-review { color: #d8ccff; font-weight: 600; }
+.provenance-id { color: var(--muted); }
 .sql-block { max-width: 100%; margin: 1rem 0; padding: 1rem; overflow-x: auto; border: 1px solid #2b3d55; border-radius: .6rem; color: #bceef3; background: #050b14; }
 .source-list { color: var(--muted); line-height: 1.65; }
 .empty-state { padding: 1.4rem; border: 1px dashed #394b64; border-radius: .75rem; color: var(--muted); text-align: center; }

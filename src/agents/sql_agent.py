@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from time import monotonic
 
 import pandas as pd
 
@@ -28,6 +29,8 @@ class SQLAgentResult:
     sql: str
     result: pd.DataFrame
     llm_text: str
+    execution_seconds: float = 0.0
+    correction_attempted: bool = False
 
 
 def answer_with_sql(
@@ -48,6 +51,9 @@ def answer_with_sql(
     llm_response = llm_client.generate(prompt)
     sql = extract_sql(llm_response.text)
     safe_sql = validate_read_query(sql)
+    execution_seconds = 0.0
+    correction_attempted = False
+    started_at = monotonic()
     try:
         result = execute_read_query(
             stored_table.database_path,
@@ -59,6 +65,8 @@ def answer_with_sql(
     except (UnsafeQueryError, QueryTimeoutError):
         raise
     except Exception as exc:
+        execution_seconds += monotonic() - started_at
+        correction_attempted = True
         retry_prompt = build_sql_retry_prompt(
             original_prompt=prompt,
             failed_sql=safe_sql,
@@ -66,6 +74,7 @@ def answer_with_sql(
         )
         retry_response = llm_client.generate(retry_prompt)
         retry_sql = validate_read_query(extract_sql(retry_response.text))
+        started_at = monotonic()
         try:
             result = execute_read_query(
                 stored_table.database_path,
@@ -83,11 +92,14 @@ def answer_with_sql(
         safe_sql = retry_sql
         llm_response = retry_response
 
+    execution_seconds += monotonic() - started_at
     return SQLAgentResult(
         question=question,
         sql=safe_sql,
         result=result,
         llm_text=llm_response.text,
+        execution_seconds=execution_seconds,
+        correction_attempted=correction_attempted,
     )
 
 

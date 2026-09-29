@@ -20,7 +20,7 @@ def test_openapi_contract_is_versioned_and_never_accepts_tenant_authority() -> N
     contract = create_app().openapi()
     paths = contract["paths"]
 
-    assert contract["info"]["version"] == "0.5.0"
+    assert contract["info"]["version"] == "0.6.0"
     assert paths
     assert all(path.startswith("/api/v1/") for path in paths if path.startswith("/api/"))
     assert "tenant_id" not in json.dumps(contract)

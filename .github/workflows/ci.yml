@@ -64,6 +64,17 @@ jobs:
         run: python -m mypy apps config packages scripts src tests
       - name: Tests and coverage
         run: python -m pytest --cov --cov-report=term-missing
+      - name: Offline AI evaluation gate
+        # Deterministic and credential-free: scripted model, hashing embedder,
+        # real guards. Fails on critical safety checks, regressions, or drift.
+        run: python -m scripts.run_evaluations --output evals/results/latest.json
+      - name: Upload evaluation report
+        if: always() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report
+          path: evals/results/latest.json
+          if-no-files-found: ignore
 
   security:
     runs-on: ubuntu-latest

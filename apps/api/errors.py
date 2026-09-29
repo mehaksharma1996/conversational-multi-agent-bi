@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apps.api.models import ErrorBody, ErrorDetail, ErrorResponse
+from packages.observability import bind_request_id, error_category
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def error_response(
     details: list[ErrorDetail] | None = None,
 ) -> JSONResponse:
     request_id = request_id_for(request)
+    request.state.error_code = code
     payload = ErrorResponse(
         error=ErrorBody(
             code=code,
@@ -115,6 +117,14 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
         request_id = request_id_for(request)
         LOGGER.exception("api_request_failed request_id=%s", request_id, exc_info=exc)
+        observability = getattr(request.app.state, "observability", None)
+        if observability is not None:
+            with bind_request_id(request_id):
+                observability.telemetry.emit(
+                    "api.unhandled_error",
+                    outcome="failure",
+                    error_category=error_category(exc),
+                )
         return error_response(
             request,
             status_code=500,

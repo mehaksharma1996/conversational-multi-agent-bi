@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,9 +21,13 @@ from src.charts.chart_builder import ChartSpec
 from src.documents.retriever import DocumentRetriever
 from src.ingestion.tabular_loader import LoadedTable
 from src.memory.session_memory import SessionMemory
+from src.orchestration.graph_state import AnswerDiagnostics
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 from src.storage.sqlite_store import StoredTable
+
+WorkspaceLifecycleListener = Callable[[str, "WorkspaceRecord", str], None]
+"""Called as ``listener(event, workspace, reason)`` for created/expired/deleted."""
 
 
 def _resource_id(prefix: str) -> str:
@@ -124,6 +129,8 @@ class MessageRecord:
     dataframe: pd.DataFrame | None
     sources: tuple[str, ...]
     created_at: datetime
+    request_id: str = "unknown"
+    diagnostics: AnswerDiagnostics = AnswerDiagnostics()
 
 
 @dataclass(frozen=True)
@@ -167,6 +174,7 @@ class LocalResourceRepository:
         if retention_hours < 1:
             raise ValueError("retention_hours must be at least 1.")
         self._lock = RLock()
+        self.lifecycle_listener: WorkspaceLifecycleListener | None = None
         self.storage_root = (storage_root or Path("data/api")).resolve()
         self.retention_hours = retention_hours
         self._workspaces: dict[str, WorkspaceRecord] = {}
@@ -193,14 +201,13 @@ class LocalResourceRepository:
         local_only_mode: bool = False,
     ) -> WorkspaceRecord:
         with self._lock:
+            self._purge_expired_unlocked()
             if idempotency_key is not None:
                 existing_id = self._workspace_creation_keys.get((tenant_id, idempotency_key))
                 if existing_id is not None:
                     existing = self._workspaces.get(existing_id)
                     if existing is not None and existing.expires_at > _now():
                         return self._touch_workspace_unlocked(existing)
-                    if existing is not None:
-                        self._delete_workspace_unlocked(existing)
             workspace = WorkspaceRecord(
                 id=_resource_id("ws"),
                 tenant_id=tenant_id,
@@ -215,6 +222,7 @@ class LocalResourceRepository:
             self._workspaces[workspace.id] = workspace
             if idempotency_key is not None:
                 self._workspace_creation_keys[(tenant_id, idempotency_key)] = workspace.id
+            self._notify("created", workspace, "requested")
             return workspace
 
     def get_workspace(self, workspace_id: str, tenant_id: str) -> WorkspaceRecord:
@@ -495,6 +503,8 @@ class LocalResourceRepository:
         memory: SessionMemory | None,
         max_messages: int,
         max_dataframes: int,
+        request_id: str = "unknown",
+        diagnostics: AnswerDiagnostics | None = None,
     ) -> MessageRecord:
         with self._lock:
             conversation = self._owned(
@@ -515,6 +525,8 @@ class LocalResourceRepository:
                 dataframe=dataframe.copy() if dataframe is not None else None,
                 sources=sources,
                 created_at=_now(),
+                request_id=request_id,
+                diagnostics=diagnostics or AnswerDiagnostics(),
             )
             self._messages[message.id] = message
             all_message_ids = (*conversation.message_ids, message.id)
@@ -616,7 +628,29 @@ class LocalResourceRepository:
     def delete_workspace(self, workspace_id: str, tenant_id: str) -> None:
         with self._lock:
             workspace = self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
-            self._delete_workspace_unlocked(workspace)
+            self._delete_workspace_unlocked(workspace, "user_requested")
+
+    def purge_expired(self) -> int:
+        """Delete every expired workspace now; returns how many were removed.
+
+        Expiry is otherwise lazy (checked when a resource is touched), so this
+        gives retention a deterministic trigger and each removal an audit event.
+        """
+        with self._lock:
+            return self._purge_expired_unlocked()
+
+    def _purge_expired_unlocked(self) -> int:
+        expired = [
+            workspace for workspace in self._workspaces.values() if workspace.expires_at <= _now()
+        ]
+        for workspace in expired:
+            self._delete_workspace_unlocked(workspace, "retention_expired")
+        return len(expired)
+
+    def _notify(self, event: str, workspace: WorkspaceRecord, reason: str) -> None:
+        listener = self.lifecycle_listener
+        if listener is not None:
+            listener(event, workspace, reason)
 
     def _touch_workspace_unlocked(self, workspace: WorkspaceRecord) -> WorkspaceRecord:
         updated = replace(
@@ -626,7 +660,11 @@ class LocalResourceRepository:
         self._workspaces[workspace.id] = updated
         return updated
 
-    def _delete_workspace_unlocked(self, workspace: WorkspaceRecord) -> None:
+    def _delete_workspace_unlocked(
+        self,
+        workspace: WorkspaceRecord,
+        reason: str = "retention_expired",
+    ) -> None:
         collection_ids = [
             key
             for key, record in self._document_collections.items()
@@ -659,6 +697,7 @@ class LocalResourceRepository:
         target = (self.storage_root / workspace.tenant_id / workspace.id).resolve()
         if target.is_relative_to(self.storage_root) and target.exists():
             shutil.rmtree(target)
+        self._notify("expired" if reason == "retention_expired" else "deleted", workspace, reason)
 
     def _owned[RecordT](
         self,
@@ -682,7 +721,7 @@ class LocalResourceRepository:
                 raise ResourceNotFoundError(resource_name)
             workspace = resource_workspace
         if workspace.expires_at <= _now():
-            self._delete_workspace_unlocked(workspace)
+            self._delete_workspace_unlocked(workspace, "retention_expired")
             raise ResourceNotFoundError(resource_name)
         touched = self._touch_workspace_unlocked(workspace)
         if isinstance(record, WorkspaceRecord):

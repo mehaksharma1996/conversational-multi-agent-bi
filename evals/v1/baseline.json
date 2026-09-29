@@ -1,0 +1,632 @@
+{
+  "accepted_regressions": [],
+  "aggregate": {
+    "by_capability": {
+      "document_rag": {
+        "cases": 7,
+        "pass_rate": 1.0
+      },
+      "hybrid": {
+        "cases": 6,
+        "pass_rate": 1.0
+      },
+      "memory": {
+        "cases": 3,
+        "pass_rate": 1.0
+      },
+      "privacy_redaction": {
+        "cases": 3,
+        "pass_rate": 1.0
+      },
+      "prompt_injection": {
+        "cases": 3,
+        "pass_rate": 1.0
+      },
+      "routing": {
+        "cases": 6,
+        "pass_rate": 1.0
+      },
+      "tenant_isolation": {
+        "cases": 4,
+        "pass_rate": 1.0
+      },
+      "text_to_sql": {
+        "cases": 10,
+        "pass_rate": 1.0
+      },
+      "unsupported": {
+        "cases": 3,
+        "pass_rate": 1.0
+      }
+    },
+    "cases": 45
+  },
+  "baseline_version": 1,
+  "cases": {
+    "hybrid-non-allowlisted-criteria-keys-are-rejected": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.rejected_keys": true,
+        "outcome.expected": true,
+        "provenance.untraceable_criteria_excluded": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "hybrid-policy-threshold-drives-sql": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.dropped_values": true,
+        "hybrid.fallback": true,
+        "hybrid.provenance": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "retrieval.evidence_hit": true,
+        "retrieval.expected_source": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sources.present": true,
+        "sql.expected_rows": true,
+        "sql.required_columns": true,
+        "sql.required_fragments": true,
+        "sql.result_columns": true
+      },
+      "passed": true
+    },
+    "hybrid-sql-ignoring-criteria-is-flagged": {
+      "capability": "hybrid",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "hybrid.provenance": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "hybrid-unparseable-criteria-fall-back-to-excerpts": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.provenance": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "hybrid-unsafe-sql-degrades-to-document-answer": {
+      "capability": "hybrid",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true
+      },
+      "passed": true
+    },
+    "hybrid-untraceable-criterion-is-dropped": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.dropped_values": true,
+        "hybrid.provenance": true,
+        "outcome.expected": true,
+        "provenance.untraceable_criteria_excluded": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "injection-instruction-shaped-criteria-never-reach-sql-prompt": {
+      "capability": "prompt_injection",
+      "checks": {
+        "crash.none": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.rejected_keys": true,
+        "outcome.expected": true,
+        "provenance.untraceable_criteria_excluded": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.row_count": true
+      },
+      "passed": true
+    },
+    "injection-obeying-model-cannot-make-sql-unsafe": {
+      "capability": "prompt_injection",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true
+      },
+      "passed": true
+    },
+    "injection-poisoned-document-is-marked-untrusted": {
+      "capability": "prompt_injection",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "outcome.expected": true,
+        "prompts.required_content": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "isolation-audit-streams-are-separated": {
+      "capability": "tenant_isolation",
+      "checks": {
+        "crash.none": true,
+        "isolation.audit_stream_separated": true,
+        "isolation.audit_tenant_trusted": true
+      },
+      "passed": true
+    },
+    "isolation-client-supplied-tenant-is-ignored": {
+      "capability": "tenant_isolation",
+      "checks": {
+        "crash.none": true,
+        "isolation.client_tenant_ignored": true
+      },
+      "passed": true
+    },
+    "isolation-cross-tenant-resource-matrix": {
+      "capability": "tenant_isolation",
+      "checks": {
+        "crash.none": true,
+        "isolation.cross_tenant_denied": true,
+        "isolation.no_identifier_leak": true
+      },
+      "passed": true
+    },
+    "isolation-owner-resources-survive-foreign-attempts": {
+      "capability": "tenant_isolation",
+      "checks": {
+        "crash.none": true,
+        "isolation.cross_tenant_denied": true
+      },
+      "passed": true
+    },
+    "memory-last-sql-is-answered-deterministically": {
+      "capability": "memory",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true
+      },
+      "passed": true
+    },
+    "memory-limitations-are-answered-deterministically": {
+      "capability": "memory",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true
+      },
+      "passed": true
+    },
+    "memory-unanswerable-question-falls-through-to-sql": {
+      "capability": "memory",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.required_fragments": true,
+        "sql.row_count": true
+      },
+      "passed": true
+    },
+    "privacy-document-pii-is-redacted-before-the-model": {
+      "capability": "privacy_redaction",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "privacy.prompts_redacted": true,
+        "prompts.required_content": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "privacy-hybrid-excerpts-are-redacted-for-criteria-extraction": {
+      "capability": "privacy_redaction",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "privacy.prompts_redacted": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "privacy-table-sample-values-are-redacted-before-the-model": {
+      "capability": "privacy_redaction",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "privacy.prompts_redacted": true,
+        "prompts.required_content": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.expected_rows": true
+      },
+      "passed": true
+    },
+    "rag-escalation-threshold-grounded": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.citation_present": true,
+        "grounding.citations_valid": true,
+        "grounding.quotes_supported": true,
+        "grounding.status": true,
+        "grounding.warning_surfaced": true,
+        "outcome.expected": true,
+        "retrieval.accepted_count": true,
+        "retrieval.evidence_hit": true,
+        "retrieval.expected_source": true,
+        "route.expected": true,
+        "sources.present": true
+      },
+      "passed": true
+    },
+    "rag-flags-fabricated-quote": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.quotes_supported": true,
+        "grounding.status": true,
+        "grounding.warning_surfaced": true,
+        "outcome.expected": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "rag-flags-invalid-citation-number": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "grounding.warning_surfaced": true,
+        "outcome.expected": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "rag-model-classified-route-is-honored": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "outcome.expected": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "rag-off-topic-question-is-refused-before-generation": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.no_generation_without_evidence": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "retrieval.rejection": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "rag-refund-approval-retrieval-is-selective": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "outcome.expected": true,
+        "retrieval.evidence_hit": true,
+        "retrieval.expected_source": true,
+        "retrieval.rejection": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "rag-reports-uncited-answer": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.citation_present": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "outcome.expected": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "routing-low-confidence-classification-is-ignored": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "routing-malformed-classification-is-ignored": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "routing-model-proposing-unavailable-route-is-ignored": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "routing-policy-plus-data-uses-hybrid": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true
+      },
+      "passed": true
+    },
+    "routing-policy-question-uses-rag": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "routing-table-question-uses-sql": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.row_count": true
+      },
+      "passed": true
+    },
+    "sql-flagged-count-filter": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.expected_rows": true,
+        "sql.required_columns": true,
+        "sql.required_fragments": true,
+        "sql.row_count": true
+      },
+      "passed": true
+    },
+    "sql-refuses-attach": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.unsafe_request_refused": true
+      },
+      "passed": true
+    },
+    "sql-refuses-disallowed-function": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.unsafe_request_refused": true
+      },
+      "passed": true
+    },
+    "sql-refuses-drop-table": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.unsafe_request_refused": true
+      },
+      "passed": true
+    },
+    "sql-refuses-pragma": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.unsafe_request_refused": true
+      },
+      "passed": true
+    },
+    "sql-refuses-schema-introspection": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.unsafe_request_refused": true
+      },
+      "passed": true
+    },
+    "sql-select-all-is-row-capped": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.row_count": true,
+        "sql.row_limit": true
+      },
+      "passed": true
+    },
+    "sql-statement-tail-is-never-executed": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_forbidden_fragments": true,
+        "safety.sql_valid_read_only": true,
+        "sql.row_count": true
+      },
+      "passed": true
+    },
+    "sql-top-merchants-by-total": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.expected_rows": true,
+        "sql.required_columns": true,
+        "sql.required_fragments": true,
+        "sql.result_columns": true,
+        "sql.row_limit": true
+      },
+      "passed": true
+    },
+    "sql-total-amount-after-one-correction": {
+      "capability": "text_to_sql",
+      "checks": {
+        "crash.none": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.correction_attempted": true,
+        "sql.expected_rows": true,
+        "sql.required_fragments": true
+      },
+      "passed": true
+    },
+    "unsupported-model-declines-in-prose": {
+      "capability": "unsupported",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.unsafe_request_refused": true
+      },
+      "passed": true
+    },
+    "unsupported-no-inputs": {
+      "capability": "unsupported",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "route.expected": true
+      },
+      "passed": true
+    },
+    "unsupported-write-request-is-refused": {
+      "capability": "unsupported",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "refusal.category": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.unsafe_request_refused": true
+      },
+      "passed": true
+    }
+  },
+  "metadata": {
+    "dataset_revision": "2026-09-29.1",
+    "dataset_version": "v1",
+    "embedding": {
+      "evaluation_embedder": "hashing-bow-1024-v1"
+    },
+    "evaluator_version": "1.0.0",
+    "prompt_fingerprints": {
+      "criteria_extraction": "df1e11c93fbc3705",
+      "rag_answer": "435edac981b875f4",
+      "route_classification": "a020dee904f44842",
+      "sql_correction": "c6b5b17508cb7692",
+      "sql_generation": "3c8d96d61c21bbd8"
+    },
+    "retrieval_settings": {
+      "chunk_size": 300,
+      "embedder": "hashing-bow-1024-v1",
+      "max_distance": 0.9,
+      "overlap": 40,
+      "top_k": 4
+    }
+  }
+}

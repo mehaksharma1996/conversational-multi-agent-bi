@@ -1,0 +1,130 @@
+[
+  {
+    "id": "rag-escalation-threshold-grounded",
+    "capability": "document_rag",
+    "question": "According to the review policy, which transactions require escalation?",
+    "rationale": "An on-topic policy question retrieves the escalation passage and the answer cites a real source with a verbatim quote.",
+    "context": {"corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars must \"require escalation to a senior analyst\" per the policy. Source 1"
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "min_sources": 1,
+      "retrieval": {
+        "expected_filename": "review_policy.pdf",
+        "evidence_terms": ["escalation", "500"],
+        "min_accepted": 1
+      },
+      "grounding": {
+        "status": "checked_no_issues",
+        "min_citations": 1,
+        "invalid_citations": 0,
+        "unverified_quotes": 0,
+        "warning_in_answer": false
+      }
+    }
+  },
+  {
+    "id": "rag-refund-approval-retrieval-is-selective",
+    "capability": "document_rag",
+    "question": "Under the policy, what approval do refunds above 200 dollars need?",
+    "rationale": "Retrieval must surface the refund passage without pulling in unrelated administrative pages.",
+    "context": {"corpus": "review_policy"},
+    "script": {"rag_answer": "Refunds above 200 dollars need manager approval. Source 1"},
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "retrieval": {
+        "expected_filename": "review_policy.pdf",
+        "evidence_terms": ["refunds", "manager approval"],
+        "max_accepted": 3
+      },
+      "grounding": {"status": "checked_no_issues", "invalid_citations": 0}
+    }
+  },
+  {
+    "id": "rag-off-topic-question-is-refused-before-generation",
+    "capability": "document_rag",
+    "question": "What is the weather forecast for tomorrow in Paris?",
+    "rationale": "With no sufficiently relevant evidence the system must refuse rather than ground an answer in the nearest irrelevant chunk, and must not call the model at all.",
+    "context": {"corpus": "review_policy"},
+    "script": {"rag_answer": "This scripted answer must never be requested."},
+    "expect": {
+      "outcome": "refused",
+      "route": "rag",
+      "refusal_category": "retrieval_or_grounding",
+      "llm_generation_calls": {"exact": 0},
+      "retrieval": {"max_accepted": 0}
+    }
+  },
+  {
+    "id": "rag-flags-invalid-citation-number",
+    "capability": "document_rag",
+    "question": "According to the policy, what happens to flagged transactions?",
+    "rationale": "A citation to a source number that was never retrieved must be detected and surfaced to the reader.",
+    "deterministic_only": true,
+    "context": {"corpus": "review_policy"},
+    "script": {"rag_answer": "Flagged transactions need a second reviewer. Source 9"},
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "grounding": {
+        "status": "warnings",
+        "invalid_citations": 1,
+        "warning_in_answer": true
+      }
+    }
+  },
+  {
+    "id": "rag-flags-fabricated-quote",
+    "capability": "document_rag",
+    "question": "According to the policy, how long are escalation records retained?",
+    "rationale": "A quotation that does not appear verbatim in the retrieved context must be detected and surfaced.",
+    "deterministic_only": true,
+    "context": {"corpus": "review_policy"},
+    "script": {
+      "rag_answer": "The policy states \"all escalation records are deleted after thirty days\" Source 1"
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "grounding": {
+        "status": "warnings",
+        "unverified_quotes": 1,
+        "warning_in_answer": true
+      }
+    }
+  },
+  {
+    "id": "rag-reports-uncited-answer",
+    "capability": "document_rag",
+    "question": "According to the policy, who must review flagged transactions?",
+    "rationale": "An answer with no citation must never be reported as grounded.",
+    "deterministic_only": true,
+    "context": {"corpus": "review_policy"},
+    "script": {"rag_answer": "A second reviewer must review flagged transactions."},
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "grounding": {"status": "uncited", "min_citations": 0, "invalid_citations": 0}
+    }
+  },
+  {
+    "id": "rag-model-classified-route-is-honored",
+    "capability": "document_rag",
+    "question": "Summarize the review policy for me.",
+    "rationale": "A model-proposed route that is available and confident is used, and the same grounding checks still apply.",
+    "context": {"corpus": "review_policy"},
+    "script": {
+      "classification": {"route": "rag", "confidence": 0.9},
+      "rag_answer": "The policy covers escalation and refunds. Source 1"
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "grounding": {"status": "checked_no_issues", "invalid_citations": 0}
+    }
+  }
+]

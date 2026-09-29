@@ -89,5 +89,7 @@ responses.
 - OIDC identity at the FastAPI boundary; it currently uses the explicit local
   development identity adapter.
 - OCR for scanned PDFs and vector-store encryption.
-- Semantic answer-quality evaluation and production telemetry, which are the
-  next roadmap phase.
+- Real-model answer-quality evaluation and a production telemetry exporter.
+  Phase 6 added the offline evaluation suite, structured telemetry, audit
+  events, and provenance display; see
+  [evaluation, governance, and observability](evaluation-governance-observability.md).

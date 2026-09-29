@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Header, UploadFile, status
 from apps.api.dependencies import (
     get_api_settings,
     get_identity,
+    get_observability,
     get_repository,
     get_tabular_service,
 )
@@ -28,6 +29,7 @@ from apps.api.models import (
     WorkbookSheetsResponse,
     WorkspaceResponse,
 )
+from apps.api.observability import ApiObservability
 from apps.api.repository import LocalResourceRepository
 from apps.api.serializers import (
     analysis_response,
@@ -56,6 +58,7 @@ IdentityDependency = Annotated[IdentityContext, Depends(get_identity)]
 RepositoryDependency = Annotated[LocalResourceRepository, Depends(get_repository)]
 ServiceDependency = Annotated[TabularApplicationService, Depends(get_tabular_service)]
 SettingsDependency = Annotated[Settings, Depends(get_api_settings)]
+ObservabilityDependency = Annotated[ApiObservability, Depends(get_observability)]
 
 
 @router.post(
@@ -110,6 +113,7 @@ async def upload_tabular_file(
     identity: IdentityDependency,
     repository: RepositoryDependency,
     settings: SettingsDependency,
+    observability: ObservabilityDependency,
     file: Annotated[UploadFile, File(description="CSV or Excel source file")],
 ) -> TabularUploadResponse:
     repository.get_workspace(workspace_id, identity.tenant_id)
@@ -141,6 +145,20 @@ async def upload_tabular_file(
         filename=filename,
         content_type=file.content_type,
         payload=payload,
+    )
+    file_format = extension.lstrip(".")
+    observability.telemetry.emit(
+        "upload.tabular",
+        tenant_id=identity.tenant_id,
+        size_bytes=len(payload),
+        format=file_format,
+    )
+    observability.audit(
+        "tabular.uploaded",
+        identity,
+        resource_id=record.id,
+        size_bytes=len(payload),
+        format=file_format,
     )
     return upload_response(record)
 
@@ -181,19 +199,22 @@ def create_dataset(
     repository: RepositoryDependency,
     service: ServiceDependency,
     settings: SettingsDependency,
+    observability: ObservabilityDependency,
 ) -> DatasetResponse:
     upload = repository.get_upload(upload_id, identity.tenant_id)
     try:
-        table = service.load(
-            LoadTabularCommand(
-                payload=upload.payload,
-                filename=upload.filename,
-                max_upload_bytes=settings.max_tabular_upload_bytes,
-                max_rows=settings.max_tabular_rows,
-                sheet_name=command.sheet_name,
+        with observability.operation("dataset.create", identity) as operation:
+            table = service.load(
+                LoadTabularCommand(
+                    payload=upload.payload,
+                    filename=upload.filename,
+                    max_upload_bytes=settings.max_tabular_upload_bytes,
+                    max_rows=settings.max_tabular_rows,
+                    sheet_name=command.sheet_name,
+                )
             )
-        )
-        profiled = service.profile(ProfileTabularCommand(dataframe=table.dataframe))
+            profiled = service.profile(ProfileTabularCommand(dataframe=table.dataframe))
+            operation.set(row_count=table.row_count, column_count=table.column_count)
     except (TabularLoadError, TabularWorkflowError, ValueError) as exc:
         raise ApiError(422, "invalid_tabular_dataset", str(exc)) from exc
 
@@ -203,6 +224,13 @@ def create_dataset(
         profile=profiled.profile,
         schema_mapping=profiled.suggested_mapping,
         recommended_anomaly_features=profiled.recommended_anomaly_features,
+    )
+    observability.audit(
+        "dataset.created",
+        identity,
+        resource_id=dataset.id,
+        row_count=table.row_count,
+        column_count=table.column_count,
     )
     return dataset_response(dataset)
 
@@ -234,6 +262,7 @@ def confirm_schema_mapping(
     repository: RepositoryDependency,
     service: ServiceDependency,
     settings: SettingsDependency,
+    observability: ObservabilityDependency,
 ) -> DatasetResponse:
     dataset = repository.get_dataset(dataset_id, identity.tenant_id)
     try:
@@ -247,20 +276,30 @@ def confirm_schema_mapping(
     except ValueError as exc:
         raise ApiError(422, "invalid_schema_mapping", str(exc)) from exc
 
-    stored_table = SQLiteStore(
-        repository.workspace_dir(dataset.workspace_id, identity.tenant_id) / "sqlite" / "app.db",
-        encryption_key=settings.sqlite_encryption_key,
-        include_sample_values=not settings.gemini_exclude_sample_values,
-    ).save_dataframe(
-        dataset.table.dataframe,
-        canonical_mapping=mapping.mapped_fields(),
-    )
+    with observability.operation("dataset.confirm_schema", identity) as operation:
+        stored_table = SQLiteStore(
+            repository.workspace_dir(dataset.workspace_id, identity.tenant_id)
+            / "sqlite"
+            / "app.db",
+            encryption_key=settings.sqlite_encryption_key,
+            include_sample_values=not settings.gemini_exclude_sample_values,
+        ).save_dataframe(
+            dataset.table.dataframe,
+            canonical_mapping=mapping.mapped_fields(),
+        )
+        operation.set(row_count=stored_table.row_count, column_count=stored_table.column_count)
     updated = repository.confirm_dataset_mapping(
         dataset_id=dataset.id,
         tenant_id=identity.tenant_id,
         schema_mapping=mapping,
         recommended_anomaly_features=recommended_features,
         stored_table=stored_table,
+    )
+    observability.audit(
+        "dataset.schema_confirmed",
+        identity,
+        resource_id=updated.id,
+        mapping_version=updated.mapping_version,
     )
     return dataset_response(updated)
 
@@ -278,6 +317,7 @@ def create_analysis(
     identity: IdentityDependency,
     repository: RepositoryDependency,
     service: ServiceDependency,
+    observability: ObservabilityDependency,
 ) -> AnalysisResponse:
     dataset = repository.get_dataset(dataset_id, identity.tenant_id)
     if not dataset.mapping_confirmed:
@@ -291,15 +331,21 @@ def create_analysis(
         else dataset.recommended_anomaly_features
     )
     try:
-        bundle = service.analyze(
-            AnalyzeTabularCommand(
-                dataframe=dataset.table.dataframe,
-                profile=dataset.profile,
-                schema_mapping=dataset.schema_mapping,
-                anomaly_features=anomaly_features,
-                anomaly_contamination=command.anomaly_contamination,
+        with observability.operation("analysis.run", identity) as operation:
+            bundle = service.analyze(
+                AnalyzeTabularCommand(
+                    dataframe=dataset.table.dataframe,
+                    profile=dataset.profile,
+                    schema_mapping=dataset.schema_mapping,
+                    anomaly_features=anomaly_features,
+                    anomaly_contamination=command.anomaly_contamination,
+                )
             )
-        )
+            operation.set(
+                row_count=dataset.table.row_count,
+                mapping_version=dataset.mapping_version,
+                anomaly_flagged_count=bundle.anomaly_report.flagged_count,
+            )
     except ValueError as exc:
         raise ApiError(422, "invalid_analysis_configuration", str(exc)) from exc
     documents = repository.latest_document_collection_for_workspace(
@@ -330,6 +376,13 @@ def create_analysis(
         anomaly_contamination=command.anomaly_contamination,
         bundle=bundle,
         memory=memory,
+    )
+    observability.audit(
+        "analysis.executed",
+        identity,
+        resource_id=analysis.id,
+        mapping_version=analysis.dataset_mapping_version,
+        anomaly_features_count=len(anomaly_features),
     )
     return analysis_response(analysis)
 

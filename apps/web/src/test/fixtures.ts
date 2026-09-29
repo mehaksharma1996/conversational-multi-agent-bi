@@ -51,6 +51,16 @@ export const messageFixture = {
   sql: "SELECT merchant, amount FROM uploaded_data ORDER BY amount DESC LIMIT 20",
   rows: [{ merchant: "North", amount: 900 }],
   sources: [{ citation: "policy.pdf, page 2" }],
+  provenance: {
+    grounding_status: "checked_no_issues",
+    source_count: 1,
+    citation_count: 1,
+    invalid_citation_count: 0,
+    unverified_quote_count: 0,
+    criteria_provenance: "traced",
+    hybrid_fell_back_to_documents: false,
+  },
+  request_id: "req-fixture-0001",
   created_at: "2026-09-29T12:00:06Z",
 } satisfies Message;
 

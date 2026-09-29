@@ -25,6 +25,8 @@ data/sqlite/*
 data/vectorstore/*
 data/reports/*
 data/sessions/
+data/api/
+data/audit/
 data/.last_cleanup
 data/cleanup_audit.log
 
@@ -39,6 +41,7 @@ work/
 
 # Generated application output
 outputs/
+evals/results/
 work/*.log
 work/*.pid
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Message, Workspace } from "../api/client";
+import { AnswerProvenance } from "./AnswerProvenance";
 import { StatusBanner } from "./StatusBanner";
 
 interface ConversationPanelProps {
@@ -105,6 +106,7 @@ export function ConversationPanel({
             <article className="chat-message chat-message--assistant">
               <div className="message-meta"><span>Workbench</span><span className="route-badge">{message.route} route</span></div>
               <p className="answer-text">{message.answer}</p>
+              <AnswerProvenance message={message} />
               {message.sql ? <pre className="sql-block"><code>{message.sql}</code></pre> : null}
               {message.rows && message.rows.length > 0 ? (
                 <>

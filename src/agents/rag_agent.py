@@ -15,7 +15,22 @@ _QUOTE_PATTERN = re.compile(r'"([^"]{15,})"')
 
 
 class RAGAgentError(RuntimeError):
-    """Raised when document QA cannot be completed."""
+    """Raised when document QA cannot be completed.
+
+    Retrieval counts are structural facts (never content) so callers can record
+    why a question was refused without inspecting document text.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        candidates_considered: int = 0,
+        candidates_rejected_by_distance: int = 0,
+    ) -> None:
+        super().__init__(message)
+        self.candidates_considered = candidates_considered
+        self.candidates_rejected_by_distance = candidates_rejected_by_distance
 
 
 @dataclass(frozen=True)
@@ -26,6 +41,9 @@ class RAGAnswer:
     cited_source_numbers: list[int] = field(default_factory=list)
     invalid_citations: list[int] = field(default_factory=list)
     unverified_quotes: list[str] = field(default_factory=list)
+    candidates_considered: int = 0
+    candidates_rejected_by_distance: int = 0
+    duplicates_skipped: int = 0
 
 
 def answer_with_documents(
@@ -48,13 +66,18 @@ def answer_with_documents(
 
     retrieval = retriever.retrieve(question=question, top_k=top_k)
     if not retrieval.chunks:
+        counts = {
+            "candidates_considered": retrieval.candidates_considered,
+            "candidates_rejected_by_distance": retrieval.candidates_rejected_by_distance,
+        }
         if retrieval.candidates_rejected_by_distance:
             raise RAGAgentError(
                 f"No relevant document chunks were found ("
                 f"{retrieval.candidates_rejected_by_distance} candidate(s) considered "
-                "but none were similar enough to the question)."
+                "but none were similar enough to the question).",
+                **counts,
             )
-        raise RAGAgentError("No relevant document chunks were found.")
+        raise RAGAgentError("No relevant document chunks were found.", **counts)
 
     prompt = build_rag_prompt(question=question, chunks=retrieval.chunks)
     response = llm_client.generate(prompt)
@@ -76,6 +99,9 @@ def answer_with_documents(
         cited_source_numbers=cited_source_numbers,
         invalid_citations=invalid_citations,
         unverified_quotes=unverified_quotes,
+        candidates_considered=retrieval.candidates_considered,
+        candidates_rejected_by_distance=retrieval.candidates_rejected_by_distance,
+        duplicates_skipped=retrieval.duplicates_skipped,
     )
 
 

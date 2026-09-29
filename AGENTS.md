@@ -23,6 +23,10 @@ document retrieval, anomaly detection, visualization, and report generation.
 - `src/reporting/` produces PDF reports.
 - `packages/analytics/` exposes framework-neutral tabular commands and services.
 - `packages/connectors/` defines provider and repository ports for application code.
+- `packages/retrieval/` exposes framework-neutral PDF indexing.
+- `packages/observability/` provides request-ID context, allowlist-only telemetry, and safe error categories.
+- `packages/governance/` provides the audit vocabulary and append-only, hash-chained audit sinks.
+- `packages/evaluation/` and `evals/` provide the deterministic evaluation harness, fixtures, thresholds, and baseline.
 - `packages/retrieval/` exposes framework-neutral document-indexing commands and services.
 - `tests/` contains the pytest suite.
 
@@ -54,7 +58,14 @@ python -m pytest
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy apps config packages scripts src tests
+python -m scripts.run_evaluations
 ```
+
+The evaluation command is offline and deterministic. Changing a prompt, retrieval
+setting, fixture, or safety behavior requires updating `evals/v1/` and its baseline
+as described in `docs/governance/evaluation.md`. Telemetry and audit attributes are
+allowlists: never add a field that can carry a question, SQL, result rows, document
+text, prompts, or secrets.
 
 Run frontend quality checks from `apps/web/` with:
 

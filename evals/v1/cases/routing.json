@@ -1,0 +1,71 @@
+[
+  {
+    "id": "routing-table-question-uses-sql",
+    "capability": "routing",
+    "question": "Show the top five merchants by total amount.",
+    "rationale": "Deterministic fallback: a data question with only a table uses guarded SQL.",
+    "context": {"dataset": "transactions"},
+    "script": {
+      "sql": ["SELECT \"merchant\", SUM(\"amount\") AS \"total_amount\" FROM \"uploaded_data\" GROUP BY \"merchant\" ORDER BY \"total_amount\" DESC LIMIT 5"]
+    },
+    "expect": {"outcome": "answered", "route": "sql", "sql": {"row_count": 5}}
+  },
+  {
+    "id": "routing-policy-question-uses-rag",
+    "capability": "routing",
+    "question": "According to the uploaded policy, which cases require escalation?",
+    "rationale": "Deterministic fallback: a document question with only indexed PDFs uses RAG.",
+    "context": {"corpus": "review_policy"},
+    "script": {"rag_answer": "Transactions over 500 dollars require escalation. Source 1"},
+    "expect": {"outcome": "answered", "route": "rag"}
+  },
+  {
+    "id": "routing-policy-plus-data-uses-hybrid",
+    "capability": "routing",
+    "question": "Which uploaded transactions match the document policy?",
+    "rationale": "A question that names both a document and table rows uses the hybrid route.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {"thresholds": [500]},
+      "sql": ["SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500"]
+    },
+    "expect": {"outcome": "answered", "route": "hybrid"}
+  },
+  {
+    "id": "routing-model-proposing-unavailable-route-is-ignored",
+    "capability": "routing",
+    "question": "Compare the data with the policy.",
+    "rationale": "A model cannot select a route whose inputs do not exist; the deterministic router decides instead.",
+    "context": {"dataset": "transactions"},
+    "script": {
+      "classification": {"route": "hybrid", "confidence": 0.99},
+      "sql": ["SELECT COUNT(*) AS \"row_count\" FROM \"uploaded_data\""]
+    },
+    "expect": {"outcome": "answered", "route": "sql", "llm_generation_calls": {"exact": 1}}
+  },
+  {
+    "id": "routing-low-confidence-classification-is-ignored",
+    "capability": "routing",
+    "question": "How many transactions are there?",
+    "rationale": "A classification below the confidence threshold is discarded in favor of deterministic routing.",
+    "context": {"dataset": "transactions"},
+    "script": {
+      "classification": {"route": "unsupported", "confidence": 0.4},
+      "sql": ["SELECT COUNT(*) AS \"row_count\" FROM \"uploaded_data\""]
+    },
+    "expect": {"outcome": "answered", "route": "sql"}
+  },
+  {
+    "id": "routing-malformed-classification-is-ignored",
+    "capability": "routing",
+    "question": "How many transactions are there?",
+    "rationale": "A classification that is not a JSON object cannot influence the route.",
+    "context": {"dataset": "transactions"},
+    "script": {
+      "classification": "Sure, I think the route is sql!",
+      "sql": ["SELECT COUNT(*) AS \"row_count\" FROM \"uploaded_data\""]
+    },
+    "expect": {"outcome": "answered", "route": "sql"}
+  }
+]

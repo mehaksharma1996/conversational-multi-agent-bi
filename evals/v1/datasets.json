@@ -1,0 +1,33 @@
+{
+  "transactions": {
+    "description": "Twelve invented card transactions.",
+    "columns": ["transaction_id", "transaction_date", "merchant", "amount", "customer_id", "status"],
+    "rows": [
+      ["T-001", "2026-01-03", "Alpha Mart", 120.5, "C-1", "approved"],
+      ["T-002", "2026-01-04", "Beta Books", 35.0, "C-2", "approved"],
+      ["T-003", "2026-01-05", "Alpha Mart", 640.0, "C-3", "flagged"],
+      ["T-004", "2026-01-09", "Gamma Gas", 58.25, "C-1", "approved"],
+      ["T-005", "2026-01-11", "Delta Deli", 12.75, "C-4", "approved"],
+      ["T-006", "2026-01-15", "Beta Books", 910.0, "C-2", "flagged"],
+      ["T-007", "2026-01-18", "Epsilon Electronics", 1520.0, "C-5", "flagged"],
+      ["T-008", "2026-01-20", "Gamma Gas", 47.1, "C-3", "approved"],
+      ["T-009", "2026-02-02", "Alpha Mart", 89.9, "C-6", "approved"],
+      ["T-010", "2026-02-07", "Delta Deli", 23.4, "C-4", "approved"],
+      ["T-011", "2026-02-14", "Epsilon Electronics", 799.99, "C-5", "approved"],
+      ["T-012", "2026-02-20", "Beta Books", 15.0, "C-7", "approved"]
+    ]
+  },
+  "customer_contacts": {
+    "description": "Invented customers with reserved-example e-mail addresses to exercise sample-value redaction.",
+    "columns": ["customer_id", "contact_email", "lifetime_amount"],
+    "rows": [
+      ["C-1", "avery.stone@example.com", 178.75],
+      ["C-2", "blake.rivera@example.com", 960.0],
+      ["C-3", "casey.morgan@example.com", 687.1]
+    ]
+  },
+  "event_log": {
+    "description": "Generated 650-row table used to verify the executor's result-row cap.",
+    "generate": {"rows": 650, "columns": ["event_id", "value"]}
+  }
+}
