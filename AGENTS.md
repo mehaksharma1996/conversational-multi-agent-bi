@@ -9,6 +9,7 @@ document retrieval, anomaly detection, visualization, and report generation.
 ## Architecture
 
 - `app.py` is the Streamlit entry point.
+- `apps/api/` is the versioned FastAPI service boundary.
 - `src/ui/` contains upload, dashboard, and chat interfaces.
 - `src/ingestion/` loads tabular files and PDFs.
 - `src/profiling/` handles schema mapping, profiling, and capability detection.
@@ -25,7 +26,7 @@ document retrieval, anomaly detection, visualization, and report generation.
 
 ## Technology
 
-- Python and Streamlit
+- Python, Streamlit, and FastAPI
 - LangGraph for routing and orchestration
 - Gemini 2.5 Flash for SQL generation and grounded document answers
 - SentenceTransformers `all-MiniLM-L6-v2` for embeddings
@@ -49,5 +50,5 @@ Run quality checks with:
 python -m pytest
 python -m ruff check .
 python -m ruff format --check .
-python -m mypy config packages src tests
+python -m mypy apps config packages scripts src tests
 ```

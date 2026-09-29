@@ -53,7 +53,14 @@ Phase 2 introduces a [framework-neutral tabular core](docs/architecture/framewor
 under `packages/analytics/`, with typed upload, profile, schema-review, and
 analysis commands now used by Streamlit. Provider and repository contracts live
 under `packages/connectors/`, and CI prevents these packages from importing UI
-or API frameworks. The FastAPI boundary remains the next migration phase.
+or API frameworks.
+
+Phase 3 adds the [versioned FastAPI tabular vertical slice](docs/architecture/fastapi-vertical-slice.md)
+under `apps/api/`. It covers local identity, tenant-scoped workspaces, bounded
+CSV/Excel upload and sheet discovery, profiling, explicit schema confirmation,
+deterministic analysis, health checks, safe request-ID errors, and a committed
+OpenAPI contract. The API repository is intentionally process-local at this
+stage; durable persistence is deferred and documented.
 
 ## Local Setup
 
@@ -66,6 +73,17 @@ py -3.14 -m venv .venv
 Copy-Item .env.example .env
 & ".\.venv\Scripts\python.exe" -m streamlit run app.py
 ```
+
+Run the Phase 3 API locally in a separate terminal:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -m uvicorn apps.api.main:app --reload
+```
+
+Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
+The committed [OpenAPI contract](openapi/openapi.json) can be regenerated with
+`python -m scripts.generate_openapi`. Until durable resource persistence lands,
+run one API process; restarting it clears API-created workspace metadata.
 
 For development tools:
 
@@ -98,7 +116,7 @@ fixed local-development tenant when authentication is not configured; see
 ```powershell
 & ".\.venv\Scripts\python.exe" -m ruff check .
 & ".\.venv\Scripts\python.exe" -m ruff format --check .
-& ".\.venv\Scripts\python.exe" -m mypy config packages src tests
+& ".\.venv\Scripts\python.exe" -m mypy apps config packages scripts src tests
 & ".\.venv\Scripts\python.exe" -m pytest --cov --cov-report=term-missing
 ```
 
@@ -287,6 +305,7 @@ those controls before hosting it for untrusted users.
 ## Repository Layout
 
 - `app.py`: Streamlit entry point and session initialization.
+- `apps/api/`: versioned FastAPI application and HTTP contracts.
 - `src/ui/`: upload, dashboard, report, and chat interfaces.
 - `src/profiling/`: profiling, schema mapping, and capability readiness.
 - `src/analytics/`: deterministic analytics and anomaly detection.
@@ -297,6 +316,7 @@ those controls before hosting it for untrusted users.
 - `src/memory/`: state lifecycle and conversational memory.
 - `packages/analytics/`: framework-neutral tabular workflow commands and service.
 - `packages/connectors/`: provider, identity, audit, and persistence ports.
+- `openapi/`: generated, reproducibility-checked API contract.
 - `tests/`: unit and Streamlit integration tests.
 
 ## Current Limitations

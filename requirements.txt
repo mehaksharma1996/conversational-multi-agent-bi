@@ -1,4 +1,7 @@
 streamlit==1.64.0
+fastapi==0.141.1
+uvicorn==0.54.0
+python-multipart==0.0.32
 Authlib==1.8.0
 sqlcipher3==0.6.2
 pandas==3.0.6

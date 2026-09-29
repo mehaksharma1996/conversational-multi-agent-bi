@@ -58,10 +58,10 @@ interfaces structurally; no provider has been replaced.
 ## Compatibility and deferred work
 
 Streamlit remains the primary UI, and existing `src.*` imports remain valid.
-The next phase can place a versioned FastAPI adapter above these commands
-without importing Streamlit or duplicating analytics behavior.
+Phase 3 now places a versioned FastAPI adapter above these commands without
+importing Streamlit or duplicating analytics behavior.
 
-This phase does not add an HTTP API, React, a worker, Docker, cloud resources,
+Phase 2 itself did not add an HTTP API, React, a worker, Docker, cloud resources,
 new persistence technology, or hosted deployment configuration. PDF/RAG,
-conversation, export, report-download, reset, and deletion commands will be
-extracted in later vertical slices as their API resources are introduced.
+conversation, export, report-download, reset, and deletion commands remain for
+later vertical slices as their API resources are introduced.
