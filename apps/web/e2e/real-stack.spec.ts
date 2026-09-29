@@ -25,7 +25,7 @@ test("real local-only stack: tabular analysis, memory, reports, and reset", asyn
   await uploadConfirmAndAnalyze(page);
   await page.getByLabel("Business question").fill("What analysis was possible?");
   await page.getByRole("button", { name: "Ask workbench" }).click();
-  await expect(page.getByText("memory route")).toBeVisible();
+  await expect(page.getByText("memory route", { exact: true })).toBeVisible();
 
   const markdownDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download Markdown report" }).click();
@@ -50,7 +50,7 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
 
   await page.getByLabel("Business question").fill("What does the policy require?");
   await page.getByRole("button", { name: "Ask workbench" }).click();
-  await expect(page.getByText("rag route")).toBeVisible();
+  await expect(page.getByText("rag route", { exact: true })).toBeVisible();
   await page.getByText("Retrieved document sources").click();
   await expect(
     page.locator(".source-list > li").filter({ hasText: "review_policy.pdf, page 1" }),
@@ -58,7 +58,7 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
 
   await page.getByLabel("Business question").fill("Which uploaded transactions violate the policy?");
   await page.getByRole("button", { name: "Ask workbench" }).click();
-  await expect(page.getByText("hybrid route")).toBeVisible();
+  await expect(page.getByText("hybrid route", { exact: true })).toBeVisible();
   await expect(page.getByText("SELECT", { exact: false })).toBeVisible();
 
   const csvDownload = page.waitForEvent("download");
