@@ -23,7 +23,7 @@ async function uploadConfirmAndAnalyze(page: import("@playwright/test").Page) {
 test("real local-only stack: tabular analysis, memory, reports, and reset", async ({ page }) => {
   test.skip(stackMode !== "local", "requires the default LOCAL_ONLY_MODE Compose stack");
   await uploadConfirmAndAnalyze(page);
-  await page.getByLabel("Business question").fill("How many rows were analyzed?");
+  await page.getByLabel("Business question").fill("What analysis was possible?");
   await page.getByRole("button", { name: "Ask workbench" }).click();
   await expect(page.getByText("memory route")).toBeVisible();
 
