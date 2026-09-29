@@ -47,6 +47,8 @@ from packages.analytics import (
 )
 from packages.connectors import IdentityContext
 from src.ingestion.tabular_loader import SUPPORTED_TABULAR_EXTENSIONS, TabularLoadError
+from src.memory.session_memory import build_session_memory
+from src.storage.sqlite_store import SQLiteStore
 
 router = APIRouter(prefix="/api/v1")
 
@@ -66,6 +68,7 @@ SettingsDependency = Annotated[Settings, Depends(get_api_settings)]
 def create_workspace(
     identity: IdentityDependency,
     repository: RepositoryDependency,
+    settings: SettingsDependency,
     idempotency_key: Annotated[
         str | None,
         Header(alias="Idempotency-Key", min_length=1, max_length=128),
@@ -75,6 +78,8 @@ def create_workspace(
         tenant_id=identity.tenant_id,
         authentication_mode=identity.authentication_mode,
         idempotency_key=idempotency_key,
+        gemini_configured=settings.gemini_configured,
+        local_only_mode=settings.local_only_mode,
     )
     return workspace_response(record)
 
@@ -228,6 +233,7 @@ def confirm_schema_mapping(
     identity: IdentityDependency,
     repository: RepositoryDependency,
     service: ServiceDependency,
+    settings: SettingsDependency,
 ) -> DatasetResponse:
     dataset = repository.get_dataset(dataset_id, identity.tenant_id)
     try:
@@ -241,11 +247,20 @@ def confirm_schema_mapping(
     except ValueError as exc:
         raise ApiError(422, "invalid_schema_mapping", str(exc)) from exc
 
+    stored_table = SQLiteStore(
+        repository.workspace_dir(dataset.workspace_id, identity.tenant_id) / "sqlite" / "app.db",
+        encryption_key=settings.sqlite_encryption_key,
+        include_sample_values=not settings.gemini_exclude_sample_values,
+    ).save_dataframe(
+        dataset.table.dataframe,
+        canonical_mapping=mapping.mapped_fields(),
+    )
     updated = repository.confirm_dataset_mapping(
         dataset_id=dataset.id,
         tenant_id=identity.tenant_id,
         schema_mapping=mapping,
         recommended_anomaly_features=recommended_features,
+        stored_table=stored_table,
     )
     return dataset_response(updated)
 
@@ -287,10 +302,34 @@ def create_analysis(
         )
     except ValueError as exc:
         raise ApiError(422, "invalid_analysis_configuration", str(exc)) from exc
+    documents = repository.latest_document_collection_for_workspace(
+        dataset.workspace_id,
+        identity.tenant_id,
+    )
+    document_status = (
+        {
+            "document_count": len(documents.filenames),
+            "chunk_count": documents.chunk_count,
+            "filenames": list(documents.filenames),
+        }
+        if documents is not None
+        else None
+    )
+    memory = build_session_memory(
+        profile=dataset.profile,
+        schema_mapping=dataset.schema_mapping,
+        capability_report=bundle.capability_report,
+        analytics_report=bundle.analytics_report,
+        anomaly_report=bundle.anomaly_report,
+        chart_specs=bundle.chart_specs,
+        business_report=bundle.business_report,
+        document_status=document_status,
+    )
     analysis = repository.create_analysis(
         dataset=dataset,
         anomaly_contamination=command.anomaly_contamination,
         bundle=bundle,
+        memory=memory,
     )
     return analysis_response(analysis)
 

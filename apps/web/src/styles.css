@@ -15,7 +15,7 @@
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 80% 0%, #13203a 0, transparent 34rem), #060b18; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 a { color: inherit; }
 :focus-visible { outline: 3px solid #f8d06b; outline-offset: 3px; }
 .skip-link { position: fixed; left: 1rem; top: -5rem; z-index: 20; padding: .65rem 1rem; color: #05101c; background: #fff; border-radius: .4rem; }
@@ -26,6 +26,7 @@ a { color: inherit; }
 .workspace-status { display: flex; align-items: center; gap: .5rem; color: var(--muted); font-size: .85rem; }
 .workspace-status > span { width: .55rem; height: .55rem; border-radius: 50%; background: #64748b; }
 .workspace-status.is-ready > span { background: var(--green); }
+.header-actions { display: flex; align-items: center; gap: 1rem; }
 main { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 4rem 0; }
 .hero { max-width: 860px; padding: 2rem 0 3.5rem; }
 .eyebrow { margin: 0 0 .55rem; color: var(--cyan); font-size: .75rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
@@ -49,6 +50,7 @@ input[type="file"]::file-selector-button { margin-right: .8rem; padding: .45rem 
 .button--primary { color: #032329; background: var(--cyan); }
 .button--primary:hover:not(:disabled) { background: #6ce8f5; }
 .button--secondary { color: #dce8f7; border-color: #52647b; background: #18263b; }
+.button--compact { min-height: 2.15rem; padding: .4rem .7rem; font-size: .78rem; }
 .button--link { min-height: auto; margin-left: .5rem; padding: .25rem; color: inherit; background: transparent; text-decoration: underline; }
 .sheet-picker { margin-top: 1.5rem; }
 .inline-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; margin-top: .45rem; }
@@ -96,11 +98,31 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--cyan); }
 .report-card section { margin-top: 1.2rem; }
 .report-card h4 { margin: 0 0 .5rem; color: #dce8f7; }
 .report-card p, .report-card li { color: var(--muted); line-height: 1.55; }
+.button-row { display: flex; flex-wrap: wrap; gap: .65rem; margin: 1rem 0; }
+.report-actions { justify-content: flex-end; }
+.consent-button { width: fit-content; margin-top: .5rem; }
+.message-list { display: grid; gap: 1rem; margin: 1.5rem 0; }
+.message-pair { display: grid; gap: .65rem; }
+.chat-message { max-width: min(100%, 900px); padding: 1rem; border: 1px solid var(--border); border-radius: .85rem; }
+.chat-message p { margin: 0; line-height: 1.6; }
+.chat-message--user { justify-self: end; border-color: #31566f; background: #102a3b; }
+.chat-message--assistant { background: rgba(5, 12, 24, .55); }
+.message-label, .message-meta { margin-bottom: .4rem !important; color: var(--muted); font-size: .75rem; font-weight: 800; text-transform: uppercase; }
+.message-meta { display: flex; align-items: center; gap: .6rem; }
+.route-badge { padding: .25rem .5rem; border: 1px solid rgba(167, 139, 250, .55); border-radius: 999px; color: #d8ccff; background: rgba(167, 139, 250, .1); font-size: .67rem; }
+.answer-text { white-space: pre-wrap; }
+.sql-block { max-width: 100%; margin: 1rem 0; padding: 1rem; overflow-x: auto; border: 1px solid #2b3d55; border-radius: .6rem; color: #bceef3; background: #050b14; }
+.source-list { color: var(--muted); line-height: 1.65; }
+.empty-state { padding: 1.4rem; border: 1px dashed #394b64; border-radius: .75rem; color: var(--muted); text-align: center; }
+.question-composer { display: grid; gap: .65rem; }
+.question-composer textarea { width: 100%; resize: vertical; padding: .8rem; border: 1px solid #394b64; border-radius: .65rem; color: #e5edf8; background: #091221; line-height: 1.5; }
+.question-composer .button { justify-self: start; }
 footer { padding: 2rem; border-top: 1px solid var(--border); color: var(--muted); text-align: center; font-size: .8rem; }
 
 @media (max-width: 640px) {
   .site-header { align-items: flex-start; }
   .brand { max-width: 12rem; }
+  .header-actions { align-items: flex-end; flex-direction: column; gap: .5rem; }
   .workspace-status { max-width: 9rem; justify-content: flex-end; text-align: right; }
   main { padding-top: 2rem; }
   .hero { padding-top: 1rem; }

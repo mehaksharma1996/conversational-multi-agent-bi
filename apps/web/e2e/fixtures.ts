@@ -4,6 +4,45 @@ export const workspaceFixture = {
   id: "workspace-1",
   status: "active",
   authentication_mode: "local_development",
+  expires_at: "2026-09-30T12:00:00Z",
+  gemini_configured: true,
+  local_only_mode: false,
+  consent_required: true,
+  consent_accepted: false,
+  created_at: createdAt,
+};
+
+export const documentCollectionFixture = {
+  id: "documents-1",
+  workspace_id: workspaceFixture.id,
+  status: "ready",
+  document_count: 1,
+  page_count: 2,
+  chunk_count: 3,
+  filenames: ["policy.pdf"],
+  created_at: createdAt,
+};
+
+export const conversationFixture = {
+  id: "conversation-1",
+  workspace_id: workspaceFixture.id,
+  status: "active",
+  dataset_id: null,
+  document_collection_id: documentCollectionFixture.id,
+  message_count: 0,
+  created_at: createdAt,
+};
+
+export const messageFixture = {
+  id: "message-1",
+  conversation_id: conversationFixture.id,
+  role: "assistant",
+  question: "What is the escalation threshold?",
+  answer: "Transactions over 500 require review.",
+  route: "rag",
+  sql: null,
+  rows: null,
+  sources: [{ citation: "policy.pdf, page 2" }],
   created_at: createdAt,
 };
 

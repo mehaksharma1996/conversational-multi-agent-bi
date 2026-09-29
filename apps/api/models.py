@@ -37,7 +37,25 @@ class WorkspaceResponse(StrictModel):
     id: str
     status: Literal["active"]
     authentication_mode: str
+    expires_at: datetime
+    gemini_configured: bool
+    local_only_mode: bool
+    consent_required: bool
+    consent_accepted: bool
     created_at: datetime
+
+
+class ConsentUpdateRequest(StrictModel):
+    accepted: Literal[True]
+    notice_version: str = Field(default="2026-09", min_length=1, max_length=32)
+
+
+class ConsentResponse(StrictModel):
+    workspace_id: str
+    required: bool
+    accepted: bool
+    notice_version: str | None
+    accepted_at: datetime | None
 
 
 class TabularUploadResponse(StrictModel):
@@ -185,3 +203,84 @@ class AnalysisResponse(StrictModel):
     anomaly: AnomalyResponse
     charts: list[ChartResponse]
     report: BusinessReportResponse
+
+
+class DocumentCollectionResponse(StrictModel):
+    id: str
+    workspace_id: str
+    status: Literal["ready"]
+    document_count: int
+    page_count: int
+    chunk_count: int
+    filenames: list[str]
+    created_at: datetime
+
+
+class ConversationCreateRequest(StrictModel):
+    dataset_id: str | None = None
+    document_collection_id: str | None = None
+
+
+class ConversationResponse(StrictModel):
+    id: str
+    workspace_id: str
+    status: Literal["active"]
+    dataset_id: str | None
+    document_collection_id: str | None
+    message_count: int
+    created_at: datetime
+
+
+class MessageCreateRequest(StrictModel):
+    question: str = Field(min_length=1, max_length=4_000)
+
+
+class SourceResponse(StrictModel):
+    citation: str
+
+
+class MessageResponse(StrictModel):
+    id: str
+    conversation_id: str
+    role: Literal["assistant"]
+    question: str
+    answer: str
+    route: Literal["memory", "sql", "rag", "hybrid", "unsupported"]
+    sql: str | None
+    rows: list[dict[str, Any]] | None
+    sources: list[SourceResponse]
+    created_at: datetime
+
+
+class MessageListResponse(StrictModel):
+    conversation_id: str
+    messages: list[MessageResponse]
+
+
+class ReportCreateRequest(StrictModel):
+    include_charts: bool = True
+
+
+class ReportResponse(StrictModel):
+    id: str
+    analysis_id: str
+    workspace_id: str
+    status: Literal["ready"]
+    formats: list[Literal["markdown", "pdf"]]
+    created_at: datetime
+
+
+class ExportCreateRequest(StrictModel):
+    format: Literal["csv", "xlsx"]
+
+
+class ExportResponse(StrictModel):
+    id: str
+    message_id: str
+    workspace_id: str
+    status: Literal["ready"]
+    format: Literal["csv", "xlsx"]
+    filename: str
+    media_type: str
+    size_bytes: int
+    created_at: datetime

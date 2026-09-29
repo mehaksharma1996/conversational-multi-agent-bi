@@ -8,6 +8,8 @@ const Plot = lazy(() => import("react-plotly.js"));
 
 interface AnalysisDashboardProps {
   analysis: Analysis;
+  downloadBusy: boolean;
+  onDownloadReport: (format: "markdown" | "pdf") => Promise<void>;
 }
 
 interface PlotlyFigure {
@@ -61,7 +63,11 @@ function RecordsTable({ caption, records }: { caption: string; records: Record<s
   );
 }
 
-export function AnalysisDashboard({ analysis }: AnalysisDashboardProps) {
+export function AnalysisDashboard({
+  analysis,
+  downloadBusy,
+  onDownloadReport,
+}: AnalysisDashboardProps) {
   return (
     <section className="panel analysis-panel" aria-labelledby="analysis-results-heading">
       <div className="section-heading">
@@ -76,6 +82,11 @@ export function AnalysisDashboard({ analysis }: AnalysisDashboardProps) {
         Anomaly flags are review candidates, not confirmed fraud or misconduct. This workbench
         supports human decisions; it does not make autonomous decisions.
       </StatusBanner>
+
+      <div className="button-row report-actions" aria-label="Report downloads">
+        <button className="button button--secondary" type="button" disabled={downloadBusy} onClick={() => void onDownloadReport("markdown")}>Download Markdown report</button>
+        <button className="button button--secondary" type="button" disabled={downloadBusy} onClick={() => void onDownloadReport("pdf")}>Download PDF report</button>
+      </div>
 
       <div className="metrics-grid" aria-label="Analysis summary">
         {Object.entries(analysis.dataset_summary).map(([label, value]) => (

@@ -12,6 +12,11 @@ export type Dataset = components["schemas"]["DatasetResponse"];
 export type SchemaMappingUpdate = components["schemas"]["SchemaMappingUpdateRequest"];
 export type Analysis = components["schemas"]["AnalysisResponse"];
 export type AnalysisCreate = components["schemas"]["AnalysisCreateRequest"];
+export type DocumentCollection = components["schemas"]["DocumentCollectionResponse"];
+export type Conversation = components["schemas"]["ConversationResponse"];
+export type Message = components["schemas"]["MessageResponse"];
+export type Report = components["schemas"]["ReportResponse"];
+export type Export = components["schemas"]["ExportResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 
 export class ApiClientError extends Error {
@@ -119,4 +124,125 @@ export async function runAnalysis(
     },
   );
   return unwrap(data, error, response);
+}
+
+export async function acceptConsent(workspaceId: string): Promise<void> {
+  const { data, error, response } = await api.PUT(
+    "/api/v1/workspaces/{workspace_id}/consent",
+    {
+      params: { path: { workspace_id: workspaceId } },
+      body: { accepted: true, notice_version: "2026-09" },
+    },
+  );
+  unwrap(data, error, response);
+}
+
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  const { error, response } = await api.DELETE("/api/v1/workspaces/{workspace_id}", {
+    params: { path: { workspace_id: workspaceId } },
+  });
+  if (!response.ok) unwrap(undefined, error, response);
+}
+
+export async function uploadDocuments(
+  workspaceId: string,
+  files: File[],
+): Promise<DocumentCollection> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/workspaces/{workspace_id}/document-collections",
+    {
+      params: { path: { workspace_id: workspaceId } },
+      body: { files: files as unknown as string[] },
+      bodySerializer: () => {
+        const form = new FormData();
+        files.forEach((file) => form.append("files", file));
+        return form;
+      },
+    },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function createConversation(
+  workspaceId: string,
+  datasetId: string | null,
+  documentCollectionId: string | null,
+): Promise<Conversation> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/workspaces/{workspace_id}/conversations",
+    {
+      params: { path: { workspace_id: workspaceId } },
+      body: { dataset_id: datasetId, document_collection_id: documentCollectionId },
+    },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function askQuestion(
+  conversationId: string,
+  question: string,
+): Promise<Message> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/conversations/{conversation_id}/messages",
+    {
+      params: { path: { conversation_id: conversationId } },
+      body: { question },
+    },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function createReport(
+  analysisId: string,
+  includeCharts: boolean,
+): Promise<Report> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/analyses/{analysis_id}/reports",
+    {
+      params: { path: { analysis_id: analysisId } },
+      body: { include_charts: includeCharts },
+    },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function createResultExport(
+  messageId: string,
+  format: "csv" | "xlsx",
+): Promise<Export> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/messages/{message_id}/exports",
+    {
+      params: { path: { message_id: messageId } },
+      body: { format },
+    },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function downloadReport(
+  reportId: string,
+  format: "markdown" | "pdf",
+): Promise<Blob> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/reports/{report_id}/content",
+    {
+      params: { path: { report_id: reportId }, query: { format } },
+      parseAs: "blob",
+    },
+  );
+  if (!response.ok || data === undefined) unwrap(undefined, error, response);
+  return data as Blob;
+}
+
+export async function downloadResultExport(exportId: string): Promise<Blob> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/exports/{export_id}/content",
+    {
+      params: { path: { export_id: exportId } },
+      parseAs: "blob",
+    },
+  );
+  if (!response.ok || data === undefined) unwrap(undefined, error, response);
+  return data as Blob;
 }

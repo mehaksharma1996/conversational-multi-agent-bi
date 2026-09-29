@@ -165,5 +165,8 @@ class ChromaDocumentStore:
     def close(self) -> None:
         """Release Chroma references before session storage is removed on Windows."""
         self._collection = None
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            close()
         self._client = None
         gc.collect()

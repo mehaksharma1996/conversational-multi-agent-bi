@@ -4,15 +4,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import {
+  acceptConsent,
+  askQuestion,
   confirmSchema,
+  createConversation,
   createDataset,
   createWorkspace,
   listWorkbookSheets,
   runAnalysis,
+  uploadDocuments,
   uploadTabular,
 } from "./api/client";
 import {
   analysisFixture,
+  conversationFixture,
+  documentCollectionFixture,
+  messageFixture,
   readyDatasetFixture,
   reviewDatasetFixture,
   uploadFixture,
@@ -30,6 +37,10 @@ vi.mock("./api/client", async (importOriginal) => {
     createDataset: vi.fn(),
     confirmSchema: vi.fn(),
     runAnalysis: vi.fn(),
+    uploadDocuments: vi.fn(),
+    acceptConsent: vi.fn(),
+    createConversation: vi.fn(),
+    askQuestion: vi.fn(),
   };
 });
 
@@ -41,6 +52,10 @@ describe("tabular analysis journey", () => {
     vi.mocked(createDataset).mockResolvedValue(reviewDatasetFixture);
     vi.mocked(confirmSchema).mockResolvedValue(readyDatasetFixture);
     vi.mocked(runAnalysis).mockResolvedValue(analysisFixture);
+    vi.mocked(uploadDocuments).mockResolvedValue(documentCollectionFixture);
+    vi.mocked(acceptConsent).mockResolvedValue();
+    vi.mocked(createConversation).mockResolvedValue(conversationFixture);
+    vi.mocked(askQuestion).mockResolvedValue(messageFixture);
   });
 
   it("moves from upload through schema confirmation to deterministic results", async () => {
@@ -69,5 +84,33 @@ describe("tabular analysis journey", () => {
       anomaly_contamination: 0.05,
       anomaly_features: ["amount"],
     });
+  });
+
+  it("indexes documents, records model consent, and renders a cited answer", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Local workspace ready");
+    await user.upload(
+      screen.getByLabelText("PDF documents"),
+      new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
+
+    expect(await screen.findByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+
+    await user.type(
+      screen.getByLabelText("Business question"),
+      "Which transaction matches the escalation policy?",
+    );
+    await user.click(screen.getByRole("button", { name: "Ask workbench" }));
+
+    expect(await screen.findByText(messageFixture.answer)).toBeVisible();
+    expect(screen.getByText("hybrid route")).toBeVisible();
+    await user.click(screen.getByText("Retrieved document sources"));
+    expect(screen.getByText("policy.pdf, page 2")).toBeVisible();
+    expect(createConversation).toHaveBeenCalledWith("workspace-1", null, "documents-1");
+    expect(askQuestion).toHaveBeenCalledWith("conversation-1", messageFixture.question);
   });
 });

@@ -1,11 +1,58 @@
-import type { Analysis, Dataset, TabularUpload, Workspace } from "../api/client";
+import type {
+  Analysis,
+  Conversation,
+  Dataset,
+  DocumentCollection,
+  Message,
+  TabularUpload,
+  Workspace,
+} from "../api/client";
 
 export const workspaceFixture = {
   id: "workspace-1",
   status: "active",
   authentication_mode: "local_development",
+  expires_at: "2026-09-30T12:00:00Z",
+  gemini_configured: true,
+  local_only_mode: false,
+  consent_required: true,
+  consent_accepted: false,
   created_at: "2026-09-29T12:00:00Z",
 } satisfies Workspace;
+
+export const documentCollectionFixture = {
+  id: "documents-1",
+  workspace_id: workspaceFixture.id,
+  status: "ready",
+  document_count: 1,
+  page_count: 2,
+  chunk_count: 3,
+  filenames: ["policy.pdf"],
+  created_at: "2026-09-29T12:00:04Z",
+} satisfies DocumentCollection;
+
+export const conversationFixture = {
+  id: "conversation-1",
+  workspace_id: workspaceFixture.id,
+  status: "active",
+  dataset_id: "dataset-1",
+  document_collection_id: documentCollectionFixture.id,
+  message_count: 0,
+  created_at: "2026-09-29T12:00:05Z",
+} satisfies Conversation;
+
+export const messageFixture = {
+  id: "message-1",
+  conversation_id: conversationFixture.id,
+  role: "assistant",
+  question: "Which transaction matches the escalation policy?",
+  answer: "The North transaction for 900 matches the escalation threshold.",
+  route: "hybrid",
+  sql: "SELECT merchant, amount FROM uploaded_data ORDER BY amount DESC LIMIT 20",
+  rows: [{ merchant: "North", amount: 900 }],
+  sources: [{ citation: "policy.pdf, page 2" }],
+  created_at: "2026-09-29T12:00:06Z",
+} satisfies Message;
 
 export const uploadFixture = {
   id: "upload-1",

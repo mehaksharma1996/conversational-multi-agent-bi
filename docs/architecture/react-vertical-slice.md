@@ -78,13 +78,15 @@ contract-shaped API responses.
 
 ## Current limitations
 
+This document records the Phase 4 boundary. Phase 5 subsequently migrated the
+PDF, conversation, report, export, consent, reset, and retention workflows; see
+[React and FastAPI feature parity](feature-parity.md).
+
 - The FastAPI workspace repository remains process-local. Restarting the API
   removes resources created through this surface.
 - Authentication remains local-development identity only at this API boundary.
-- PDF/RAG, conversational SQL, chat memory, downloadable reports, and exports
-  remain in Streamlit until later migration phases.
 - Long-running job progress and cancellation are not yet required by the
-  synchronous tabular path.
+  synchronous tabular and document paths.
 - The web build renders the full Plotly distribution when a chart is needed;
   bundle optimization is a later performance task once migrated chart types
   are fixed.

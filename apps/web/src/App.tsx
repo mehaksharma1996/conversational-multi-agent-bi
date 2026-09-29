@@ -2,23 +2,48 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ApiClientError,
+  acceptConsent,
+  askQuestion,
   confirmSchema,
+  createConversation,
   createDataset,
+  createReport,
+  createResultExport,
   createWorkspace,
+  deleteWorkspace,
+  downloadReport,
+  downloadResultExport,
   listWorkbookSheets,
   runAnalysis,
   uploadTabular,
+  uploadDocuments,
   type Analysis,
+  type Conversation,
   type Dataset,
+  type DocumentCollection,
+  type Message,
   type SchemaMappingUpdate,
   type Workspace,
 } from "./api/client";
 import { AnalysisDashboard } from "./components/AnalysisDashboard";
+import { ConversationPanel } from "./components/ConversationPanel";
+import { DocumentUpload } from "./components/DocumentUpload";
 import { SchemaReview } from "./components/SchemaReview";
 import { StatusBanner } from "./components/StatusBanner";
 import { UploadStep } from "./components/UploadStep";
 
-type Task = "workspace" | "upload" | "dataset" | "schema" | "analysis" | null;
+type Task =
+  | "workspace"
+  | "upload"
+  | "dataset"
+  | "schema"
+  | "analysis"
+  | "documents"
+  | "consent"
+  | "conversation"
+  | "download"
+  | "reset"
+  | null;
 
 function normalizeError(error: unknown): ApiClientError {
   if (error instanceof ApiClientError) return error;
@@ -33,6 +58,9 @@ export default function App() {
   const [sheets, setSheets] = useState<string[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [documents, setDocuments] = useState<DocumentCollection | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
   const [contamination, setContamination] = useState(0.05);
   const [task, setTask] = useState<Task>(null);
@@ -62,6 +90,8 @@ export default function App() {
     setError(null);
     setDataset(null);
     setAnalysis(null);
+    setConversation(null);
+    setMessages([]);
     setSheets([]);
     try {
       const upload = await uploadTabular(workspace.id, file);
@@ -90,6 +120,8 @@ export default function App() {
       setDataset(profiled);
       setSelectedFeatures(profiled.recommended_anomaly_features);
       setSheets([]);
+      setConversation(null);
+      setMessages([]);
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -103,6 +135,8 @@ export default function App() {
     setError(null);
     try {
       setDataset(await confirmSchema(dataset.id, mapping));
+      setConversation(null);
+      setMessages([]);
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -115,10 +149,125 @@ export default function App() {
     setTask("analysis");
     setError(null);
     try {
-      setAnalysis(await runAnalysis(dataset.id, {
+      const result = await runAnalysis(dataset.id, {
         anomaly_contamination: contamination,
         anomaly_features: selectedFeatures.length > 0 ? selectedFeatures : null,
-      }));
+      });
+      setAnalysis(result);
+      setConversation(null);
+      setMessages([]);
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
+  const handleDocuments = async (files: File[]) => {
+    if (!workspace) return;
+    setTask("documents");
+    setError(null);
+    try {
+      setDocuments(await uploadDocuments(workspace.id, files));
+      setConversation(null);
+      setMessages([]);
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
+  const handleConsent = async () => {
+    if (!workspace) return;
+    setTask("consent");
+    setError(null);
+    try {
+      await acceptConsent(workspace.id);
+      setWorkspace({ ...workspace, consent_accepted: true });
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
+  const handleQuestion = async (question: string) => {
+    if (!workspace) return;
+    setTask("conversation");
+    setError(null);
+    try {
+      const activeConversation = conversation ?? await createConversation(
+        workspace.id,
+        dataset?.status === "ready" ? dataset.id : null,
+        documents?.id ?? null,
+      );
+      if (!conversation) setConversation(activeConversation);
+      const message = await askQuestion(activeConversation.id, question);
+      setMessages((current) => [...current, message]);
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleReportDownload = async (format: "markdown" | "pdf") => {
+    if (!analysis) return;
+    setTask("download");
+    setError(null);
+    try {
+      const report = await createReport(analysis.id, format === "pdf");
+      const blob = await downloadReport(report.id, format);
+      saveBlob(blob, format === "pdf" ? "business-intelligence-report.pdf" : "business-intelligence-report.md");
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
+  const handleResultExport = async (message: Message, format: "csv" | "xlsx") => {
+    setTask("download");
+    setError(null);
+    try {
+      const resultExport = await createResultExport(message.id, format);
+      saveBlob(await downloadResultExport(resultExport.id), resultExport.filename);
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!workspace || !window.confirm("Delete this local workspace and all derived data?")) return;
+    setTask("reset");
+    setError(null);
+    try {
+      await deleteWorkspace(workspace.id);
+      setWorkspace(null);
+      setUploadId(null);
+      setSheets([]);
+      setDataset(null);
+      setAnalysis(null);
+      setDocuments(null);
+      setConversation(null);
+      setMessages([]);
+      setSelectedFeatures([]);
+      workspaceKey.current = crypto.randomUUID();
+      await initializeWorkspace();
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -135,13 +284,23 @@ export default function App() {
           <span className="brand-mark" aria-hidden="true" />
           <span>Conversational BI Workbench</span>
         </a>
-        <div className={`workspace-status ${workspace ? "is-ready" : ""}`} role="status">
-          <span aria-hidden="true" />
-          {workspace
-            ? "Local workspace ready"
-            : task === "workspace"
-              ? "Starting workspace…"
-              : "Workspace unavailable"}
+        <div className="header-actions">
+          <div className={`workspace-status ${workspace ? "is-ready" : ""}`} role="status">
+            <span aria-hidden="true" />
+            {workspace
+              ? "Local workspace ready"
+              : task === "workspace"
+                ? "Starting workspace…"
+                : "Workspace unavailable"}
+          </div>
+          <button
+            className="button button--secondary button--compact"
+            type="button"
+            disabled={!workspace || task !== null}
+            onClick={() => void handleReset()}
+          >
+            {task === "reset" ? "Resetting…" : "Reset workspace"}
+          </button>
         </div>
       </header>
 
@@ -150,13 +309,13 @@ export default function App() {
           <p className="eyebrow">Review-first analytics</p>
           <h1 id="page-title">Turn uploaded data into explainable business insight.</h1>
           <p>
-            Profile messy tabular data, verify how columns are interpreted, and run bounded,
-            deterministic analysis before introducing conversational AI.
+            Profile tabular data, review anomaly candidates, retrieve cited PDF evidence, and
+            ask grounded questions through bounded SQL, RAG, and hybrid routes.
           </p>
           <div className="hero-badges" aria-label="Platform characteristics">
             <span>Local workspace</span>
             <span>Human-reviewed schema</span>
-            <span>Typed API contract</span>
+            <span>Grounded agent routes</span>
           </div>
         </section>
 
@@ -177,7 +336,7 @@ export default function App() {
 
         <div className="workflow">
           <UploadStep
-            disabled={!workspace}
+            disabled={!workspace || task !== null}
             busy={task === "upload" || task === "dataset"}
             sheets={sheets}
             onUpload={handleUpload}
@@ -185,7 +344,7 @@ export default function App() {
           />
 
           {dataset?.status === "review_required" ? (
-            <SchemaReview dataset={dataset} busy={task === "schema"} onConfirm={handleSchema} />
+            <SchemaReview dataset={dataset} busy={task !== null} onConfirm={handleSchema} />
           ) : null}
 
           {dataset?.status === "ready" ? (
@@ -207,7 +366,7 @@ export default function App() {
                     <input
                       type="checkbox"
                       checked={selectedFeatures.includes(column)}
-                      disabled={task === "analysis"}
+                      disabled={task !== null}
                       onChange={(event) =>
                         setSelectedFeatures((current) =>
                           event.target.checked
@@ -231,14 +390,14 @@ export default function App() {
                   max="0.5"
                   step="0.01"
                   value={contamination}
-                  disabled={task === "analysis"}
+                  disabled={task !== null}
                   onChange={(event) => setContamination(Number(event.target.value))}
                 />
               </div>
               <button
                 className="button button--primary"
                 type="button"
-                disabled={task === "analysis"}
+                disabled={task !== null}
                 onClick={() => void handleAnalysis()}
               >
                 {task === "analysis"
@@ -250,10 +409,35 @@ export default function App() {
             </section>
           ) : null}
 
-          {analysis ? <AnalysisDashboard analysis={analysis} /> : null}
+          {analysis ? (
+            <AnalysisDashboard
+              analysis={analysis}
+              downloadBusy={task !== null}
+              onDownloadReport={handleReportDownload}
+            />
+          ) : null}
+
+          <DocumentUpload
+            disabled={!workspace || task !== null}
+            busy={task === "documents"}
+            collection={documents}
+            onUpload={handleDocuments}
+          />
+
+          {workspace ? (
+            <ConversationPanel
+              workspace={workspace}
+              messages={messages}
+              busy={task !== null}
+              hasContext={dataset?.status === "ready" || documents !== null}
+              onAcceptConsent={handleConsent}
+              onAsk={handleQuestion}
+              onExport={handleResultExport}
+            />
+          ) : null}
         </div>
       </main>
-      <footer>Local prototype · Uploaded data is scoped to this API process.</footer>
+      <footer>Local workbench · Workspace data is isolated, retained for a bounded period, and resettable.</footer>
     </>
   );
 }

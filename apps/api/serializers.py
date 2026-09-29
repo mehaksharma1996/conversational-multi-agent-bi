@@ -14,17 +14,29 @@ from apps.api.models import (
     CapabilityResponse,
     ChartResponse,
     ColumnProfileResponse,
+    ConversationResponse,
     DataProfileResponse,
     DatasetResponse,
+    DocumentCollectionResponse,
+    ExportResponse,
     FieldMappingResponse,
+    MessageListResponse,
+    MessageResponse,
+    ReportResponse,
     ReportSectionResponse,
     SchemaMappingResponse,
+    SourceResponse,
     TabularUploadResponse,
     WorkspaceResponse,
 )
 from apps.api.repository import (
     AnalysisRecord,
+    ConversationRecord,
     DatasetRecord,
+    DocumentCollectionRecord,
+    ExportRecord,
+    MessageRecord,
+    ReportRecord,
     TabularUploadRecord,
     WorkspaceRecord,
 )
@@ -37,6 +49,11 @@ def workspace_response(record: WorkspaceRecord) -> WorkspaceResponse:
         id=record.id,
         status="active",
         authentication_mode=record.authentication_mode,
+        expires_at=record.expires_at,
+        gemini_configured=record.gemini_configured,
+        local_only_mode=record.local_only_mode,
+        consent_required=record.gemini_configured,
+        consent_accepted=record.consent_accepted_at is not None,
         created_at=record.created_at,
     )
 
@@ -140,6 +157,83 @@ def analysis_response(record: AnalysisRecord) -> AnalysisResponse:
                 for section in bundle.business_report.sections
             ],
         ),
+    )
+
+
+def document_collection_response(
+    record: DocumentCollectionRecord,
+) -> DocumentCollectionResponse:
+    return DocumentCollectionResponse(
+        id=record.id,
+        workspace_id=record.workspace_id,
+        status="ready",
+        document_count=len(record.filenames),
+        page_count=record.page_count,
+        chunk_count=record.chunk_count,
+        filenames=list(record.filenames),
+        created_at=record.created_at,
+    )
+
+
+def conversation_response(record: ConversationRecord) -> ConversationResponse:
+    return ConversationResponse(
+        id=record.id,
+        workspace_id=record.workspace_id,
+        status="active",
+        dataset_id=record.dataset_id,
+        document_collection_id=record.document_collection_id,
+        message_count=len(record.message_ids),
+        created_at=record.created_at,
+    )
+
+
+def message_response(record: MessageRecord) -> MessageResponse:
+    return MessageResponse(
+        id=record.id,
+        conversation_id=record.conversation_id,
+        role="assistant",
+        question=record.question,
+        answer=record.answer,
+        route=record.route,
+        sql=record.sql,
+        rows=_records(record.dataframe) if record.dataframe is not None else None,
+        sources=[SourceResponse(citation=source) for source in record.sources],
+        created_at=record.created_at,
+    )
+
+
+def message_list_response(
+    conversation_id: str,
+    records: list[MessageRecord],
+) -> MessageListResponse:
+    return MessageListResponse(
+        conversation_id=conversation_id,
+        messages=[message_response(record) for record in records],
+    )
+
+
+def report_response(record: ReportRecord) -> ReportResponse:
+    return ReportResponse(
+        id=record.id,
+        analysis_id=record.analysis_id,
+        workspace_id=record.workspace_id,
+        status="ready",
+        formats=["markdown", "pdf"],
+        created_at=record.created_at,
+    )
+
+
+def export_response(record: ExportRecord) -> ExportResponse:
+    return ExportResponse(
+        id=record.id,
+        message_id=record.message_id,
+        workspace_id=record.workspace_id,
+        status="ready",
+        format=record.format,
+        filename=record.filename,
+        media_type=record.media_type,
+        size_bytes=len(record.payload),
+        created_at=record.created_at,
     )
 
 

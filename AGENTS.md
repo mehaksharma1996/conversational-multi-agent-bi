@@ -23,6 +23,7 @@ document retrieval, anomaly detection, visualization, and report generation.
 - `src/reporting/` produces PDF reports.
 - `packages/analytics/` exposes framework-neutral tabular commands and services.
 - `packages/connectors/` defines provider and repository ports for application code.
+- `packages/retrieval/` exposes framework-neutral document-indexing commands and services.
 - `tests/` contains the pytest suite.
 
 ## Technology

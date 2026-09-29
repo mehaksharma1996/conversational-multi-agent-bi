@@ -1,8 +1,8 @@
 # Conversational Business Intelligence Workbench
 
-A Streamlit application for exploring uploaded CSV, Excel, and PDF files through
-deterministic analytics, read-only SQL, document retrieval, and coordinated
-conversational workflows.
+A local-first conversational BI platform with Streamlit and React product
+surfaces over deterministic analytics, read-only SQL, document retrieval, and
+coordinated conversational workflows.
 
 ## What It Does
 
@@ -69,6 +69,14 @@ journey, with responsive styling, accessible controls, component coverage,
 and a Playwright critical-path test. Streamlit remains available while later
 phases migrate conversational SQL, document retrieval, and exports.
 
+Phase 5 completes [React and FastAPI feature parity](docs/architecture/feature-parity.md)
+for the core analyst journey. The typed web client now indexes bounded PDFs,
+records explicit Gemini data-sharing consent, invokes the existing memory,
+safe-SQL, RAG, and hybrid routes, displays citations and generated SQL,
+downloads Markdown/PDF reports and spreadsheet-safe CSV/Excel results, and
+resets the full local workspace. Tenant checks and sliding retention apply to
+the new API resources; Streamlit remains available as a compatibility surface.
+
 ## Local Setup
 
 Python 3.12 through 3.14 is supported. The current verified environment uses
@@ -81,13 +89,13 @@ Copy-Item .env.example .env
 & ".\.venv\Scripts\python.exe" -m streamlit run app.py
 ```
 
-Run the Phase 3 API locally in a separate terminal:
+Run the FastAPI service locally in a separate terminal:
 
 ```powershell
 & ".\.venv\Scripts\python.exe" -m uvicorn apps.api.main:app --reload
 ```
 
-Run the Phase 4 web client in another terminal. Node 24.14 and npm 11.20 are
+Run the React web client in another terminal. Node 24.14 and npm 11.20 are
 pinned in `.nvmrc` and `apps/web/package.json`:
 
 ```powershell
@@ -103,7 +111,8 @@ introducing a production hosting decision.
 Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
 The committed [OpenAPI contract](openapi/openapi.json) can be regenerated with
 `python -m scripts.generate_openapi`. Until durable resource persistence lands,
-run one API process; restarting it clears API-created workspace metadata.
+run one API process. Restarting it clears API-created workspace metadata; use
+the UI reset before shutdown when you also want its local files removed.
 
 For development tools:
 
@@ -345,6 +354,7 @@ those controls before hosting it for untrusted users.
 - `src/memory/`: state lifecycle and conversational memory.
 - `packages/analytics/`: framework-neutral tabular workflow commands and service.
 - `packages/connectors/`: provider, identity, audit, and persistence ports.
+- `packages/retrieval/`: framework-neutral PDF indexing application service.
 - `openapi/`: generated, reproducibility-checked API contract.
 - `tests/`: unit and Streamlit integration tests.
 
