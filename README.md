@@ -35,6 +35,17 @@ For questions that explicitly combine uploaded transactions with document
 guidance, the hybrid route retrieves the guidance first and then generates a
 guarded query using that context. It does not claim autonomous agent consensus.
 
+### Modernization roadmap
+
+The production-structure roadmap is tracked in
+[GitHub issue #6](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/6).
+Its first iteration records the [current-to-target baseline](docs/architecture/modernization-baseline.md),
+the [initial API resource model](docs/architecture/api-resource-model.md), and
+the [architecture decisions](docs/adr/README.md) that govern the incremental
+React, FastAPI, evaluation, observability, governance, and local Docker work.
+The existing Streamlit application remains the behavioral reference until the
+new product surface demonstrates tested feature parity.
+
 ## Local Setup
 
 Python 3.12 through 3.14 is supported. The current verified environment uses
