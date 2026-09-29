@@ -16,7 +16,7 @@ jobs:
         working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -103,7 +103,7 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 300
       - name: Smoke test (journey, hardening, restart, audit persistence)
         run: python3 scripts/compose_smoke.py --compose --expect-local-only
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
