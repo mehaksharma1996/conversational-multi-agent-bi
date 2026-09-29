@@ -38,6 +38,9 @@ waiver are in [ADR 0010](../adr/0010-local-container-release.md).
 | Secrets | none; runtime environment only | none |
 | Startup check | build fails if the API or Streamlit cannot be imported | build fails on type or lint errors in the app |
 
+Measured in CI on Linux: the API image is about 2.25 GB (budget 4.5 GB, which guards against the
+multi-gigabyte CUDA PyTorch wheel) and the web image about 59 MB (budget 150 MB).
+
 The API image contains application code only (`apps`, `config`, `packages`, `scripts`, `src`, `app.py`).
 Tests, docs, sample data, and `.env` are excluded by `.dockerignore`. The web bundle uses relative URLs,
 so no API address is compiled in.

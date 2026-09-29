@@ -6,8 +6,9 @@ restart-persistence waiver are recorded in [ADR 0010](../adr/0010-local-containe
 ## Requirements
 
 - Docker Engine or Docker Desktop with Compose v2.17+ (`docker compose version`).
-- About 4 GB of memory for Docker and roughly 3 GB of disk for the images (the API image is
-  large because of scientific Python and CPU-only PyTorch), plus about 100 MB for the embedding model.
+- About 4 GB of memory for Docker and roughly 2.5 GB of disk for the images (measured in CI: the API image
+  is about 2.25 GB because of scientific Python and CPU-only PyTorch; the web image is about 60 MB), plus
+  about 100 MB for the embedding model. CI fails if the API image exceeds 4.5 GB.
 - Network access for the first build, and for the first PDF upload unless you prefetch the model
   (see "Offline use").
 
