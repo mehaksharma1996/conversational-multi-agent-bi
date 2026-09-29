@@ -52,7 +52,9 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
   await page.getByRole("button", { name: "Ask workbench" }).click();
   await expect(page.getByText("rag route")).toBeVisible();
   await page.getByText("Retrieved document sources").click();
-  await expect(page.getByRole("listitem", { name: /review_policy\.pdf, page 1/ })).toBeVisible();
+  await expect(
+    page.locator(".source-list > li").filter({ hasText: "review_policy.pdf, page 1" }),
+  ).toBeVisible();
 
   await page.getByLabel("Business question").fill("Which uploaded transactions violate the policy?");
   await page.getByRole("button", { name: "Ask workbench" }).click();
