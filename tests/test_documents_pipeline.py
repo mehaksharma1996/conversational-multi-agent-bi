@@ -218,6 +218,29 @@ def test_replace_chunks_swaps_in_new_content() -> None:
     assert not any("Old refund policy" in chunk.text for chunk in chunks)
 
 
+def test_replace_chunks_refreshes_other_live_readers() -> None:
+    persist_dir = isolated_vector_path("replace_chunks_live_reader")
+    reader = ChromaDocumentStore(persist_dir=persist_dir, embedder=FakeEmbedder())
+    reader.replace_chunks(
+        [DocumentChunk(id="old", text="Old refund policy.", metadata={"filename": "old.pdf"})]
+    )
+
+    writer = ChromaDocumentStore(persist_dir=persist_dir, embedder=FakeEmbedder())
+    writer.replace_chunks(
+        [
+            DocumentChunk(
+                id="new",
+                text="New security policy.",
+                metadata={"filename": "new.pdf"},
+            )
+        ]
+    )
+
+    assert reader.count() == 1
+    remaining = reader.query("security policy", top_k=1)
+    assert remaining and remaining[0].text == "New security policy."
+
+
 def test_replace_chunks_leaves_existing_index_untouched_on_failure() -> None:
     persist_dir = isolated_vector_path("replace_chunks_rollback")
     good_store = ChromaDocumentStore(persist_dir=persist_dir, embedder=FakeEmbedder())

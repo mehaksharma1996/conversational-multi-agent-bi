@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock, RLock
 from typing import Any
 from uuid import uuid4
 
@@ -15,6 +16,16 @@ from src.documents.embedding import TextEmbedder
 
 DEFAULT_COLLECTION_NAME = "uploaded_documents"
 DEFAULT_EMBEDDING_BATCH_SIZE = 64
+
+_STORE_LOCKS_GUARD = Lock()
+_STORE_LOCKS: dict[tuple[str, str], RLock] = {}
+
+
+def _store_lock(persist_dir: Path, collection_name: str) -> RLock:
+    """Share one operation lock across clients for the same embedded index."""
+    key = (str(persist_dir.resolve()), collection_name)
+    with _STORE_LOCKS_GUARD:
+        return _STORE_LOCKS.setdefault(key, RLock())
 
 
 @dataclass(frozen=True)
@@ -37,28 +48,33 @@ class ChromaDocumentStore:
         self.persist_dir = persist_dir
         self.embedder = embedder
         self.collection_name = collection_name
+        self._lock = _store_lock(self.persist_dir, self.collection_name)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
-        self._client: Any = chromadb.PersistentClient(path=str(self.persist_dir))
-        self._collection: Any = self._client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        with self._lock:
+            self._client: Any = chromadb.PersistentClient(path=str(self.persist_dir))
+            self._collection: Any = self._client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
 
     def reset(self) -> None:
-        collection_names = {collection.name for collection in self._client.list_collections()}
-        if self.collection_name in collection_names:
-            self._client.delete_collection(name=self.collection_name)
-        self._collection = self._client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        with self._lock:
+            collection_names = {collection.name for collection in self._client.list_collections()}
+            if self.collection_name in collection_names:
+                self._client.delete_collection(name=self.collection_name)
+            self._collection = self._client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
 
     def add_chunks(
         self,
         chunks: list[DocumentChunk],
         batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
     ) -> None:
-        self._add_chunks_to(self._collection, chunks, batch_size)
+        with self._lock:
+            self._refresh_collection()
+            self._add_chunks_to(self._collection, chunks, batch_size)
 
     def replace_chunks(
         self,
@@ -73,22 +89,23 @@ class ChromaDocumentStore:
         so a failure partway through never leaves a partial or missing index
         under the canonical collection name.
         """
-        staging_name = f"{self.collection_name}__staging_{uuid4().hex[:8]}"
-        staging_collection = self._client.get_or_create_collection(
-            name=staging_name,
-            metadata={"hnsw:space": "cosine"},
-        )
-        try:
-            self._add_chunks_to(staging_collection, chunks, batch_size)
-        except Exception:
-            self._client.delete_collection(name=staging_name)
-            raise
+        with self._lock:
+            staging_name = f"{self.collection_name}__staging_{uuid4().hex[:8]}"
+            staging_collection = self._client.get_or_create_collection(
+                name=staging_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            try:
+                self._add_chunks_to(staging_collection, chunks, batch_size)
+            except Exception:
+                self._client.delete_collection(name=staging_name)
+                raise
 
-        collection_names = {collection.name for collection in self._client.list_collections()}
-        if self.collection_name in collection_names:
-            self._client.delete_collection(name=self.collection_name)
-        staging_collection.modify(name=self.collection_name)
-        self._collection = staging_collection
+            collection_names = {collection.name for collection in self._client.list_collections()}
+            if self.collection_name in collection_names:
+                self._client.delete_collection(name=self.collection_name)
+            staging_collection.modify(name=self.collection_name)
+            self._collection = staging_collection
 
     def _add_chunks_to(
         self,
@@ -119,14 +136,19 @@ class ChromaDocumentStore:
         top_k: int = 4,
         max_distance: float | None = None,
     ) -> list[RetrievedChunk]:
-        if not question.strip() or self.count() == 0:
+        if not question.strip():
             return []
 
-        embeddings = self.embedder.embed_texts([question])
-        result = self._collection.query(
-            query_embeddings=embeddings,
-            n_results=min(top_k, self.count()),
-        )
+        with self._lock:
+            self._refresh_collection()
+            count = int(self._collection.count())
+            if count == 0:
+                return []
+            embeddings = self.embedder.embed_texts([question])
+            result = self._collection.query(
+                query_embeddings=embeddings,
+                n_results=min(top_k, count),
+            )
 
         documents = result.get("documents", [[]])[0]
         metadatas = result.get("metadatas", [[]])[0]
@@ -160,13 +182,27 @@ class ChromaDocumentStore:
         return chunks
 
     def count(self) -> int:
-        return int(self._collection.count())
+        with self._lock:
+            self._refresh_collection()
+            return int(self._collection.count())
+
+    def _refresh_collection(self) -> None:
+        """Resolve the canonical collection after another client promoted a staging index.
+
+        Chroma collection handles retain an internal collection ID. Deleting the old
+        canonical collection during promotion invalidates handles owned by other store
+        instances even though a collection with the canonical name exists again.
+        Resolving by name at each serialized operation keeps those readers on the
+        current index and avoids reads racing Chroma's segment cleanup.
+        """
+        self._collection = self._client.get_collection(name=self.collection_name)
 
     def close(self) -> None:
         """Release Chroma references before session storage is removed on Windows."""
-        self._collection = None
-        close = getattr(self._client, "close", None)
-        if callable(close):
-            close()
-        self._client = None
+        with self._lock:
+            self._collection = None
+            close = getattr(self._client, "close", None)
+            if callable(close):
+                close()
+            self._client = None
         gc.collect()
