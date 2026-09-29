@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Conversational BI Target Platform",
+    "output": ".archify/architecture-target-platform-20260928-232755/target-platform.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/mehaksharma1996/conversational-multi-agent-bi.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "7ae7c6a75ff22fef188072f70242cd888f8a5dc7"
+    }
+  },
+  "components": [
+    {
+      "id": "analyst",
+      "type": "external",
+      "label": "Business Analyst",
+      "sublabel": "Uploads data and reviews evidence",
+      "pos": [500, 30],
+      "size": [150, 70],
+      "sources": [
+        { "path": "README.md", "line": 1, "end_line": 18, "label": "Current product journey" }
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "React Web App",
+      "sublabel": "Strict TypeScript + generated client",
+      "tag": "planned",
+      "pos": [485, 210],
+      "size": [180, 76],
+      "sources": [
+        { "path": "docs/adr/0003-react-typescript-frontend.md", "line": 13, "end_line": 26, "label": "Frontend decision" }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI Service",
+      "sublabel": "/api/v1 + Pydantic + OpenAPI",
+      "tag": "planned",
+      "pos": [485, 460],
+      "size": [180, 80],
+      "sources": [
+        { "path": "docs/adr/0002-versioned-api-contract.md", "line": 13, "end_line": 27, "label": "API contract" }
+      ]
+    },
+    {
+      "id": "identity",
+      "type": "security",
+      "label": "OIDC Identity",
+      "sublabel": "Verified subject -> tenant context",
+      "pos": [100, 464],
+      "size": [180, 72],
+      "sources": [
+        { "path": "docs/adr/0004-identity-session-tenancy.md", "line": 14, "end_line": 25, "label": "Identity decision" }
+      ]
+    },
+    {
+      "id": "governance",
+      "type": "security",
+      "label": "Governance Policy",
+      "sublabel": "Authorization, consent, limits, audit",
+      "pos": [480, 710],
+      "size": [190, 80],
+      "sources": [
+        { "path": "docs/adr/0001-modular-monorepo-boundaries.md", "line": 16, "end_line": 32, "label": "Package boundary" },
+        { "path": "docs/architecture/modernization-baseline.md", "line": 48, "end_line": 55, "label": "Security invariants" }
+      ]
+    },
+    {
+      "id": "services",
+      "type": "backend",
+      "label": "Application Services",
+      "sublabel": "Ingestion, analytics, SQL, reports",
+      "pos": [470, 960],
+      "size": [210, 84],
+      "sources": [
+        { "path": "docs/adr/0001-modular-monorepo-boundaries.md", "line": 30, "end_line": 36, "label": "Framework-neutral services" },
+        { "path": "docs/architecture/modernization-baseline.md", "line": 16, "end_line": 26, "label": "Current owners" }
+      ]
+    },
+    {
+      "id": "orchestration",
+      "type": "backend",
+      "label": "LangGraph Workflows",
+      "sublabel": "Memory, SQL, RAG, hybrid routes",
+      "tag": "retain",
+      "pos": [470, 1200],
+      "size": [210, 84],
+      "sources": [
+        { "path": "src/orchestration/langgraph_orchestrator.py", "line": 88, "end_line": 150, "label": "Workflow graph" },
+        { "path": "docs/architecture/modernization-baseline.md", "line": 65, "end_line": 71, "label": "Agent boundary" }
+      ]
+    },
+    {
+      "id": "gemini",
+      "type": "external",
+      "label": "Gemini API",
+      "sublabel": "Bounded model-assisted operations",
+      "pos": [490, 1460],
+      "size": [170, 76],
+      "sources": [
+        { "path": "src/llm/gemini_client.py", "line": 18, "end_line": 95, "label": "Provider adapter" }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Optional Worker",
+      "sublabel": "Measured long-running jobs only",
+      "tag": "conditional",
+      "pos": [100, 963],
+      "size": [190, 78],
+      "sources": [
+        { "path": "docs/adr/0005-job-execution-boundary.md", "line": 14, "end_line": 27, "label": "Worker trigger" }
+      ]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "Session SQLite",
+      "sublabel": "Profiles, table data, guarded SQL",
+      "tag": "retain",
+      "pos": [850, 966],
+      "size": [180, 72],
+      "sources": [
+        { "path": "docs/adr/0006-persistence-concurrency-lifecycle.md", "line": 14, "end_line": 24, "label": "Persistence decision" }
+      ]
+    },
+    {
+      "id": "chroma",
+      "type": "database",
+      "label": "Session ChromaDB",
+      "sublabel": "Chunks, embeddings, retrieval evidence",
+      "tag": "retain",
+      "pos": [850, 1206],
+      "size": [180, 72],
+      "sources": [
+        { "path": "docs/adr/0006-persistence-concurrency-lifecycle.md", "line": 14, "end_line": 27, "label": "Vector persistence" }
+      ]
+    },
+    {
+      "id": "observability",
+      "type": "backend",
+      "label": "Observability + Audit",
+      "sublabel": "Privacy-safe logs, metrics, traces",
+      "tag": "planned",
+      "pos": [60, 1203],
+      "size": [230, 78],
+      "sources": [
+        { "path": "docs/adr/0007-observability-privacy.md", "line": 13, "end_line": 24, "label": "Telemetry decision" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Local Docker Compose topology",
+      "wraps": ["web", "api", "identity", "governance", "services", "orchestration", "worker", "sqlite", "chroma", "observability"],
+      "pad": 24
+    },
+    {
+      "kind": "security-group",
+      "label": "Tenant ownership and workspace boundary",
+      "wraps": ["api", "governance", "services", "orchestration", "worker", "sqlite", "chroma"],
+      "pad": 14
+    }
+  ],
+  "connections": [
+    { "id": "analyst-web", "from": "analyst", "to": "web", "label": "uses", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "id": "web-api", "from": "web", "to": "api", "label": "generated /api/v1 client", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "id": "identity-api", "from": "identity", "to": "api", "label": "verified identity claims", "variant": "security", "fromSide": "right", "toSide": "left" },
+    { "id": "api-governance", "from": "api", "to": "governance", "label": "validated request context", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "id": "governance-services", "from": "governance", "to": "services", "label": "authorized typed commands", "fromSide": "bottom", "toSide": "top" },
+    { "id": "services-orchestration", "from": "services", "to": "orchestration", "label": "model-assisted routes", "fromSide": "bottom", "toSide": "top" },
+    { "id": "orchestration-gemini", "from": "orchestration", "to": "gemini", "label": "classify, propose, synthesize", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "id": "services-sqlite", "from": "services", "to": "sqlite", "label": "versioned workspace data", "fromSide": "right", "toSide": "left" },
+    { "id": "orchestration-chroma", "from": "orchestration", "to": "chroma", "label": "retrieve grounded evidence", "fromSide": "right", "toSide": "left" },
+    { "id": "governance-worker", "from": "governance", "to": "worker", "label": "authorized job", "variant": "dashed", "fromSide": "left", "toSide": "top" },
+    { "id": "worker-services", "from": "worker", "to": "services", "label": "invoke same services", "variant": "dashed", "fromSide": "right", "toSide": "left" },
+    { "id": "orchestration-observability", "from": "orchestration", "to": "observability", "label": "route + provider signals", "fromSide": "left", "toSide": "right" },
+    { "id": "worker-observability", "from": "worker", "to": "observability", "label": "job telemetry + audit", "variant": "dashed", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Incremental migration",
+      "items": [
+        "Streamlit stays until tested React/FastAPI parity",
+        "Framework-neutral services are extracted before UI retirement"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Deterministic control plane",
+      "items": [
+        "Authorization, SQL safety, resource limits, retention, and deletion stay deterministic",
+        "Model outputs are validated and remain reviewable"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Local and portable",
+      "items": [
+        "Docker Compose is the roadmap's operational boundary",
+        "Worker adoption is measurement-gated; hosting selection is deferred"
+      ]
+    }
+  ]
+}

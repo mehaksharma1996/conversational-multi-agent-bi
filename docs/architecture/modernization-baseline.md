@@ -29,8 +29,10 @@ through LangGraph to memory, guarded SQL, RAG, or hybrid workflows.
 
 The target is a local, cloud-neutral composition of a React web client, FastAPI
 service, reusable packages, current local stores/providers, and an optional
-worker behind a job interface. The target diagram is delivered as a validated
-Archify artifact in the first-iteration diagram folder under `.archify/`.
+worker behind a job interface. Explore the validated
+[interactive target architecture](../../.archify/architecture-target-platform-20260928-232755/target-platform.html)
+or inspect its
+[typed specification](../../.archify/architecture-target-platform-20260928-232755/candidate.json).
 
 The target is intentionally not a hosted-deployment design. Docker Compose is
 the operational boundary for this roadmap.

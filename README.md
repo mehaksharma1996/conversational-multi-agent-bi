@@ -43,6 +43,9 @@ Its first iteration records the [current-to-target baseline](docs/architecture/m
 the [initial API resource model](docs/architecture/api-resource-model.md), and
 the [architecture decisions](docs/adr/README.md) that govern the incremental
 React, FastAPI, evaluation, observability, governance, and local Docker work.
+The validated
+[interactive target architecture](.archify/architecture-target-platform-20260928-232755/target-platform.html)
+shows how those boundaries fit together.
 The existing Streamlit application remains the behavioral reference until the
 new product surface demonstrates tested feature parity.
 
