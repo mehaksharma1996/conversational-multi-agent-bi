@@ -7,14 +7,20 @@ import logging
 import streamlit as st
 
 from config.settings import Settings
+from packages.analytics import (
+    AnalyzeTabularCommand,
+    ConfirmSchemaCommand,
+    ProfiledTabularData,
+    ProfileTabularCommand,
+    TabularApplicationService,
+)
 from src.agents.report_agent import BusinessReport, report_to_markdown
 from src.analytics.anomaly_detection import (
     DEFAULT_CONTAMINATION,
     AnomalyReport,
-    recommend_anomaly_features,
 )
 from src.analytics.basic_analytics import AnalyticsReport
-from src.analytics.pipeline import AnalysisBundle, build_analysis_bundle
+from src.analytics.pipeline import AnalysisBundle
 from src.charts.chart_builder import ChartSpec
 from src.memory.session_keys import (
     ANALYSIS_CACHE,
@@ -35,12 +41,11 @@ from src.profiling.capability_detector import (
     CapabilityReport,
     capability_report_to_dataframe,
 )
-from src.profiling.data_profiler import DataProfile, profile_dataframe, profile_to_dataframe
+from src.profiling.data_profiler import DataProfile, profile_to_dataframe
 from src.profiling.schema_mapper import (
     CANONICAL_FIELDS,
     REQUIRED_TYPES,
     SchemaMapping,
-    map_schema,
     schema_mapping_to_dataframe,
 )
 from src.reporting.pdf_report import build_report_pdf, chart_export_error
@@ -53,6 +58,7 @@ from src.storage.sqlite_store import DEFAULT_TABLE_NAME, SQLiteStore, StoredTabl
 from src.utils.error_reporting import report_error
 
 LOGGER = logging.getLogger(__name__)
+TABULAR_SERVICE = TabularApplicationService()
 
 
 def render_dashboard(settings: Settings) -> None:
@@ -69,8 +75,9 @@ def render_dashboard(settings: Settings) -> None:
 
     dataframe = loaded_table.dataframe
     data_signature = st.session_state.get(TABULAR_SIGNATURE, loaded_table.filename)
-    profile = _cached_profile(dataframe, data_signature)
-    suggested_mapping = map_schema(profile)
+    profiled_data = _cached_profile(dataframe, data_signature)
+    profile = profiled_data.profile
+    suggested_mapping = profiled_data.suggested_mapping
     schema_mapping = _render_schema_controls(
         profile=profile,
         suggested_mapping=suggested_mapping,
@@ -327,7 +334,9 @@ def _render_schema_controls(
         )
 
     try:
-        return map_schema(profile, overrides=overrides)
+        return TABULAR_SERVICE.confirm_schema(
+            ConfirmSchemaCommand(profile=profile, overrides=overrides)
+        )
     except ValueError as exc:
         st.error(f"Schema mapping needs attention: {exc}")
         return suggested_mapping
@@ -338,7 +347,7 @@ def _render_anomaly_controls(
     schema_mapping: SchemaMapping,
     data_signature: str,
 ) -> tuple[list[str], float]:
-    recommended = recommend_anomaly_features(profile, schema_mapping)
+    recommended = TABULAR_SERVICE.recommend_anomaly_features(profile, schema_mapping)
     with st.expander("Anomaly model settings", expanded=False):
         features = st.multiselect(
             "Numeric features",
@@ -596,14 +605,18 @@ def _render_sql_workspace(stored_table: StoredTable | None) -> None:
         st.dataframe(result, use_container_width=True)
 
 
-def _cached_profile(dataframe, data_signature: str) -> DataProfile:
+def _cached_profile(dataframe, data_signature: str) -> ProfiledTabularData:
     cached = st.session_state.get(PROFILE_CACHE)
-    if cached is not None and cached[0] == data_signature:
+    if (
+        cached is not None
+        and cached[0] == data_signature
+        and isinstance(cached[1], ProfiledTabularData)
+    ):
         return cached[1]
 
-    profile = profile_dataframe(dataframe)
-    st.session_state[PROFILE_CACHE] = (data_signature, profile)
-    return profile
+    profiled_data = TABULAR_SERVICE.profile(ProfileTabularCommand(dataframe=dataframe))
+    st.session_state[PROFILE_CACHE] = (data_signature, profiled_data)
+    return profiled_data
 
 
 def _cached_analysis(
@@ -627,13 +640,15 @@ def _cached_analysis(
     if cached is not None and cached[0] == cache_key:
         return cached[1]
 
-    bundle = build_analysis_bundle(
-        dataframe=dataframe,
-        profile=profile,
-        schema_mapping=schema_mapping,
-        anomaly_features=list(anomaly_features),
-        anomaly_contamination=anomaly_contamination,
-        document_status=document_status,
+    bundle = TABULAR_SERVICE.analyze(
+        AnalyzeTabularCommand(
+            dataframe=dataframe,
+            profile=profile,
+            schema_mapping=schema_mapping,
+            anomaly_features=anomaly_features,
+            anomaly_contamination=anomaly_contamination,
+            document_status=document_status,
+        )
     )
     st.session_state[ANALYSIS_CACHE] = (cache_key, bundle)
     return bundle

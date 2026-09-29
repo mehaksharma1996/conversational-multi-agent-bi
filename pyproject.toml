@@ -23,7 +23,7 @@ warn_unused_ignores = true
 exclude = "(^|/)(\\.venv|data|work|outputs)/"
 
 [tool.coverage.run]
-source = ["config", "src"]
+source = ["config", "packages", "src"]
 omit = ["src/ui/*"]
 
 [tool.coverage.report]

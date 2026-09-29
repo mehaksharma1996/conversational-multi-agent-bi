@@ -19,6 +19,8 @@ document retrieval, anomaly detection, visualization, and report generation.
 - `src/orchestration/` routes questions through SQL, document RAG, memory, or fallback paths with LangGraph.
 - `src/memory/` manages session-level conversational context.
 - `src/reporting/` produces PDF reports.
+- `packages/analytics/` exposes framework-neutral tabular commands and services.
+- `packages/connectors/` defines provider and repository ports for application code.
 - `tests/` contains the pytest suite.
 
 ## Technology
@@ -47,5 +49,5 @@ Run quality checks with:
 python -m pytest
 python -m ruff check .
 python -m ruff format --check .
-python -m mypy config src tests
+python -m mypy config packages src tests
 ```

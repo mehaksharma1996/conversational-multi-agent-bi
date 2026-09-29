@@ -49,6 +49,12 @@ shows how those boundaries fit together.
 The existing Streamlit application remains the behavioral reference until the
 new product surface demonstrates tested feature parity.
 
+Phase 2 introduces a [framework-neutral tabular core](docs/architecture/framework-neutral-core.md)
+under `packages/analytics/`, with typed upload, profile, schema-review, and
+analysis commands now used by Streamlit. Provider and repository contracts live
+under `packages/connectors/`, and CI prevents these packages from importing UI
+or API frameworks. The FastAPI boundary remains the next migration phase.
+
 ## Local Setup
 
 Python 3.12 through 3.14 is supported. The current verified environment uses
@@ -92,7 +98,7 @@ fixed local-development tenant when authentication is not configured; see
 ```powershell
 & ".\.venv\Scripts\python.exe" -m ruff check .
 & ".\.venv\Scripts\python.exe" -m ruff format --check .
-& ".\.venv\Scripts\python.exe" -m mypy config src tests
+& ".\.venv\Scripts\python.exe" -m mypy config packages src tests
 & ".\.venv\Scripts\python.exe" -m pytest --cov --cov-report=term-missing
 ```
 
@@ -289,6 +295,8 @@ those controls before hosting it for untrusted users.
 - `src/agents/`: SQL, document-answering, and report workflows.
 - `src/orchestration/`: LangGraph routing and hybrid coordination.
 - `src/memory/`: state lifecycle and conversational memory.
+- `packages/analytics/`: framework-neutral tabular workflow commands and service.
+- `packages/connectors/`: provider, identity, audit, and persistence ports.
 - `tests/`: unit and Streamlit integration tests.
 
 ## Current Limitations

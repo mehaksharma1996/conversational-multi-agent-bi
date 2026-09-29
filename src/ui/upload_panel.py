@@ -9,16 +9,18 @@ from io import BytesIO
 import streamlit as st
 
 from config.settings import Settings
+from packages.analytics import (
+    ListWorkbookSheetsCommand,
+    LoadTabularCommand,
+    TabularApplicationService,
+    TabularWorkflowError,
+)
 from src.documents.chunker import chunk_document_pages
 from src.documents.embedding import EmbeddingError, SentenceTransformerEmbedder
 from src.documents.retriever import DocumentRetriever
 from src.documents.vector_store import ChromaDocumentStore
 from src.ingestion.pdf_loader import PDFLoadError, count_pdf_pages, load_pdf_file
-from src.ingestion.tabular_loader import (
-    TabularLoadError,
-    list_excel_sheets,
-    load_tabular_file,
-)
+from src.ingestion.tabular_loader import TabularLoadError
 from src.memory.session_keys import (
     DOCUMENT_ERROR,
     DOCUMENT_RETRIEVER,
@@ -38,6 +40,7 @@ from src.utils.error_reporting import report_error
 from src.utils.hashing import sha256_bytes
 
 LOGGER = logging.getLogger(__name__)
+TABULAR_SERVICE = TabularApplicationService()
 
 
 def render_upload_panel(settings: Settings) -> None:
@@ -152,23 +155,18 @@ def _handle_tabular_upload(
     """
     st.session_state[TABULAR_SIGNATURE] = signature
     try:
-        loaded_table = load_tabular_file(
-            file=BytesIO(payload),
-            filename=filename,
-            max_rows=settings.max_tabular_rows + 1,
-            sheet_name=sheet_name or 0,
+        loaded_table = TABULAR_SERVICE.load(
+            LoadTabularCommand(
+                payload=payload,
+                filename=filename,
+                max_upload_bytes=settings.max_tabular_upload_bytes,
+                max_rows=settings.max_tabular_rows,
+                sheet_name=sheet_name or 0,
+            )
         )
-    except TabularLoadError as exc:
+    except (TabularLoadError, TabularWorkflowError) as exc:
         st.session_state[UPLOAD_ERROR] = str(exc)
         st.error(str(exc))
-        return
-
-    if loaded_table.row_count > settings.max_tabular_rows:
-        st.session_state[UPLOAD_ERROR] = (
-            f"The upload contains {loaded_table.row_count:,} rows; the current "
-            f"limit is {settings.max_tabular_rows:,}."
-        )
-        st.error(st.session_state[UPLOAD_ERROR])
         return
 
     _remove_table_storage(settings)
@@ -192,7 +190,9 @@ def _select_excel_sheet(payload: bytes, filename: str) -> str | None:
     if not filename.lower().endswith((".xls", ".xlsx")):
         return None
     try:
-        sheet_names = list_excel_sheets(BytesIO(payload))
+        sheet_names = TABULAR_SERVICE.list_workbook_sheets(
+            ListWorkbookSheetsCommand(payload=payload, filename=filename)
+        )
     except TabularLoadError as exc:
         st.error(str(exc))
         return None
