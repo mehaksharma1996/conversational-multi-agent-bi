@@ -5,6 +5,15 @@ __pycache__/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.npm-cache/
+
+# Frontend dependencies and generated test/build output
+apps/web/node_modules/
+apps/web/dist/
+apps/web/coverage/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/.playwright-browsers/
 
 .env
 .venv/

@@ -62,6 +62,13 @@ deterministic analysis, health checks, safe request-ID errors, and a committed
 OpenAPI contract. The API repository is intentionally process-local at this
 stage; durable persistence is deferred and documented.
 
+Phase 4 adds the [React and TypeScript tabular vertical slice](docs/architecture/react-vertical-slice.md)
+under `apps/web/`. It uses the committed OpenAPI contract to provide a typed
+upload, schema-review, anomaly-configuration, and deterministic-analysis
+journey, with responsive styling, accessible controls, component coverage,
+and a Playwright critical-path test. Streamlit remains available while later
+phases migrate conversational SQL, document retrieval, and exports.
+
 ## Local Setup
 
 Python 3.12 through 3.14 is supported. The current verified environment uses
@@ -79,6 +86,19 @@ Run the Phase 3 API locally in a separate terminal:
 ```powershell
 & ".\.venv\Scripts\python.exe" -m uvicorn apps.api.main:app --reload
 ```
+
+Run the Phase 4 web client in another terminal. Node 24.14 and npm 11.20 are
+pinned in `.nvmrc` and `apps/web/package.json`:
+
+```powershell
+Set-Location apps/web
+npm ci
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`. Vite proxies `/api` and `/health` to the local
+FastAPI process on port 8000, keeping local development same-origin without
+introducing a production hosting decision.
 
 Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
 The committed [OpenAPI contract](openapi/openapi.json) can be regenerated with
@@ -118,13 +138,21 @@ fixed local-development tenant when authentication is not configured; see
 & ".\.venv\Scripts\python.exe" -m ruff format --check .
 & ".\.venv\Scripts\python.exe" -m mypy apps config packages scripts src tests
 & ".\.venv\Scripts\python.exe" -m pytest --cov --cov-report=term-missing
+Set-Location apps/web
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+npm run test:e2e
 ```
 
-CI runs the same checks on pushes and pull requests, plus a separate security
+CI runs the same Python and frontend checks on pushes and pull requests. The
+frontend job also verifies that its generated client matches the committed
+OpenAPI contract and exercises the critical browser journey. A separate security
 job: `pip-audit` against `requirements.lock` (with a documented, reviewed
 exception for four chromadb advisories scoped to its standalone HTTP server,
 which this app never runs) and a `gitleaks` secret scan. Dependabot opens
-weekly update PRs for both Python dependencies and GitHub Actions.
+weekly update PRs for Python and frontend dependencies and GitHub Actions.
 `requirements.txt` pins direct runtime dependencies; `requirements.lock`
 captures the fully resolved, tested environment.
 
@@ -306,6 +334,7 @@ those controls before hosting it for untrusted users.
 
 - `app.py`: Streamlit entry point and session initialization.
 - `apps/api/`: versioned FastAPI application and HTTP contracts.
+- `apps/web/`: React and TypeScript web client for the migrated vertical slice.
 - `src/ui/`: upload, dashboard, report, and chat interfaces.
 - `src/profiling/`: profiling, schema mapping, and capability readiness.
 - `src/analytics/`: deterministic analytics and anomaly detection.

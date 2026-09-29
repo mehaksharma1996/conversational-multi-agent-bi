@@ -9,6 +9,7 @@ document retrieval, anomaly detection, visualization, and report generation.
 ## Architecture
 
 - `app.py` is the Streamlit entry point.
+- `apps/web/` is the React and TypeScript browser client.
 - `apps/api/` is the versioned FastAPI service boundary.
 - `src/ui/` contains upload, dashboard, and chat interfaces.
 - `src/ingestion/` loads tabular files and PDFs.
@@ -26,7 +27,8 @@ document retrieval, anomaly detection, visualization, and report generation.
 
 ## Technology
 
-- Python, Streamlit, and FastAPI
+- Python, Streamlit, FastAPI, React, and TypeScript
+- Vite for the web build, Vitest for component tests, and Playwright for browser tests
 - LangGraph for routing and orchestration
 - Gemini 2.5 Flash for SQL generation and grounded document answers
 - SentenceTransformers `all-MiniLM-L6-v2` for embeddings
@@ -51,4 +53,16 @@ python -m pytest
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy apps config packages scripts src tests
+```
+
+Run frontend quality checks from `apps/web/` with:
+
+```powershell
+npm ci
+npm run generate:api
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+npm run test:e2e
 ```

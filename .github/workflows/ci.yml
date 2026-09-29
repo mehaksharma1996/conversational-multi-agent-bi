@@ -8,6 +8,38 @@ permissions:
   contents: read
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Verify generated API client
+        run: |
+          npm run generate:api
+          git diff --exit-code -- src/api/schema.d.ts
+      - name: Frontend lint
+        run: npm run lint
+      - name: Frontend type check
+        run: npm run typecheck
+      - name: Frontend unit tests
+        run: npm run test
+      - name: Frontend production build
+        run: npm run build
+      - name: Install browser test dependency
+        run: npx playwright install --with-deps chromium
+      - name: Frontend browser test
+        run: npm run test:e2e
+
   quality:
     strategy:
       fail-fast: false
