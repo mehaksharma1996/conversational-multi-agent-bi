@@ -78,6 +78,55 @@ def test_load_tabular_file_cleans_currency_percent_dates_and_columns() -> None:
     assert loaded.dataframe["order_date"].tolist() == ["2024-03-15", "2024-03-16"]
 
 
+def test_percent_conversion_produces_a_warning() -> None:
+    loaded = load_tabular_file(
+        BytesIO(b"margin\n12%\n25%\n"),
+        "margins.csv",
+    )
+
+    assert any("Percentage" in warning for warning in loaded.column_warnings.get("margin", []))
+
+
+def test_single_currency_symbol_produces_a_warning() -> None:
+    loaded = load_tabular_file(
+        BytesIO(b'amount\n"$1,200.50"\n"$2,000.00"\n'),
+        "amounts.csv",
+    )
+
+    warnings = loaded.column_warnings.get("amount", [])
+    assert any("Currency symbol removed" in warning for warning in warnings)
+    assert not any("Mixed currency" in warning for warning in warnings)
+
+
+def test_mixed_currency_symbols_produce_a_warning() -> None:
+    loaded = load_tabular_file(
+        BytesIO('amount\n"$100.00"\n"€50.00"\n'.encode()),
+        "amounts.csv",
+    )
+
+    warnings = loaded.column_warnings.get("amount", [])
+    assert any("Mixed currency symbols" in warning for warning in warnings)
+
+
+def test_ambiguous_date_order_produces_a_warning() -> None:
+    loaded = load_tabular_file(
+        BytesIO(b"event_date\n01/02/2026\n03/04/2026\n05/06/2026\n"),
+        "events.csv",
+    )
+
+    warnings = loaded.column_warnings.get("event_date", [])
+    assert any("could not be determined" in warning for warning in warnings)
+
+
+def test_unambiguous_date_order_produces_no_warning() -> None:
+    loaded = load_tabular_file(
+        BytesIO(b"event_date\n25/02/2026\n03/04/2026\n"),
+        "events.csv",
+    )
+
+    assert "event_date" not in loaded.column_warnings
+
+
 def test_load_tabular_file_limits_rows_during_read() -> None:
     loaded = load_tabular_file(
         BytesIO(b"value\n1\n2\n3\n"),

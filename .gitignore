@@ -16,6 +16,8 @@ data/sqlite/*
 data/vectorstore/*
 data/reports/*
 data/sessions/
+data/.last_cleanup
+data/cleanup_audit.log
 
 !data/raw/.gitkeep
 !data/processed/.gitkeep

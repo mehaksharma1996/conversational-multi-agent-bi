@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.agents.report_agent import generate_business_report, report_to_markdown
+from src.agents.report_agent import (
+    BusinessReport,
+    ReportSection,
+    generate_business_report,
+    report_to_markdown,
+)
 from src.analytics.anomaly_detection import detect_anomalies
 from src.analytics.basic_analytics import run_basic_analytics
 from src.charts.chart_builder import build_charts
@@ -116,3 +121,24 @@ def test_build_report_pdf_can_embed_chart_images() -> None:
 
     assert pdf_with_charts.startswith(b"%PDF")
     assert len(pdf_with_charts) > len(pdf_without_charts)
+
+
+def test_build_report_pdf_renders_non_latin1_text() -> None:
+    """Helvetica (WinAnsi/Latin-1) cannot encode Cyrillic or Greek text; the
+    registered Unicode-capable font must be used instead or this raises.
+    """
+    report = BusinessReport(
+        title="Отчёт о транзакциях",
+        sections=[
+            ReportSection(
+                title="Σύνοψη",
+                body="Обзор данных за период. Στατιστικά στοιχεία.",
+                bullets=["Категория: Επισκόπηση", "Валюта: €"],
+            )
+        ],
+    )
+
+    pdf_bytes = build_report_pdf(report)
+
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 1000

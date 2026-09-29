@@ -33,6 +33,16 @@ def test_sqlite_store_saves_dataframe() -> None:
     assert SQLiteStore(database_path).table_exists(DEFAULT_TABLE_NAME)
 
 
+def test_sqlite_store_excludes_sample_values_when_disabled() -> None:
+    database_path = isolated_database_path("store_excludes_sample_values")
+    dataframe = pd.DataFrame({"amount": [10.5, 22.0], "merchant": ["Store A", "Store B"]})
+
+    stored_table = SQLiteStore(database_path, include_sample_values=False).save_dataframe(dataframe)
+
+    assert stored_table.sample_values == {}
+    assert stored_table.columns == ["amount", "merchant"]
+
+
 def test_sqlite_store_rejects_unsafe_table_name() -> None:
     database_path = isolated_database_path("store_rejects_unsafe_table_name")
     dataframe = pd.DataFrame({"amount": [10.5]})

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from io import BytesIO
 
+import pytest
 from reportlab.pdfgen import canvas
 
 from src.agents.rag_agent import answer_with_documents, build_rag_prompt
 from src.documents.chunker import DocumentChunk, chunk_document, chunk_document_pages
 from src.documents.retriever import RetrievalResult
 from src.documents.vector_store import ChromaDocumentStore, RetrievedChunk
-from src.ingestion.pdf_loader import DocumentPage, load_pdf_file
+from src.ingestion.pdf_loader import DocumentPage, PDFLoadError, count_pdf_pages, load_pdf_file
 from src.llm.base import LLMResponse
 from tests.test_utils import isolated_vector_path
 
@@ -44,6 +45,19 @@ class FakeRetriever:
         )
 
 
+class FailingAfterFirstBatchEmbedder:
+    """Succeeds once, then fails — used to test mid-replace rollback."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("embedding provider unavailable")
+        return [[0.0, 0.0, 0.0] for _ in texts]
+
+
 class FakeLLM:
     provider = "fake"
     model = "fake-model"
@@ -70,6 +84,44 @@ def test_load_pdf_file_extracts_text() -> None:
     assert document.page_count == 1
     assert "Refund policy" in document.text
     assert document.pages[0].page_number == 1
+
+
+def test_load_pdf_file_detects_likely_scanned_document() -> None:
+    """A page with no drawn text (as a scan/image-only page would produce)
+    should get a specific OCR remediation message, not a generic error.
+    """
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+
+    with pytest.raises(PDFLoadError, match="scanned or image-based"):
+        load_pdf_file(buffer, "scan.pdf")
+
+
+def test_count_pdf_pages_matches_load_pdf_file() -> None:
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.drawString(72, 720, "Page one.")
+    pdf.showPage()
+    pdf.drawString(72, 720, "Page two.")
+    pdf.save()
+    buffer.seek(0)
+
+    assert count_pdf_pages(buffer, "policy.pdf") == 2
+
+
+def test_count_pdf_pages_does_not_require_extractable_text() -> None:
+    """Unlike load_pdf_file, counting pages must not extract text, so it
+    succeeds even on a page with no text content (and stays cheap)."""
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+
+    assert count_pdf_pages(buffer, "blank.pdf") == 1
 
 
 def test_chunk_document_creates_overlapping_chunks() -> None:
@@ -141,6 +193,62 @@ def test_chroma_document_store_retrieves_relevant_chunk() -> None:
     assert len(chunks) == 1
     assert "Refunds" in chunks[0].text
     assert chunks[0].relevance_score is not None
+
+
+def test_replace_chunks_swaps_in_new_content() -> None:
+    persist_dir = isolated_vector_path("replace_chunks_swap")
+    store = ChromaDocumentStore(persist_dir=persist_dir, embedder=FakeEmbedder())
+    store.replace_chunks(
+        [DocumentChunk(id="old", text="Old refund policy.", metadata={"filename": "old.pdf"})]
+    )
+    assert store.count() == 1
+
+    store.replace_chunks(
+        [
+            DocumentChunk(
+                id="new-1", text="New security policy.", metadata={"filename": "new.pdf"}
+            ),
+            DocumentChunk(id="new-2", text="Another new chunk.", metadata={"filename": "new.pdf"}),
+        ]
+    )
+
+    assert store.count() == 2
+    chunks = store.query("security policy", top_k=2)
+    assert all("policy" in chunk.text.lower() or "chunk" in chunk.text.lower() for chunk in chunks)
+    assert not any("Old refund policy" in chunk.text for chunk in chunks)
+
+
+def test_replace_chunks_leaves_existing_index_untouched_on_failure() -> None:
+    persist_dir = isolated_vector_path("replace_chunks_rollback")
+    good_store = ChromaDocumentStore(persist_dir=persist_dir, embedder=FakeEmbedder())
+    good_store.replace_chunks(
+        [
+            DocumentChunk(
+                id="good", text="Refunds require approval.", metadata={"filename": "good.pdf"}
+            )
+        ]
+    )
+    assert good_store.count() == 1
+
+    failing_store = ChromaDocumentStore(
+        persist_dir=persist_dir, embedder=FailingAfterFirstBatchEmbedder()
+    )
+    new_chunks = [
+        DocumentChunk(
+            id=f"bad-{i}", text=f"Replacement chunk {i}.", metadata={"filename": "bad.pdf"}
+        )
+        for i in range(4)
+    ]
+
+    with pytest.raises(RuntimeError):
+        failing_store.replace_chunks(new_chunks, batch_size=1)
+
+    assert good_store.count() == 1
+    remaining = good_store.query("Refunds require approval", top_k=1)
+    assert remaining and "Refunds require approval" in remaining[0].text
+
+    collection_names = {c.name for c in good_store._client.list_collections()}
+    assert collection_names == {good_store.collection_name}
 
 
 def test_build_rag_prompt_includes_sources() -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
 
 from config.settings import Settings
@@ -48,6 +50,9 @@ from src.storage.query_executor import (
     execute_read_query,
 )
 from src.storage.sqlite_store import DEFAULT_TABLE_NAME, SQLiteStore, StoredTable
+from src.utils.error_reporting import report_error
+
+LOGGER = logging.getLogger(__name__)
 
 
 def render_dashboard(settings: Settings) -> None:
@@ -266,12 +271,16 @@ def _render_schema_mapping(schema_mapping: SchemaMapping) -> None:
         st.success("All canonical fields were mapped.")
 
 
+LOW_CONFIDENCE_THRESHOLD = 0.5
+
+
 def _render_schema_controls(
     profile: DataProfile,
     suggested_mapping: SchemaMapping,
     data_signature: str,
 ) -> SchemaMapping:
     overrides: dict[str, str | None] = {}
+    unconfirmed_low_confidence: list[str] = []
     with st.expander("Review schema mapping", expanded=False):
         st.caption("Confirm or correct the business meaning of each column before analysis.")
         columns = st.columns(2)
@@ -284,15 +293,38 @@ def _render_schema_controls(
                     if column.inferred_type in REQUIRED_TYPES[field]
                 ],
             ]
-            suggested = suggested_mapping.mappings[field].source_column
-            default_index = options.index(suggested) if suggested in options else 0
-            overrides[field] = columns[index % 2].selectbox(
+            field_mapping = suggested_mapping.mappings[field]
+            suggested = field_mapping.source_column
+            is_low_confidence = field_mapping.confidence < LOW_CONFIDENCE_THRESHOLD
+            # Low-confidence guesses default to "Not mapped" rather than being
+            # silently applied; the user must pick them deliberately.
+            default_index = (
+                options.index(suggested) if suggested in options and not is_low_confidence else 0
+            )
+            help_text = (
+                f"Low-confidence guess: '{suggested}' ({field_mapping.confidence:.0%}). "
+                "Select it explicitly to use it."
+                if suggested is not None and is_low_confidence
+                else None
+            )
+            selected = columns[index % 2].selectbox(
                 field.replace("_", " ").title(),
                 options=options,
                 index=default_index,
                 format_func=lambda value: "Not mapped" if value is None else value,
                 key=f"schema_{data_signature}_{field}",
+                help=help_text,
             )
+            overrides[field] = selected
+            if is_low_confidence and selected == suggested and suggested is not None:
+                unconfirmed_low_confidence.append(field)
+
+    if unconfirmed_low_confidence:
+        st.warning(
+            "Low-confidence mapping(s) in use: "
+            + ", ".join(unconfirmed_low_confidence)
+            + ". Analysis depending on these fields may be unreliable."
+        )
 
     try:
         return map_schema(profile, overrides=overrides)
@@ -397,18 +429,38 @@ def _render_charts(chart_specs: list[ChartSpec]) -> None:
 
 def _render_anomaly_report(report: AnomalyReport) -> None:
     st.write("Anomaly detection")
-    metric_cols = st.columns(3)
+    metric_cols = st.columns(4)
     metric_cols[0].metric("Enabled", "Yes" if report.enabled else "No")
-    metric_cols[1].metric("Flagged rows", report.flagged_count)
-    metric_cols[2].metric("Features", len(report.feature_columns))
+    metric_cols[1].metric(
+        "Flagged by model", report.model_flagged_count, help="IsolationForest outliers."
+    )
+    metric_cols[2].metric(
+        "Flagged by rules",
+        report.rule_flagged_count,
+        help="Duplicates, round amounts, or off-hours activity.",
+    )
+    metric_cols[3].metric("Features", len(report.feature_columns))
 
     st.write("Feature columns")
     st.write(", ".join(report.feature_columns) if report.feature_columns else "None")
+
+    if report.score_percentiles:
+        st.caption(
+            "Model anomaly score distribution: "
+            f"p50={report.score_percentiles.get('p50', 0):.3f}, "
+            f"p90={report.score_percentiles.get('p90', 0):.3f}, "
+            f"p99={report.score_percentiles.get('p99', 0):.3f} "
+            "(higher score means more unusual)."
+        )
 
     if report.flagged_rows.empty:
         st.info("No flagged rows to show.")
     else:
         st.dataframe(report.flagged_rows, use_container_width=True)
+        st.caption(
+            "'is_model_anomaly' and 'is_rule_anomaly' show which mechanism flagged each "
+            "row; a row can be flagged by either, both, or neither contributing to 'reason'."
+        )
 
     if report.limitations:
         st.write("Limitations")
@@ -416,8 +468,11 @@ def _render_anomaly_report(report: AnomalyReport) -> None:
             st.warning(limitation)
 
     st.caption(
-        "Anomaly flags indicate unusual numeric patterns for review; they are not "
-        "proof of fraud, misconduct, or business risk."
+        "Anomaly flags indicate unusual numeric patterns for review, not proof of fraud, "
+        "misconduct, or business risk. The model's 'expected anomaly fraction' setting is a "
+        "sensitivity control, not a calibrated precision/recall estimate; rule-based flags "
+        "(round amounts, off-hours activity) are generic heuristics that can trigger on "
+        "legitimate rows and have not been evaluated against labeled data."
     )
 
 
@@ -449,7 +504,7 @@ def _render_business_report(
                 st.session_state[PDF_BYTES] = _cached_pdf(report, chart_specs)
                 st.session_state[PDF_SIGNATURE] = report_signature
         except Exception as exc:
-            st.warning(f"Could not generate PDF report: {exc}")
+            st.warning(report_error(LOGGER, "Could not generate PDF report", exc))
             return
 
     pdf_bytes = st.session_state.get(PDF_BYTES)
@@ -479,14 +534,18 @@ def _store_uploaded_dataframe(
         return st.session_state[STORED_TABLE]
 
     try:
-        stored_table = SQLiteStore(settings.sqlite_db_path).save_dataframe(
+        stored_table = SQLiteStore(
+            settings.sqlite_db_path,
+            encryption_key=settings.sqlite_encryption_key,
+            include_sample_values=not settings.gemini_exclude_sample_values,
+        ).save_dataframe(
             dataframe,
             table_name=DEFAULT_TABLE_NAME,
             canonical_mapping=schema_mapping.mapped_fields(),
         )
     except Exception as exc:
         st.session_state.pop(STORED_TABLE, None)
-        st.error(f"Could not store uploaded data in SQLite: {exc}")
+        st.error(report_error(LOGGER, "Could not store uploaded data", exc))
         return None
 
     st.session_state[STORED_TABLE] = stored_table
@@ -524,12 +583,13 @@ def _render_sql_workspace(stored_table: StoredTable | None) -> None:
                 query,
                 allowed_tables={stored_table.table_name},
                 allowed_columns={stored_table.table_name: set(stored_table.columns)},
+                encryption_key=stored_table.encryption_key,
             )
         except (UnsafeQueryError, QueryTimeoutError) as exc:
             st.error(str(exc))
             return
         except Exception as exc:
-            st.error(f"Query failed: {exc}")
+            st.error(report_error(LOGGER, "Query failed", exc))
             return
 
         st.success(f"Returned {len(result):,} row(s).")

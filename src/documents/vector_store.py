@@ -6,6 +6,7 @@ import gc
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import chromadb
 
@@ -57,6 +58,44 @@ class ChromaDocumentStore:
         chunks: list[DocumentChunk],
         batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
     ) -> None:
+        self._add_chunks_to(self._collection, chunks, batch_size)
+
+    def replace_chunks(
+        self,
+        chunks: list[DocumentChunk],
+        batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+    ) -> None:
+        """Atomically replace this store's contents with chunks.
+
+        Indexes into a temporary staging collection first. Only after every
+        batch has been embedded and added successfully is the existing
+        collection deleted and the staging collection promoted in its place,
+        so a failure partway through never leaves a partial or missing index
+        under the canonical collection name.
+        """
+        staging_name = f"{self.collection_name}__staging_{uuid4().hex[:8]}"
+        staging_collection = self._client.get_or_create_collection(
+            name=staging_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        try:
+            self._add_chunks_to(staging_collection, chunks, batch_size)
+        except Exception:
+            self._client.delete_collection(name=staging_name)
+            raise
+
+        collection_names = {collection.name for collection in self._client.list_collections()}
+        if self.collection_name in collection_names:
+            self._client.delete_collection(name=self.collection_name)
+        staging_collection.modify(name=self.collection_name)
+        self._collection = staging_collection
+
+    def _add_chunks_to(
+        self,
+        collection: Any,
+        chunks: list[DocumentChunk],
+        batch_size: int,
+    ) -> None:
         if not chunks:
             return
         if batch_size < 1:
@@ -67,7 +106,7 @@ class ChromaDocumentStore:
             embeddings = self.embedder.embed_texts([chunk.text for chunk in batch])
             if len(embeddings) != len(batch):
                 raise ValueError("Embedding count did not match the number of document chunks.")
-            self._collection.add(
+            collection.add(
                 ids=[chunk.id for chunk in batch],
                 documents=[chunk.text for chunk in batch],
                 metadatas=[chunk.metadata for chunk in batch],

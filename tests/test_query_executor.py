@@ -136,16 +136,18 @@ def test_execute_read_query_limits_large_results() -> None:
     assert len(result) == 5
 
 
-def test_execute_read_query_enforces_table_allowlist() -> None:
+def test_execute_read_query_enforces_table_allowlist(caplog) -> None:
     database_path = isolated_database_path("query_table_allowlist")
     SQLiteStore(database_path).save_dataframe(pd.DataFrame({"amount": [10.5]}))
 
-    with pytest.raises(UnsafeQueryError):
+    with caplog.at_level("WARNING"), pytest.raises(UnsafeQueryError):
         execute_read_query(
             database_path,
             "SELECT name FROM sqlite_master",
             allowed_tables={"uploaded_data"},
         )
+
+    assert any("query_rejected_unsafe" in record.getMessage() for record in caplog.records)
 
 
 def test_execute_read_query_rejects_unapproved_function() -> None:
@@ -160,11 +162,11 @@ def test_execute_read_query_rejects_unapproved_function() -> None:
         )
 
 
-def test_execute_read_query_times_out_expensive_query() -> None:
+def test_execute_read_query_times_out_expensive_query(caplog) -> None:
     database_path = isolated_database_path("query_timeout")
     SQLiteStore(database_path).save_dataframe(pd.DataFrame({"amount": list(range(500))}))
 
-    with pytest.raises(QueryTimeoutError):
+    with caplog.at_level("WARNING"), pytest.raises(QueryTimeoutError):
         execute_read_query(
             database_path,
             "SELECT COUNT(*) FROM uploaded_data a CROSS JOIN uploaded_data b "
@@ -172,3 +174,5 @@ def test_execute_read_query_times_out_expensive_query() -> None:
             allowed_tables={"uploaded_data"},
             timeout_seconds=0.001,
         )
+
+    assert any("query_timeout" in record.getMessage() for record in caplog.records)

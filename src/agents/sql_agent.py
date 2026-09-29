@@ -15,6 +15,7 @@ from src.storage.query_executor import (
     validate_read_query,
 )
 from src.storage.sqlite_store import StoredTable
+from src.utils.pii_redaction import redact_pii
 
 
 class SQLAgentError(RuntimeError):
@@ -53,6 +54,7 @@ def answer_with_sql(
             safe_sql,
             allowed_tables={stored_table.table_name},
             allowed_columns={stored_table.table_name: set(stored_table.columns)},
+            encryption_key=stored_table.encryption_key,
         )
     except (UnsafeQueryError, QueryTimeoutError):
         raise
@@ -70,6 +72,7 @@ def answer_with_sql(
                 retry_sql,
                 allowed_tables={stored_table.table_name},
                 allowed_columns={stored_table.table_name: set(stored_table.columns)},
+                encryption_key=stored_table.encryption_key,
             )
         except (UnsafeQueryError, QueryTimeoutError):
             raise
@@ -161,7 +164,11 @@ def summarize_sql_result(result: pd.DataFrame) -> str:
 def _format_column_context(column: str, stored_table: StoredTable) -> str:
     dtype = stored_table.column_types.get(column, "unknown")
     samples = stored_table.sample_values.get(column, [])
-    sample_text = ", ".join(repr(value) for value in samples) if samples else "no non-null samples"
+    sample_text = (
+        ", ".join(repr(redact_pii(value)) for value in samples)
+        if samples
+        else "no non-null samples"
+    )
     date_hint = (
         " (ISO date/time)" if samples and all(_looks_iso_date(value) for value in samples) else ""
     )
@@ -175,9 +182,9 @@ def _format_conversation_context(
         return ""
     lines = ["Recent questions and SQL (context only):"]
     for question, sql in conversation_context[-3:]:
-        lines.append(f"- Question: {question}")
+        lines.append(f"- Question: {redact_pii(question)}")
         if sql:
-            lines.append(f"  SQL: {sql}")
+            lines.append(f"  SQL: {redact_pii(sql)}")
     return "\n".join(lines)
 
 

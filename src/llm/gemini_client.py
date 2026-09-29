@@ -9,6 +9,7 @@ from typing import Any
 
 from config.settings import Settings
 from src.llm.base import LLMConfigurationError, LLMGenerationError, LLMResponse
+from src.utils.error_reporting import report_error
 
 GEMINI_PROVIDER = "gemini"
 LOGGER = logging.getLogger(__name__)
@@ -72,7 +73,8 @@ class GeminiClient:
                 break
             except Exception as exc:
                 if attempt >= self.max_retries or not _is_retryable_error(exc):
-                    raise LLMGenerationError(f"Gemini generation failed: {exc}") from exc
+                    message = report_error(LOGGER, "Gemini generation failed", exc)
+                    raise LLMGenerationError(message) from exc
                 sleep(0.25 * (2**attempt))
 
         text = getattr(response, "text", None)
@@ -129,8 +131,13 @@ def _is_retryable_error(error: Exception) -> bool:
 
 
 def build_gemini_client(settings: Settings) -> GeminiClient:
-    """Create a Gemini client from app settings."""
+    """Create a Gemini client from app settings.
+
+    In local-only mode, the API key is withheld even if configured, as
+    defense in depth against any code path that bypasses the
+    settings.gemini_configured check.
+    """
     return GeminiClient(
-        api_key=settings.gemini_api_key,
+        api_key=None if settings.local_only_mode else settings.gemini_api_key,
         model=settings.gemini_model,
     )

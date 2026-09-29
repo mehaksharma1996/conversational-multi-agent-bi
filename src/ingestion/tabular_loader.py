@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
 from typing import BinaryIO
@@ -28,6 +28,7 @@ class LoadedTable:
     column_count: int
     column_name_mapping: dict[str, str]
     sheet_name: str | None = None
+    column_warnings: dict[str, list[str]] = field(default_factory=dict)
 
 
 def load_tabular_file(
@@ -64,7 +65,7 @@ def load_tabular_file(
     if dataframe.empty and len(dataframe.columns) == 0:
         raise TabularLoadError("The uploaded file did not contain any columns.")
 
-    cleaned, column_name_mapping = clean_dataframe(dataframe)
+    cleaned, column_name_mapping, column_warnings = clean_dataframe(dataframe)
     resolved_sheet = str(sheet_name) if extension in {".xls", ".xlsx"} else None
     return LoadedTable(
         dataframe=cleaned,
@@ -74,6 +75,7 @@ def load_tabular_file(
         column_count=len(cleaned.columns),
         column_name_mapping=column_name_mapping,
         sheet_name=resolved_sheet,
+        column_warnings=column_warnings,
     )
 
 
@@ -87,22 +89,38 @@ def list_excel_sheets(file: BinaryIO) -> list[str]:
         raise TabularLoadError(f"Could not read Excel workbook sheets: {exc}") from exc
 
 
-def clean_dataframe(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
-    """Normalize column names and strongly typed business values."""
+def clean_dataframe(
+    dataframe: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, str], dict[str, list[str]]]:
+    """Normalize column names and strongly typed business values.
+
+    Currency, percentage, and date-format normalization is lossy by nature
+    (the original string formatting is not retained), so each column that
+    was transformed, or where the transformation is ambiguous (mixed
+    currencies, an unresolvable day/month order), gets a warning explaining
+    what was assumed.
+    """
     cleaned = dataframe.copy()
     cleaned_columns, mapping = _clean_column_names(cleaned.columns)
     cleaned.columns = cleaned_columns
 
+    column_warnings: dict[str, list[str]] = {}
     for column in cleaned.columns:
         series = cleaned[column]
-        numeric = _parse_formatted_numeric(series)
-        if numeric is not None:
+        numeric_result = _parse_formatted_numeric(series)
+        if numeric_result is not None:
+            numeric, warnings = numeric_result
             cleaned[column] = numeric
+            if warnings:
+                column_warnings[column] = warnings
             continue
-        dates = _parse_date_series(series, column)
-        if dates is not None:
+        date_result = _parse_date_series(series, column)
+        if date_result is not None:
+            dates, warnings = date_result
             cleaned[column] = dates
-    return cleaned, mapping
+            if warnings:
+                column_warnings[column] = warnings
+    return cleaned, mapping, column_warnings
 
 
 def _read_dataframe(
@@ -155,7 +173,16 @@ def _clean_column_names(columns: pd.Index) -> tuple[list[str], dict[str, str]]:
     return cleaned, mapping
 
 
-def _parse_formatted_numeric(series: pd.Series) -> pd.Series | None:
+_CURRENCY_SYMBOLS = "$€£¥"
+_CURRENCY_NAMES = {
+    "$": "USD-style ($)",
+    "€": "EUR-style (€)",
+    "£": "GBP-style (£)",
+    "¥": "JPY-style (¥)",
+}
+
+
+def _parse_formatted_numeric(series: pd.Series) -> tuple[pd.Series, list[str]] | None:
     if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
         return None
     non_null = series.dropna().astype(str).str.strip()
@@ -180,10 +207,38 @@ def _parse_formatted_numeric(series: pd.Series) -> pd.Series | None:
             number = -number
         return number / 100 if percent else number
 
-    return series.map(parse_value).astype("float64")
+    warnings = _formatted_numeric_warnings(non_null)
+    return series.map(parse_value).astype("float64"), warnings
 
 
-def _parse_date_series(series: pd.Series, column_name: str) -> pd.Series | None:
+def _formatted_numeric_warnings(non_null: pd.Series) -> list[str]:
+    warnings: list[str] = []
+    currencies_used = {
+        symbol
+        for symbol in _CURRENCY_SYMBOLS
+        if non_null.str.contains(re.escape(symbol), regex=True).any()
+    }
+    if len(currencies_used) > 1:
+        names = ", ".join(sorted(_CURRENCY_NAMES[symbol] for symbol in currencies_used))
+        warnings.append(
+            f"Mixed currency symbols detected ({names}); all values were converted to "
+            "plain numbers with no currency conversion applied. Verify this is correct."
+        )
+    elif len(currencies_used) == 1:
+        symbol = next(iter(currencies_used))
+        warnings.append(
+            f"Currency symbol removed ({_CURRENCY_NAMES[symbol]}); values are now plain "
+            "numbers with the original currency unit no longer recorded."
+        )
+    if non_null.str.endswith("%").any():
+        warnings.append("Percentage values were converted to a fraction (e.g., 12% became 0.12).")
+    return warnings
+
+
+_SLASH_OR_DASH_DATE_PATTERN = re.compile(r"^(\d{1,2})[/-](\d{1,2})[/-]\d{2,4}")
+
+
+def _parse_date_series(series: pd.Series, column_name: str) -> tuple[pd.Series, list[str]] | None:
     if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
         return None
     non_null = series.dropna()
@@ -203,4 +258,29 @@ def _parse_date_series(series: pd.Series, column_name: str) -> pd.Series | None:
     )
     date_format = "%Y-%m-%d %H:%M:%S" if includes_time else "%Y-%m-%d"
     formatted = parsed.dt.strftime(date_format)
-    return formatted.where(parsed.notna(), None)
+    warnings = _date_format_warnings(non_null)
+    return formatted.where(parsed.notna(), None), warnings
+
+
+def _date_format_warnings(non_null: pd.Series) -> list[str]:
+    """Warn when day/month order cannot be determined from the data itself.
+
+    If every numeric-slash/dash date in the column has both leading
+    components <= 12, DD/MM and MM/DD are both plausible and pandas' format
+    inference is guessing; if any value has a component > 12, the order is
+    already unambiguous from the data and no warning is needed.
+    """
+    pairs = []
+    for value in non_null.astype(str).str.strip():
+        match = _SLASH_OR_DASH_DATE_PATTERN.match(value)
+        if match:
+            pairs.append((int(match.group(1)), int(match.group(2))))
+    if not pairs:
+        return []
+    if all(first <= 12 and second <= 12 for first, second in pairs):
+        return [
+            "Date order (day/month vs month/day) could not be determined from the data "
+            "(all values have both components 12 or below); dates were parsed assuming "
+            "the locale's default order and may be misread if that assumption is wrong."
+        ]
+    return []

@@ -25,6 +25,9 @@ class AnomalyReport:
     feature_columns: list[str]
     flagged_rows: pd.DataFrame
     limitations: list[str] = field(default_factory=list)
+    model_flagged_count: int = 0
+    rule_flagged_count: int = 0
+    score_percentiles: dict[str, float] = field(default_factory=dict)
 
     @property
     def flagged_count(self) -> int:
@@ -94,12 +97,23 @@ def detect_anomalies(
     transformed = pipeline[:-1].transform(model_input)
     anomaly_scores = -model.score_samples(transformed)
 
+    score_percentiles = {
+        "p50": float(pd.Series(anomaly_scores).quantile(0.50)),
+        "p90": float(pd.Series(anomaly_scores).quantile(0.90)),
+        "p99": float(pd.Series(anomaly_scores).quantile(0.99)),
+    }
+
     result = dataframe.copy()
     result.insert(0, "source_row", range(2, len(dataframe) + 2))
     result["anomaly_score"] = anomaly_scores
     rule_reasons = _rule_based_reasons(dataframe, schema_mapping)
     result["rule_reason"] = rule_reasons
-    result["is_anomaly"] = (predictions == -1) | rule_reasons.astype(bool)
+    result["is_model_anomaly"] = predictions == -1
+    result["is_rule_anomaly"] = rule_reasons.astype(bool)
+    result["is_anomaly"] = result["is_model_anomaly"] | result["is_rule_anomaly"]
+
+    model_flagged_count = int(result["is_model_anomaly"].sum())
+    rule_flagged_count = int(result["is_rule_anomaly"].sum())
 
     flagged = result[result["is_anomaly"]].copy()
     if flagged.empty:
@@ -109,6 +123,9 @@ def detect_anomalies(
             feature_columns=feature_columns,
             flagged_rows=pd.DataFrame(),
             limitations=["No anomalous rows were flagged by the model."],
+            model_flagged_count=0,
+            rule_flagged_count=0,
+            score_percentiles=score_percentiles,
         )
 
     flagged = flagged.sort_values("anomaly_score", ascending=False).head(MAX_FLAGGED_ROWS)
@@ -128,6 +145,8 @@ def detect_anomalies(
         "anomaly_rank",
         "source_row",
         "anomaly_score",
+        "is_model_anomaly",
+        "is_rule_anomaly",
         "reason",
     ] + [column for column in dataframe.columns if column in flagged.columns]
 
@@ -137,6 +156,9 @@ def detect_anomalies(
         feature_columns=feature_columns,
         flagged_rows=flagged[ordered_columns],
         limitations=[],
+        model_flagged_count=model_flagged_count,
+        rule_flagged_count=rule_flagged_count,
+        score_percentiles=score_percentiles,
     )
 
 

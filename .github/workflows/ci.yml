@@ -32,3 +32,35 @@ jobs:
         run: python -m mypy config src tests
       - name: Tests and coverage
         run: python -m pytest --cov --cov-report=term-missing
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Dependency vulnerability scan
+        # PYSEC-2026-311, -3813, -3814, -3815 (chromadb) are all scoped to
+        # chromadb's standalone HTTP server (its REST API auth/tenant model
+        # and trust_remote_code model loading). This app only uses the
+        # embedded chromadb.PersistentClient with no server and no
+        # trust_remote_code, so they do not apply here. Re-check this
+        # exception whenever chromadb is upgraded or its usage changes.
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit --requirement requirements.lock --strict \
+            --ignore-vuln PYSEC-2026-311 \
+            --ignore-vuln PYSEC-2026-3813 \
+            --ignore-vuln PYSEC-2026-3814 \
+            --ignore-vuln PYSEC-2026-3815
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

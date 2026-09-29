@@ -101,3 +101,36 @@ def test_anomaly_detection_adds_rule_based_reasons_and_spreadsheet_rows() -> Non
     first_row = report.flagged_rows.loc[report.flagged_rows["source_row"] == 2].iloc[0]
     assert "round value" in first_row["reason"]
     assert "off-hours" in first_row["reason"]
+    assert bool(first_row["is_rule_anomaly"]) is True
+
+
+def test_anomaly_report_separates_model_and_rule_flag_counts() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "amount": [10, 12, 11, 13, 12, 14, 11, 10, 13, 999],
+            "quantity": [1, 1, 2, 1, 2, 1, 1, 2, 1, 9],
+            "merchant": ["A", "A", "B", "A", "B", "A", "B", "A", "B", "Z"],
+        }
+    )
+
+    report = _anomalies_for(dataframe)
+
+    assert "is_model_anomaly" in report.flagged_rows.columns
+    assert "is_rule_anomaly" in report.flagged_rows.columns
+    assert report.model_flagged_count >= 1
+    assert report.model_flagged_count + report.rule_flagged_count >= report.flagged_count
+
+
+def test_anomaly_report_includes_score_percentiles() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "amount": [10, 12, 11, 13, 12, 14, 11, 10, 13, 999],
+            "quantity": [1, 1, 2, 1, 2, 1, 1, 2, 1, 9],
+        }
+    )
+
+    report = _anomalies_for(dataframe)
+
+    assert set(report.score_percentiles) == {"p50", "p90", "p99"}
+    assert report.score_percentiles["p50"] <= report.score_percentiles["p90"]
+    assert report.score_percentiles["p90"] <= report.score_percentiles["p99"]

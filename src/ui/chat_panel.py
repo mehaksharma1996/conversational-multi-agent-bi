@@ -14,9 +14,11 @@ from src.agents.rag_agent import RAGAgentError
 from src.agents.sql_agent import SQLAgentError
 from src.llm.base import LLMConfigurationError, LLMGenerationError
 from src.llm.gemini_client import build_gemini_client
+from src.memory.chat_history import trim_chat_history
 from src.memory.session_keys import (
     CHAT_MESSAGES,
     DOCUMENT_RETRIEVER,
+    GEMINI_CONSENT_GIVEN,
     SESSION_MEMORY,
     STORED_TABLE,
     UPLOADED_TABLE,
@@ -24,6 +26,7 @@ from src.memory.session_keys import (
 from src.memory.session_memory import remember_question
 from src.orchestration.langgraph_orchestrator import QuestionOrchestrator
 from src.storage.query_executor import QueryTimeoutError, UnsafeQueryError
+from src.utils.spreadsheet_safety import sanitize_dataframe_for_export
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +64,19 @@ def render_chat_panel(settings: Settings) -> None:
                     for source in message["sources"]:
                         st.write(source)
 
+    consent_given = bool(st.session_state.get(GEMINI_CONSENT_GIVEN, False))
+    if _gemini_consent_required(settings, consent_given):
+        st.info(
+            "Asking a question may send your question, table schema, sample "
+            "values, and/or retrieved document excerpts to Google's Gemini API. "
+            'See "Gemini Data Retention" in the README for details.'
+        )
+        if st.button("I understand, continue"):
+            st.session_state[GEMINI_CONSENT_GIVEN] = True
+            st.rerun()
+        st.caption("Accept the notice above to enable LLM-backed questions.")
+        return
+
     disabled_reason = _disabled_reason(settings)
     prompt = st.chat_input(
         "Ask a business question",
@@ -73,6 +89,11 @@ def render_chat_panel(settings: Settings) -> None:
 
     if prompt:
         _handle_question(prompt=prompt, settings=settings)
+
+
+def _gemini_consent_required(settings: Settings, consent_given: bool) -> bool:
+    """Whether the Gemini data-sharing consent notice must be shown and accepted."""
+    return settings.gemini_configured and not consent_given
 
 
 def _disabled_reason(settings: Settings) -> str | None:
@@ -97,6 +118,7 @@ def _handle_question(prompt: str, settings: Settings) -> None:
                 stored_table=st.session_state.get(STORED_TABLE),
                 document_retriever=st.session_state.get(DOCUMENT_RETRIEVER),
                 session_memory=st.session_state.get(SESSION_MEMORY),
+                debug_log_raw_content=settings.debug_log_raw_content,
             )
             result = orchestrator.answer(prompt)
         if SESSION_MEMORY in st.session_state:
@@ -127,6 +149,7 @@ def _handle_question(prompt: str, settings: Settings) -> None:
         st.session_state[CHAT_MESSAGES].append(
             {"role": "assistant", "content": f"I could not answer safely: {exc}"}
         )
+        _trim_history(settings)
         st.rerun()
         return
     except Exception as exc:
@@ -140,10 +163,20 @@ def _handle_question(prompt: str, settings: Settings) -> None:
                 ),
             }
         )
+        _trim_history(settings)
         st.rerun()
         return
 
+    _trim_history(settings)
     st.rerun()
+
+
+def _trim_history(settings: Settings) -> None:
+    st.session_state[CHAT_MESSAGES] = trim_chat_history(
+        st.session_state[CHAT_MESSAGES],
+        max_messages=settings.max_chat_messages,
+        max_messages_with_dataframes=settings.max_chat_dataframes_retained,
+    )
 
 
 def _build_result_chart(dataframe: pd.DataFrame):
@@ -171,9 +204,10 @@ def _build_result_chart(dataframe: pd.DataFrame):
 
 
 def _render_result_downloads(dataframe: pd.DataFrame, message_index: int) -> None:
-    csv_bytes = dataframe.to_csv(index=False).encode("utf-8")
+    safe_dataframe = sanitize_dataframe_for_export(dataframe)
+    csv_bytes = safe_dataframe.to_csv(index=False).encode("utf-8")
     excel_buffer = BytesIO()
-    dataframe.to_excel(excel_buffer, index=False)
+    safe_dataframe.to_excel(excel_buffer, index=False)
     csv_column, excel_column = st.columns(2)
     csv_column.download_button(
         "Download CSV",

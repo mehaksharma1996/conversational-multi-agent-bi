@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import warnings
 from contextlib import closing
 from pathlib import Path
 from time import monotonic
@@ -10,6 +12,11 @@ from time import monotonic
 import pandas as pd
 import sqlparse
 from sqlparse import tokens as sql_tokens
+
+from src.storage import encrypted_sqlite
+
+LOGGER = logging.getLogger(__name__)
+_PANDAS_DBAPI2_WARNING = "pandas only supports SQLAlchemy connectable.*"
 
 
 class UnsafeQueryError(ValueError):
@@ -79,6 +86,7 @@ def execute_read_query(
     allowed_tables: set[str] | None = None,
     allowed_columns: dict[str, set[str]] | None = None,
     timeout_seconds: float = 5.0,
+    encryption_key: bytes | None = None,
 ) -> pd.DataFrame:
     """Validate and execute a read-only SQLite query."""
     if max_rows < 1:
@@ -90,7 +98,9 @@ def execute_read_query(
     limited_query = f"SELECT * FROM ({safe_query}) AS __limited_result LIMIT {int(max_rows)}"
 
     uri = f"file:{database_path.as_posix()}?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True)) as connection:
+    with closing(
+        encrypted_sqlite.connect(uri, encryption_key=encryption_key, uri=True)
+    ) as connection:
         deadline = monotonic() + timeout_seconds
         connection.set_progress_handler(
             lambda: 1 if monotonic() > deadline else 0,
@@ -103,14 +113,18 @@ def execute_read_query(
             )
         )
         try:
-            return pd.read_sql_query(limited_query, connection)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=_PANDAS_DBAPI2_WARNING)
+                return pd.read_sql_query(limited_query, connection)
         except Exception as exc:
             message = str(exc).lower()
             if "interrupted" in message:
+                LOGGER.warning("query_timeout timeout_seconds=%.2f", timeout_seconds)
                 raise QueryTimeoutError(
                     f"Query exceeded the {timeout_seconds:g}-second execution limit."
                 ) from exc
             if "not authorized" in message or "prohibited" in message:
+                LOGGER.warning("query_rejected_unsafe")
                 raise UnsafeQueryError(
                     "Query referenced a table, column, or function that is not allowed."
                 ) from exc

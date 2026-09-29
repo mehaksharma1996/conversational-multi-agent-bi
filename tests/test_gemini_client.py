@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from config.settings import Settings
 from src.llm.base import LLMConfigurationError, LLMGenerationError
-from src.llm.gemini_client import GeminiClient
+from src.llm.gemini_client import GeminiClient, build_gemini_client
 
 
 class FakeModels:
@@ -81,3 +84,27 @@ def test_gemini_client_rejects_empty_provider_response() -> None:
 
     with pytest.raises(LLMGenerationError):
         client.generate("Try this.")
+
+
+def _settings(**overrides) -> Settings:
+    base = Settings(
+        app_data_dir=Path("data"),
+        sqlite_db_path=Path("data/sqlite/app.db"),
+        chroma_persist_dir=Path("data/vectorstore"),
+        gemini_api_key="real-key",
+        gemini_model="gemini-2.5-flash",
+        embedding_model="all-MiniLM-L6-v2",
+    )
+    return replace(base, **overrides)
+
+
+def test_build_gemini_client_uses_configured_api_key() -> None:
+    client = build_gemini_client(_settings())
+
+    assert client.configured is True
+
+
+def test_build_gemini_client_withholds_key_in_local_only_mode() -> None:
+    client = build_gemini_client(_settings(local_only_mode=True))
+
+    assert client.configured is False
