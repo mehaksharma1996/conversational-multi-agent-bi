@@ -28,6 +28,8 @@ document retrieval, anomaly detection, visualization, and report generation.
 - `packages/governance/` provides the audit vocabulary and append-only, hash-chained audit sinks.
 - `packages/evaluation/` and `evals/` provide the deterministic evaluation harness, fixtures, thresholds, and baseline.
 - `packages/retrieval/` exposes framework-neutral document-indexing commands and services.
+- `Dockerfile.api`, `Dockerfile.web`, `compose.yaml`, and `docker/nginx/` define the local container topology;
+  `ops/` holds audit backup/restore scripts.
 - `tests/` contains the pytest suite.
 
 ## Technology
@@ -60,6 +62,12 @@ python -m ruff format --check .
 python -m mypy apps config packages scripts src tests
 python -m scripts.run_evaluations
 ```
+
+Container changes: keep images digest-pinned, non-root, and secret-free, and update
+`tests/test_container_config.py` when a hardening invariant intentionally changes. With Docker
+available, `docker compose up -d --build --wait` then
+`python scripts/compose_smoke.py --compose --expect-local-only` validates the stack; CI runs
+the same in its `containers` job. See `docs/operations/local-containers.md`.
 
 The evaluation command is offline and deterministic. Changing a prompt, retrieval
 setting, fixture, or safety behavior requires updating `evals/v1/` and its baseline

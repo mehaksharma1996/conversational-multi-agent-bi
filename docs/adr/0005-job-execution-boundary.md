@@ -32,6 +32,12 @@ creation/expiry time, retry count, and cancellation state.
 - No queue technology is selected prematurely.
 - In-process execution still needs bounded concurrency and restart behavior.
 
+## Implementation status (Phase 7)
+
+No worker was introduced. The local container release ([ADR 0010](0010-local-container-release.md)) runs a
+single API container and defines no worker image or queue. The measurements this ADR requires (PDF
+extraction, embedding, analysis, and PDF rendering against a request budget) have not been made.
+
 ## Invariants
 
 - Jobs are tenant-owned and never expose cross-tenant results.

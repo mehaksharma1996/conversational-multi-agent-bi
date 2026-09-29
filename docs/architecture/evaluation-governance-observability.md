@@ -71,6 +71,5 @@ cloud-neutral; it adds no container, hosting, or vendor integration (Docker is t
 
 ## Next phase
 
-Local container release: multi-stage non-root images, `compose.yaml` with health checks and volumes,
-Gemini-enabled and local-only startup without rebuilds, and documented backup/restore/reset. Durable metadata and
-a telemetry profile for Compose are natural companions.
+Delivered in [local container release](local-container-release.md) (Phase 7). Durable metadata and a telemetry profile
+for Compose remain open follow-ups.

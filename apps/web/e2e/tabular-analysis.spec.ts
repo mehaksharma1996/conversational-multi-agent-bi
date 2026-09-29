@@ -1,5 +1,3 @@
-import { expect, test } from "@playwright/test";
-
 import {
   analysisFixture,
   conversationFixture,
@@ -10,6 +8,7 @@ import {
   uploadFixture,
   workspaceFixture,
 } from "./fixtures";
+import { expect, test } from "./test";
 
 test("analyst reviews the schema before running deterministic analysis", async ({ page }) => {
   await page.route("**/api/v1/**", async (route) => {

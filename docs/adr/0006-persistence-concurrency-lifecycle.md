@@ -34,6 +34,15 @@ implied by enabling SQLite encryption.
 - A future storage replacement can implement the repository interfaces and
   requires a separate ADR.
 
+## Implementation status (Phase 7)
+
+Implemented: the single-node envelope is enforced operationally (one API container), the API
+fails closed when storage is not writable, readiness checks the storage and audit volumes,
+orphaned workspace directories are swept at startup, and audit backup/restore with hash-chain
+verification exists. **Not implemented:** durable resource metadata, schema/index version
+metadata, migrations, restart recovery of workspaces, and backup/restore of workspace state.
+The resulting waiver of "survives restart" is recorded in [ADR 0010](0010-local-container-release.md).
+
 ## Invariants
 
 - Queries remain read-only, bounded, and authorized to the current table schema.

@@ -76,6 +76,59 @@ jobs:
           path: evals/results/latest.json
           if-no-files-found: ignore
 
+  containers:
+    # Builds the real images and exercises the Compose topology end to end. Runs in
+    # LOCAL_ONLY_MODE, so it needs no credentials and never contacts a model provider.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LOCAL_ONLY_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Dockerfiles
+        run: |
+          docker build --check -f Dockerfile.api .
+          docker build --check -f Dockerfile.web .
+      - name: Build images
+        run: docker compose --profile streamlit build
+      - name: Enforce image size budgets
+        # Guards against regressions such as the multi-gigabyte CUDA PyTorch wheel.
+        run: |
+          api_bytes="$(docker image inspect conversational-bi/api:local --format '{{.Size}}')"
+          web_bytes="$(docker image inspect conversational-bi/web:local --format '{{.Size}}')"
+          echo "api image: ${api_bytes} bytes; web image: ${web_bytes} bytes"
+          test "${api_bytes}" -lt 4500000000
+          test "${web_bytes}" -lt 150000000
+      - name: Start the stack (health-checked)
+        run: docker compose up -d --wait --wait-timeout 300
+      - name: Smoke test (journey, hardening, restart, audit persistence)
+        run: python3 scripts/compose_smoke.py --compose --expect-local-only
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Browser journeys against the nginx image (also asserts no CSP violations)
+        working-directory: apps/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          E2E_BASE_URL=http://127.0.0.1:8080 npm run test:e2e
+      - name: Backup and restore the audit log
+        run: |
+          sh ops/backup.sh backups
+          archive="$(ls backups/audit-*.tar.gz | head -n 1)"
+          sh ops/restore.sh "${archive}"
+          python3 scripts/compose_smoke.py --expect-local-only
+      - name: Streamlit compatibility profile
+        run: docker compose --profile streamlit up -d --wait streamlit
+      - name: Container logs
+        if: failure()
+        run: docker compose --profile streamlit logs --no-color --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose --profile streamlit down -v
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 15

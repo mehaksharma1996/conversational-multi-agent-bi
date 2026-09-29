@@ -3,3 +3,11 @@
 # Exclude generated interactive diagrams from GitHub language statistics and
 # from source-oriented whitespace checks; their bytes are Archify-validated.
 .archify/**/*.html linguist-generated -whitespace
+
+# Files executed inside Linux containers must keep LF line endings, even when checked
+# out on Windows, or the shell and Docker parsers fail.
+*.sh text eol=lf
+Dockerfile* text eol=lf
+.dockerignore text eol=lf
+compose.yaml text eol=lf
+docker/** text eol=lf

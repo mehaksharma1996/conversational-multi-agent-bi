@@ -1,0 +1,47 @@
+# Keep secrets, local state, and build noise out of every image build context.
+# The Dockerfiles also COPY explicit paths only; this is defense in depth.
+
+# Secrets and local configuration (never bake these into an image)
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Local runtime data and generated output
+data/
+backups/
+outputs/
+work/
+evals/results/
+**/*.db
+**/*.sqlite
+**/*.log
+
+# Version control, tooling, and caches
+.git/
+.github/
+.archify/
+.agents/
+.vscode/
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend dependencies and build/test output (rebuilt inside the image)
+**/node_modules/
+apps/web/dist/
+apps/web/coverage/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/.playwright-browsers/
+
+# Not needed at runtime
+tests/
+docs/
+sample_data/

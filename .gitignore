@@ -27,6 +27,7 @@ data/reports/*
 data/sessions/
 data/api/
 data/audit/
+backups/
 data/.last_cleanup
 data/cleanup_audit.log
 

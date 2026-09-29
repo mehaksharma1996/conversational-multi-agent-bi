@@ -1,6 +1,9 @@
 import { createDistServer } from "./server";
 
 export default async function globalSetup() {
+  // Target an already-running deployment (for example the nginx image) instead.
+  if (process.env.E2E_BASE_URL) return;
+
   const server = createDistServer();
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

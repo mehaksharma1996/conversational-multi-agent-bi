@@ -1,0 +1,117 @@
+# Local, portable topology for the conversational BI workbench.
+#
+#   docker compose up -d --build --wait      # start (http://127.0.0.1:8080)
+#   LOCAL_ONLY_MODE=true docker compose up -d --wait   # no data ever sent to Gemini
+#   docker compose down                      # stop, keep data
+#   docker compose down -v                   # stop and delete every volume (reset)
+#
+# Configuration comes from the environment or a local .env file (never baked into an
+# image). Nothing here assumes a hosting platform. See docs/operations/local-containers.md.
+#
+# SECURITY: the API has no user authentication yet (a fixed local development identity
+# is used), so the web port is published on the loopback interface only. Do not expose it
+# to a network without adding real authentication in front of it.
+
+name: conversational-bi
+
+x-hardened: &hardened
+  init: true                       # PID 1 reaps children and forwards SIGTERM
+  read_only: true                  # writable paths are explicit volumes and tmpfs
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-app-environment: &app-environment
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+  LOCAL_ONLY_MODE: ${LOCAL_ONLY_MODE:-false}
+  GEMINI_EXCLUDE_SAMPLE_VALUES: ${GEMINI_EXCLUDE_SAMPLE_VALUES:-false}
+  DEBUG_LOG_RAW_CONTENT: ${DEBUG_LOG_RAW_CONTENT:-false}
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+  HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+  RETRIEVAL_MAX_DISTANCE: ${RETRIEVAL_MAX_DISTANCE:-0.7}
+  SESSION_RETENTION_HOURS: ${SESSION_RETENTION_HOURS:-24}
+
+services:
+  api:
+    <<: *hardened
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: conversational-bi/api:local
+    environment:
+      <<: *app-environment
+      # Workspace metadata is process-local, so after a restart no user can reach the
+      # previous workspace directories. Remove them at startup (single API process only).
+      SWEEP_ORPHANED_WORKSPACES: "true"
+    volumes:
+      - bi-data:/data       # per-workspace SQLite/Chroma files (short-lived)
+      - bi-audit:/audit     # append-only audit log; back this up
+      - bi-models:/models   # Hugging Face model cache (avoids re-downloading)
+    tmpfs:
+      - /tmp
+    stop_grace_period: 30s
+    # Not published: the web service is the only entry point.
+    expose:
+      - "8000"
+
+  web:
+    <<: *hardened
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: conversational-bi/web:local
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    tmpfs:
+      - /tmp
+
+  # Optional compatibility UI: docker compose --profile streamlit up -d --wait
+  streamlit:
+    <<: *hardened
+    profiles: ["streamlit"]
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: conversational-bi/api:local
+    command:
+      - streamlit
+      - run
+      - app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+    environment:
+      <<: *app-environment
+    volumes:
+      - bi-data:/data
+      - bi-models:/models
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:${STREAMLIT_PORT:-8501}:8501"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+
+volumes:
+  bi-data:
+  bi-audit:
+  bi-models:

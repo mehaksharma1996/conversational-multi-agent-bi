@@ -45,6 +45,13 @@ class Settings:
     debug_log_raw_content: bool = False
     max_chat_messages: int = 50
     max_chat_dataframes_retained: int = 10
+    audit_log_dir: Path | None = None
+    sweep_orphaned_workspaces: bool = False
+
+    @property
+    def audit_dir(self) -> Path:
+        """Where append-only audit files live (outside every workspace directory)."""
+        return self.audit_log_dir or self.app_data_dir / "audit"
 
     @property
     def gemini_configured(self) -> bool:
@@ -101,6 +108,8 @@ def get_settings() -> Settings:
         debug_log_raw_content=_flag("DEBUG_LOG_RAW_CONTENT"),
         max_chat_messages=_positive_int("MAX_CHAT_MESSAGES", 50),
         max_chat_dataframes_retained=_non_negative_int("MAX_CHAT_DATAFRAMES_RETAINED", 10),
+        audit_log_dir=_optional_path("AUDIT_LOG_DIR"),
+        sweep_orphaned_workspaces=_flag("SWEEP_ORPHANED_WORKSPACES"),
     )
 
 
@@ -126,6 +135,13 @@ def _optional_float(name: str, default: float | None = None) -> float | None:
     if value < 0:
         raise ValueError(f"{name} cannot be negative.")
     return value
+
+
+def _optional_path(name: str) -> Path | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    return Path(raw.strip())
 
 
 def _flag(name: str, default: bool = False) -> bool:

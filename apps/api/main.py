@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from time import perf_counter
 
 from fastapi import FastAPI, Request
@@ -40,6 +41,15 @@ def create_app(
     audit_sink: AuditSink | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        _start(app)
+        try:
+            yield
+        finally:
+            _stop(app)
+
     application = FastAPI(
         title="Conversational BI API",
         summary="Versioned local API for conversational business intelligence workflows.",
@@ -47,6 +57,7 @@ def create_app(
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
     application.state.settings = active_settings
     application.state.repository = repository or LocalResourceRepository(
@@ -57,7 +68,7 @@ def create_app(
         configure_telemetry_logging()
     observability = ApiObservability.create(
         telemetry_sink=telemetry_sink or LoggingTelemetrySink(),
-        audit_sink=audit_sink or JsonlAuditSink(active_settings.app_data_dir / "audit"),
+        audit_sink=audit_sink or JsonlAuditSink(active_settings.audit_dir),
     )
     application.state.observability = observability
     application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(observability)
@@ -108,13 +119,50 @@ def create_app(
     )
     def readiness(request: Request) -> HealthResponse:
         active_repository = get_repository(request)
-        if not active_repository.ready():
+        audit_ready = getattr(request.app.state.observability.audit_sink, "ready", None)
+        if not active_repository.ready() or (audit_ready is not None and not audit_ready()):
             raise ApiError(503, "service_not_ready", "The API is not ready to accept work.")
         return HealthResponse(status="ready")
 
     application.include_router(router)
     application.include_router(feature_router)
     return application
+
+
+def _start(app: FastAPI) -> None:
+    """Fail closed on unusable storage, optionally sweep orphans, and announce startup."""
+    settings: Settings = app.state.settings
+    repository: LocalResourceRepository = app.state.repository
+    observability: ApiObservability = app.state.observability
+    audit_ready = getattr(observability.audit_sink, "ready", None)
+    if not repository.ready() or (audit_ready is not None and not audit_ready()):
+        raise RuntimeError("Workspace or audit storage is not writable; refusing to start.")
+    swept_count = 0
+    failures = 0
+    if settings.sweep_orphaned_workspaces:
+        result = repository.sweep_orphaned_storage()
+        swept_count, failures = len(result.removed), result.failed
+        for tenant_id, workspace_id in result.removed:
+            observability.recorder.record(
+                "workspace.expired",
+                tenant_id=tenant_id,
+                resource_id=workspace_id,
+                reason="orphan_swept",
+            )
+    observability.telemetry.emit(
+        "service.started",
+        gemini_configured=settings.gemini_configured,
+        local_only_mode=settings.local_only_mode,
+        sqlite_encrypted=settings.sqlite_encryption_key is not None,
+        sweep_enabled=settings.sweep_orphaned_workspaces,
+        orphans_swept=swept_count,
+        orphan_sweep_failures=failures,
+    )
+
+
+def _stop(app: FastAPI) -> None:
+    app.state.repository.close()
+    app.state.observability.telemetry.emit("service.stopped")
 
 
 def _workspace_lifecycle_listener(

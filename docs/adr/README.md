@@ -16,6 +16,7 @@ not implementation of the React or FastAPI runtime.
 | [0007](0007-observability-privacy.md) | Observability and privacy | Accepted |
 | [0008](0008-ai-evaluation-policy.md) | AI evaluation policy | Accepted |
 | [0009](0009-streamlit-migration.md) | Streamlit migration and exit criteria | Accepted |
+| [0010](0010-local-container-release.md) | Local container release and restart-persistence waiver | Accepted |
 
 ## ADR lifecycle
 

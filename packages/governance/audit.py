@@ -20,6 +20,7 @@ from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from uuid import uuid4
 
 from packages.connectors import AuditEvent, AuditSink
 from packages.observability import (
@@ -213,6 +214,17 @@ class JsonlAuditSink:
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps({**body, "hash": digest}, sort_keys=True) + "\n")
             self._heads[event.tenant_id] = (sequence + 1, digest)
+
+    def ready(self) -> bool:
+        """True when the audit directory exists and accepts writes."""
+        try:
+            self.root.mkdir(parents=True, exist_ok=True)
+            probe = self.root / f".ready-{uuid4().hex}"
+            probe.write_bytes(b"")
+            probe.unlink()
+        except OSError:
+            return False
+        return True
 
     def read(self, tenant_id: str) -> list[dict[str, Any]]:
         """Return only the given tenant's records; other tenants' files are never opened."""

@@ -90,6 +90,29 @@ route, grounding, and provenance status in the web client. See the
 and [incident runbook](docs/operations/incident-debugging.md). There is still no
 production telemetry exporter, and API resource metadata remains process-local.
 
+Phase 7 adds the [local container release](docs/architecture/local-container-release.md):
+multi-stage, digest-pinned, non-root images for the API and web client, a hardened
+`compose.yaml` (read-only filesystems, dropped capabilities, health checks, named
+volumes, loopback-only port), runtime switching between Gemini-enabled and
+`LOCAL_ONLY_MODE` without rebuilding, audit backup/restore scripts, startup recovery,
+and a CI job that builds the images and runs an end-to-end smoke test. See
+[running with Docker Compose](docs/operations/local-containers.md) and
+[ADR 0010](docs/adr/0010-local-container-release.md), which records that workspace
+state is still not durable across restarts.
+
+## Quick start with Docker
+
+```powershell
+docker compose up -d --build --wait      # then open http://127.0.0.1:8080
+$env:LOCAL_ONLY_MODE = "true"; docker compose up -d --wait   # never contact Gemini
+docker compose down -v                   # stop and delete all data
+```
+
+No Python or Node installation is needed on the host. The web port is published on
+`127.0.0.1` only because the API has no user authentication yet. Upload
+`sample_data/transactions.csv` to try the analysis. Details, backup/restore, upgrades, and
+troubleshooting are in [docs/operations/local-containers.md](docs/operations/local-containers.md).
+
 ## Local Setup
 
 Python 3.12 through 3.14 is supported. The current verified environment uses
@@ -388,7 +411,9 @@ those controls before hosting it for untrusted users.
 - `packages/evaluation/`: deterministic evaluation harness, gates, and baseline tooling.
 - `evals/`: versioned synthetic evaluation fixtures, thresholds, and baseline.
 - `docs/governance/`: responsible-AI, evaluation, and audit/observability documentation.
-- `docs/operations/`: incident and debugging runbook.
+- `docs/operations/`: local container guide and incident/debugging runbook.
+- `Dockerfile.api`, `Dockerfile.web`, `compose.yaml`, `docker/nginx/`: local container topology.
+- `ops/`: audit-log backup and restore scripts.
 - `openapi/`: generated, reproducibility-checked API contract.
 - `tests/`: unit and Streamlit integration tests.
 
@@ -408,3 +433,5 @@ those controls before hosting it for untrusted users.
   leaves their directories orphaned under `APP_DATA_DIR/api/`.
 - Audit files are tamper-evident on one node but are not immutable, rotated, or
   access-controlled beyond filesystem permissions.
+- The container topology supports exactly one API container, has no authentication (the
+  web port is loopback-only), and does not preserve workspaces across restarts.

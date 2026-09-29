@@ -73,6 +73,11 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "local_only_mode": "bool",
     "mapping_version": "int",
     "anomaly_flagged_count": "int",
+    "gemini_configured": "bool",
+    "sqlite_encrypted": "bool",
+    "sweep_enabled": "bool",
+    "orphans_swept": "int",
+    "orphan_sweep_failures": "int",
 }
 
 AttributeValue = str | int | float | bool

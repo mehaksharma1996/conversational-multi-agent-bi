@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -25,6 +26,16 @@ from src.orchestration.graph_state import AnswerDiagnostics
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 from src.storage.sqlite_store import StoredTable
+
+_TENANT_DIR = re.compile(r"[a-f0-9]{32}")
+_WORKSPACE_DIR = re.compile(r"ws_[a-f0-9]{32}")
+
+
+@dataclass(frozen=True)
+class OrphanSweepResult:
+    removed: tuple[tuple[str, str], ...]
+    failed: int
+
 
 WorkspaceLifecycleListener = Callable[[str, "WorkspaceRecord", str], None]
 """Called as ``listener(event, workspace, reason)`` for created/expired/deleted."""
@@ -189,7 +200,59 @@ class LocalResourceRepository:
         self._exports: dict[str, ExportRecord] = {}
 
     def ready(self) -> bool:
+        """True when the workspace storage root exists and accepts writes."""
+        try:
+            self.storage_root.mkdir(parents=True, exist_ok=True)
+            probe = self.storage_root / f".ready-{uuid4().hex}"
+            probe.write_bytes(b"")
+            probe.unlink()
+        except OSError:
+            return False
         return True
+
+    def close(self) -> None:
+        """Release open vector indexes (used at graceful shutdown)."""
+        with self._lock:
+            for record in self._document_collections.values():
+                record.retriever.close()
+
+    def sweep_orphaned_storage(self) -> OrphanSweepResult:
+        """Delete workspace directories that no in-memory record owns.
+
+        Resource metadata is process-local, so after a restart every directory
+        under the storage root is unreachable by any user. Only run this when a
+        single API process owns the storage root; it is opt-in for that reason.
+        Symlinks and unexpectedly named entries are never followed or removed.
+        """
+        removed: list[tuple[str, str]] = []
+        failed = 0
+        with self._lock:
+            if not self.storage_root.is_dir():
+                return OrphanSweepResult((), 0)
+            known = {(record.tenant_id, record.id) for record in self._workspaces.values()}
+            for tenant_dir in sorted(self.storage_root.iterdir()):
+                if (
+                    tenant_dir.is_symlink()
+                    or not tenant_dir.is_dir()
+                    or _TENANT_DIR.fullmatch(tenant_dir.name) is None
+                ):
+                    continue
+                for workspace_dir in sorted(tenant_dir.iterdir()):
+                    if (
+                        workspace_dir.is_symlink()
+                        or not workspace_dir.is_dir()
+                        or _WORKSPACE_DIR.fullmatch(workspace_dir.name) is None
+                        or (tenant_dir.name, workspace_dir.name) in known
+                        or workspace_dir.resolve().parent != tenant_dir.resolve()
+                    ):
+                        continue
+                    try:
+                        shutil.rmtree(workspace_dir)
+                    except OSError:
+                        failed += 1
+                        continue
+                    removed.append((tenant_dir.name, workspace_dir.name))
+        return OrphanSweepResult(tuple(removed), failed)
 
     def create_workspace(
         self,
