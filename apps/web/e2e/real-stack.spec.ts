@@ -59,7 +59,7 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
   await page.getByLabel("Business question").fill("Which uploaded transactions violate the policy?");
   await page.getByRole("button", { name: "Ask workbench" }).click();
   await expect(page.getByText("hybrid route", { exact: true })).toBeVisible();
-  await expect(page.getByText("SELECT", { exact: false })).toBeVisible();
+  await expect(page.locator(".sql-block code").filter({ hasText: 'SELECT "merchant"' })).toBeVisible();
 
   const csvDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download CSV" }).click();
