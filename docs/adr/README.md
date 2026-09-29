@@ -2,8 +2,8 @@
 
 These records define the guardrails for the modernization tracked by
 [GitHub issue #6](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/6).
-They describe the first iteration only: decisions and migration invariants,
-not implementation of the React or FastAPI runtime.
+They record migration invariants and the evidence-based decisions made as the
+React/FastAPI runtime became the primary local product.
 
 | ADR | Decision | Status |
 |---|---|---|
@@ -15,8 +15,9 @@ not implementation of the React or FastAPI runtime.
 | [0006](0006-persistence-concurrency-lifecycle.md) | Persistence and lifecycle | Accepted |
 | [0007](0007-observability-privacy.md) | Observability and privacy | Accepted |
 | [0008](0008-ai-evaluation-policy.md) | AI evaluation policy | Accepted |
-| [0009](0009-streamlit-migration.md) | Streamlit migration and exit criteria | Accepted |
+| [0009](0009-streamlit-migration.md) | Streamlit migration and exit criteria | Accepted; disposition decided by 0011 |
 | [0010](0010-local-container-release.md) | Local container release and restart-persistence waiver | Accepted |
+| [0011](0011-streamlit-disposition.md) | Retain Streamlit as a developer-only compatibility surface | Accepted |
 
 ## ADR lifecycle
 

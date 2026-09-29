@@ -50,6 +50,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -68,6 +70,18 @@ jobs:
         # Deterministic and credential-free: scripted model, hashing embedder,
         # real guards. Fails on critical safety checks, regressions, or drift.
         run: python -m scripts.run_evaluations --output evals/results/latest.json
+      - name: Verify and compatibility-check OpenAPI
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+          OPENAPI_BREAK_OVERRIDE: ${{ vars.OPENAPI_BREAK_OVERRIDE }}
+        run: |
+          python -m scripts.generate_openapi
+          git diff --exit-code -- openapi/openapi.json
+          if [ -z "${BASE_REF}" ] || echo "${BASE_REF}" | grep -Eq '^0+$'; then
+            BASE_REF="HEAD^"
+          fi
+          python -m scripts.check_openapi_compatibility --base-ref "${BASE_REF}"
       - name: Upload evaluation report
         if: always() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
@@ -113,7 +127,7 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
-          E2E_BASE_URL=http://127.0.0.1:8080 npm run test:e2e
+          E2E_BASE_URL=http://127.0.0.1:8080 E2E_REAL_STACK=local npm run test:e2e
       - name: Backup and restore the audit log
         run: |
           sh ops/backup.sh backups
@@ -122,6 +136,11 @@ jobs:
           python3 scripts/compose_smoke.py --expect-local-only
       - name: Streamlit compatibility profile
         run: docker compose --profile streamlit up -d --wait streamlit
+      - name: Real browser PDF, citation, hybrid, and export journey with test-only providers
+        run: |
+          docker compose -f compose.yaml -f compose.e2e.yaml up -d --wait --wait-timeout 300 --force-recreate api web
+          cd apps/web
+          E2E_BASE_URL=http://127.0.0.1:8080 E2E_REAL_STACK=fake npx playwright test e2e/real-stack.spec.ts
       - name: Container logs
         if: failure()
         run: docker compose --profile streamlit logs --no-color --tail 200

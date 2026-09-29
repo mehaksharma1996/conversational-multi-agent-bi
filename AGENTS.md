@@ -8,7 +8,8 @@ document retrieval, anomaly detection, visualization, and report generation.
 
 ## Architecture
 
-- `app.py` is the Streamlit entry point.
+- `app.py` is the developer-only Streamlit compatibility entry point; React/FastAPI is the primary
+  local product under ADR 0011.
 - `apps/web/` is the React and TypeScript browser client.
 - `apps/api/` is the versioned FastAPI service boundary.
 - `src/ui/` contains upload, dashboard, and chat interfaces.
@@ -31,6 +32,8 @@ document retrieval, anomaly detection, visualization, and report generation.
 - `Dockerfile.api`, `Dockerfile.web`, `compose.yaml`, and `docker/nginx/` define the local container topology;
   `ops/` holds audit backup/restore scripts.
 - `tests/` contains the pytest suite.
+- `compose.e2e.yaml` is test-only and mounts deterministic providers that must never be referenced
+  by production images, default Compose configuration, or request-selectable code.
 
 ## Technology
 
@@ -61,6 +64,7 @@ python -m ruff check .
 python -m ruff format --check .
 python -m mypy apps config packages scripts src tests
 python -m scripts.run_evaluations
+python -m scripts.check_openapi_compatibility --base-ref origin/main
 ```
 
 Container changes: keep images digest-pinned, non-root, and secret-free, and update

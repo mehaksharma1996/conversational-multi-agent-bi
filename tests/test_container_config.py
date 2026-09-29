@@ -93,6 +93,20 @@ def test_local_only_mode_and_model_key_are_runtime_switches_not_build_arguments(
         assert "args" not in service.get("build", {}), "no build args that could carry secrets"
 
 
+def test_deterministic_browser_providers_are_absent_from_production_configuration() -> None:
+    production = "\n".join(
+        [
+            (ROOT / "compose.yaml").read_text(encoding="utf-8"),
+            DOCKERFILE_API,
+            DOCKERFILE_WEB,
+        ]
+    )
+
+    assert "e2e_fake_app" not in production
+    assert "deterministic-browser-test" not in production
+    assert "compose.e2e.yaml" not in production
+
+
 def test_api_state_lives_in_named_volumes_and_orphans_are_swept() -> None:
     api = SERVICES["api"]
 

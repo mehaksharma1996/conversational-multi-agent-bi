@@ -1,6 +1,6 @@
 # ADR 0009: Streamlit migration and exit criteria
 
-- Status: Accepted
+- Status: Accepted; disposition decided by [ADR 0011](0011-streamlit-disposition.md)
 - Date: 2026-09-28
 - Issue: [#6](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/6)
 
@@ -39,3 +39,10 @@ after a follow-up ADR records the evidence and final choice.
 
 - Streamlit remains the behavioral reference until the exit criteria are met.
 - Its removal is not bundled into the first React or FastAPI pull request.
+
+## Phase 8 disposition
+
+[ADR 0011](0011-streamlit-disposition.md) applies these criteria to the recorded parity,
+accessibility, browser, container, and migration evidence. React/FastAPI is now the primary local
+product, while Streamlit remains a developer-only compatibility/reference surface until API OIDC,
+workspace continuity, complete retention evidence, and the other retirement conditions are met.

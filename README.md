@@ -1,8 +1,8 @@
 # Conversational Business Intelligence Workbench
 
-A local-first conversational BI platform with Streamlit and React product
-surfaces over deterministic analytics, read-only SQL, document retrieval, and
-coordinated conversational workflows.
+A local-first conversational BI platform with a primary React/FastAPI product
+surface and a developer-only Streamlit compatibility surface over deterministic
+analytics, read-only SQL, document retrieval, and coordinated conversational workflows.
 
 ## What It Does
 
@@ -46,8 +46,8 @@ React, FastAPI, evaluation, observability, governance, and local Docker work.
 The validated
 [interactive target architecture](.archify/architecture-target-platform-20260928-232755/target-platform.html)
 shows how those boundaries fit together.
-The existing Streamlit application remains the behavioral reference until the
-new product surface demonstrates tested feature parity.
+React/FastAPI is the primary local product. Streamlit remains an explicit
+developer-only compatibility/reference surface under [ADR 0011](docs/adr/0011-streamlit-disposition.md).
 
 Phase 2 introduces a [framework-neutral tabular core](docs/architecture/framework-neutral-core.md)
 under `packages/analytics/`, with typed upload, profile, schema-review, and
@@ -100,6 +100,14 @@ and a CI job that builds the images and runs an end-to-end smoke test. See
 [ADR 0010](docs/adr/0010-local-container-release.md), which records that workspace
 state is still not durable across restarts.
 
+Phase 8 records the [Streamlit parity evidence](docs/architecture/streamlit-parity-evidence.md),
+[accessibility baseline](docs/architecture/accessibility-baseline.md),
+[definition-of-done ledger](docs/architecture/definition-of-done.md), and
+[migration/rollback procedure](docs/operations/migration-and-rollback.md). Real Playwright journeys
+now exercise the Compose stack, an in-repo OpenAPI compatibility gate rejects breaking changes,
+and [ADR 0011](docs/adr/0011-streamlit-disposition.md) retains Streamlit only until the documented
+authentication, durability, retention, and independent-exercise conditions are met.
+
 ## Quick start with Docker
 
 ```powershell
@@ -149,6 +157,9 @@ The committed [OpenAPI contract](openapi/openapi.json) can be regenerated with
 `python -m scripts.generate_openapi`. Until durable resource persistence lands,
 run one API process. Restarting it clears API-created workspace metadata; use
 the UI reset before shutdown when you also want its local files removed.
+Breaking changes are checked against the base branch by
+`python -m scripts.check_openapi_compatibility --base-ref <ref>`; the explicit version-bump/ADR
+override is documented in [openapi-compatibility.md](docs/architecture/openapi-compatibility.md).
 
 For development tools:
 
@@ -203,7 +214,10 @@ See [the evaluation guide](docs/governance/evaluation.md) for adding cases and u
 
 CI runs the same Python and frontend checks on pushes and pull requests. The
 frontend job also verifies that its generated client matches the committed
-OpenAPI contract and exercises the critical browser journey. A separate security
+OpenAPI contract and exercises axe, keyboard, and critical browser journeys. The
+Python quality job regenerates OpenAPI and rejects breaking changes relative to the base branch.
+The container job adds real-stack local-only and isolated deterministic-provider PDF/hybrid/export
+journeys while preserving the CSP guard. A separate security
 job: `pip-audit` against `requirements.lock` (with a documented, reviewed
 exception for four chromadb advisories scoped to its standalone HTTP server,
 which this app never runs) and a `gitleaks` secret scan. Dependabot opens
@@ -226,7 +240,7 @@ context are available.
 
 ## Authentication
 
-The app supports Streamlit's native OIDC login (`st.login()`/`st.user`) for
+The developer-only Streamlit compatibility surface supports native OIDC login (`st.login()`/`st.user`) for
 gating access and scoping storage per authenticated user. To enable it, copy
 `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in a
 real identity provider's OAuth client credentials and OIDC discovery URL
@@ -435,3 +449,5 @@ those controls before hosting it for untrusted users.
   access-controlled beyond filesystem permissions.
 - The container topology supports exactly one API container, has no authentication (the
   web port is loopback-only), and does not preserve workspaces across restarts.
+- Streamlit remains in the repository only as the developer compatibility/reference surface defined
+  by ADR 0011; the API authentication, persistence, and retention conditions for retirement are open.

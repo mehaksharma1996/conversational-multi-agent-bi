@@ -1,0 +1,16 @@
+# Test-only overlay. The mounted module is outside the production image and cannot
+# be selected by an HTTP request or by the default compose.yaml command.
+services:
+  api:
+    command:
+      - uvicorn
+      - e2e_fake_app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-server-header
+      - --timeout-graceful-shutdown
+      - "20"
+    volumes:
+      - ./tests/e2e/fake_app.py:/app/e2e_fake_app.py:ro

@@ -304,7 +304,7 @@ export default function App() {
         </div>
       </header>
 
-      <main id="main-content">
+      <main id="main-content" tabIndex={-1}>
         <section className="hero" aria-labelledby="page-title">
           <p className="eyebrow">Review-first analytics</p>
           <h1 id="page-title">Turn uploaded data into explainable business insight.</h1>
