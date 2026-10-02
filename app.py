@@ -63,6 +63,7 @@ def _resolve_tenant_id() -> str | None:
 
 
 def main() -> None:
+    print("Starting Conversational BI Platform")
     configure_page()
     tenant_id = _resolve_tenant_id()
     if tenant_id is None:
