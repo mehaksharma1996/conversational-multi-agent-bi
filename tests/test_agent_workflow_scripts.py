@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -110,6 +111,14 @@ def test_brief_tier_selects_economical_defaults_and_allows_overrides() -> None:
     assert run_issue.resolve_controls(
         "codex",
         "strongest",
+        model=None,
+        effort=None,
+        budget_usd=None,
+        timeout_minutes=None,
+    ) == run_issue.RunControls("gpt-6-sol", "medium", 8.0, 30)
+    assert run_issue.resolve_controls(
+        "codex",
+        "strongest",
         model="custom-model",
         effort="high",
         budget_usd=3.0,
@@ -202,6 +211,50 @@ def test_build_command_rejects_unknown_agent() -> None:
         run_issue.build_command(
             "other", "x", model=None, effort=None, budget_usd=None, last_message_file=Path("x")
         )
+
+
+def test_codex_model_preflight_accepts_account_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = json.dumps({"models": [{"slug": "gpt-6-sol"}, {"slug": "gpt-6-luna"}]})
+    monkeypatch.setattr(
+        run_issue.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 0, catalog, ""),
+    )
+
+    run_issue.validate_codex_model("codex", "gpt-6-sol")
+
+
+def test_codex_model_preflight_rejects_unavailable_model_before_agent_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = json.dumps({"models": [{"slug": "gpt-6-sol"}, {"slug": "gpt-6-luna"}]})
+    monkeypatch.setattr(
+        run_issue.subprocess,
+        "run",
+        lambda *args, **kwargs: CompletedProcess(args[0], 0, catalog, ""),
+    )
+
+    with pytest.raises(run_issue.SetupError, match="not available.*gpt-6-sol, gpt-6-luna"):
+        run_issue.validate_codex_model("codex", "gpt-6.1-sol")
+
+
+@pytest.mark.parametrize(
+    ("completed", "message"),
+    [
+        (CompletedProcess(["codex"], 1, "", "login required"), "Could not read"),
+        (CompletedProcess(["codex"], 0, "not-json", ""), "invalid model catalog"),
+        (CompletedProcess(["codex"], 0, '{"models": []}', ""), "empty model catalog"),
+    ],
+)
+def test_codex_model_preflight_fails_closed(
+    completed: CompletedProcess[str], message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(run_issue.subprocess, "run", lambda *args, **kwargs: completed)
+
+    with pytest.raises(run_issue.SetupError, match=message):
+        run_issue.available_codex_models("codex")
 
 
 def test_prompt_points_at_brief_and_keeps_expensive_work_outside_model_loop() -> None:

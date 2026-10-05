@@ -50,7 +50,9 @@ issue text, and (3) long sessions that re-send everything every turn. This folde
    token cap through this runner; Codex usage is controlled with the selected model, reasoning
    effort, narrow brief, two-command verification limit, and `--timeout-minutes` wall-time limit.
    Codex runs use `--ephemeral --json`; the runner prints the final input, cached-input, and output
-   token counters and keeps the JSONL in the run log for later cost analysis.
+   token counters and keeps the JSONL in the run log for later cost analysis. Before a live Codex
+   run, the runner checks the selected model against the signed-in account's model catalog. An
+   unavailable default or `--model` override therefore fails before an inference turn spends usage.
 
    Unless overridden on the command line, the brief's `Tier:` selects these controls:
 
@@ -58,7 +60,7 @@ issue text, and (3) long sessions that re-send everything every turn. This folde
    |---|---|---|---:|---:|
    | `small` | `gpt-6-luna` | low | $2 | 10 minutes |
    | `medium` | `gpt-6-luna` | medium | $5 | 15 minutes |
-   | `strongest` | `gpt-6.1-sol` | medium | $8 | 30 minutes |
+   | `strongest` | `gpt-6-sol` | medium | $8 | 30 minutes |
 
    Claude keeps its configured model unless `--model` is supplied. Codex never selects Astra
    automatically. Use `--model`, `--effort`, `--budget-usd`, or `--timeout-minutes` for a deliberate
