@@ -142,6 +142,8 @@ class MessageRecord:
     created_at: datetime
     request_id: str = "unknown"
     diagnostics: AnswerDiagnostics = AnswerDiagnostics()
+    status: str = "complete"
+    checkpoint_thread_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -555,6 +557,7 @@ class LocalResourceRepository:
     def add_message(
         self,
         *,
+        message_id: str | None = None,
         conversation_id: str,
         tenant_id: str,
         question: str,
@@ -568,6 +571,8 @@ class LocalResourceRepository:
         max_dataframes: int,
         request_id: str = "unknown",
         diagnostics: AnswerDiagnostics | None = None,
+        status: str = "complete",
+        checkpoint_thread_id: str | None = None,
     ) -> MessageRecord:
         with self._lock:
             conversation = self._owned(
@@ -577,7 +582,7 @@ class LocalResourceRepository:
                 "Conversation",
             )
             message = MessageRecord(
-                id=_resource_id("msg"),
+                id=message_id or _resource_id("msg"),
                 conversation_id=conversation.id,
                 workspace_id=conversation.workspace_id,
                 tenant_id=tenant_id,
@@ -590,6 +595,8 @@ class LocalResourceRepository:
                 created_at=_now(),
                 request_id=request_id,
                 diagnostics=diagnostics or AnswerDiagnostics(),
+                status=status,
+                checkpoint_thread_id=checkpoint_thread_id,
             )
             self._messages[message.id] = message
             all_message_ids = (*conversation.message_ids, message.id)
@@ -622,6 +629,48 @@ class LocalResourceRepository:
             )
             self._conversations[conversation.id] = updated
             return message
+
+    def resolve_message(
+        self,
+        *,
+        message_id: str,
+        tenant_id: str,
+        answer: str,
+        route: str,
+        sql: str | None,
+        dataframe: pd.DataFrame | None,
+        sources: tuple[str, ...],
+        diagnostics: AnswerDiagnostics,
+        status: str,
+        memory: SessionMemory | None,
+    ) -> MessageRecord:
+        """Replace a pending message after a tenant-checked approval decision."""
+        with self._lock:
+            message = self._owned(self._messages, message_id, tenant_id, "Message")
+            if message.status != "pending_approval":
+                raise ValueError("This message no longer has a pending approval.")
+            updated = replace(
+                message,
+                answer=answer,
+                route=route,
+                sql=sql,
+                dataframe=dataframe.copy() if dataframe is not None else None,
+                sources=sources,
+                diagnostics=diagnostics,
+                status=status,
+                checkpoint_thread_id=(
+                    message.checkpoint_thread_id if status == "pending_approval" else None
+                ),
+            )
+            self._messages[message.id] = updated
+            conversation = self._owned(
+                self._conversations,
+                message.conversation_id,
+                tenant_id,
+                "Conversation",
+            )
+            self._conversations[conversation.id] = replace(conversation, memory=memory)
+            return updated
 
     def list_messages(self, conversation_id: str, tenant_id: str) -> list[MessageRecord]:
         conversation = self.get_conversation(conversation_id, tenant_id)

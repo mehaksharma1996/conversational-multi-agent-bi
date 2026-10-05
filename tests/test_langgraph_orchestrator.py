@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pandas as pd
 import pytest
 
+import src.orchestration.langgraph_orchestrator as orchestrator_module
 from src.documents.retriever import RetrievalResult
 from src.documents.vector_store import RetrievedChunk
 from src.llm.base import LLMResponse
@@ -17,6 +18,7 @@ from src.orchestration.langgraph_orchestrator import (
     _sql_references_criteria,
     route_question,
 )
+from src.storage.query_executor import QueryTimeoutError, UnsafeQueryError
 from src.storage.sqlite_store import SQLiteStore
 from tests.test_utils import isolated_database_path
 
@@ -203,6 +205,213 @@ def test_orchestrator_coordinates_document_and_sql_steps() -> None:
     assert result.sql is not None
     assert result.dataframe is not None
     assert result.sources
+
+
+def test_graph_exposes_sql_and_hybrid_workflow_nodes() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=FakeLLM(text="SELECT merchant FROM uploaded_data"),
+        stored_table=_stored_table(),
+        document_retriever=FakeRetriever(),
+    )
+
+    nodes = set(orchestrator._graph.get_graph().nodes)
+
+    assert {
+        "route",
+        "retrieve_documents",
+        "extract_criteria",
+        "generate_sql",
+        "validate_sql",
+        "approval",
+        "execute_sql",
+        "correct_sql",
+    } <= nodes
+
+
+def test_sql_graph_correction_is_bounded_to_one_attempt() -> None:
+    class FailingLLM(FakeLLM):
+        calls = 0
+
+        def generate(self, prompt: str) -> LLMResponse:
+            self.calls += 1
+            return LLMResponse(
+                text="SELECT missing_column FROM uploaded_data",
+                model=self.model,
+                provider=self.provider,
+            )
+
+    llm = FailingLLM(text="unused")
+    orchestrator = QuestionOrchestrator(llm_client=llm, stored_table=_stored_table())
+
+    with pytest.raises(orchestrator_module.SQLAgentError):
+        orchestrator.answer("Show all amounts")
+
+    assert llm.calls == 2
+
+
+def test_sql_graph_unsafe_query_never_enters_correction() -> None:
+    class UnsafeLLM(FakeLLM):
+        calls = 0
+
+        def generate(self, prompt: str) -> LLMResponse:
+            self.calls += 1
+            return LLMResponse(
+                text="DROP TABLE uploaded_data",
+                model=self.model,
+                provider=self.provider,
+            )
+
+    llm = UnsafeLLM(text="unused")
+    orchestrator = QuestionOrchestrator(llm_client=llm, stored_table=_stored_table())
+
+    with pytest.raises(UnsafeQueryError):
+        orchestrator.answer("Show all amounts")
+
+    assert llm.calls == 1
+
+
+def test_sql_graph_timeout_never_enters_correction(monkeypatch) -> None:
+    llm = FakeLLM(text="SELECT merchant FROM uploaded_data")
+    orchestrator = QuestionOrchestrator(llm_client=llm, stored_table=_stored_table())
+    executions = 0
+
+    def time_out(*args, **kwargs):
+        nonlocal executions
+        executions += 1
+        raise QueryTimeoutError("deadline")
+
+    monkeypatch.setattr(orchestrator_module, "execute_sql", time_out)
+
+    with pytest.raises(QueryTimeoutError):
+        orchestrator.answer("Show all amounts")
+
+    assert executions == 1
+
+
+def test_hybrid_approval_interrupts_then_executes_after_approval() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=FakeLLM(text="SELECT merchant, amount FROM uploaded_data"),
+        stored_table=_stored_table(),
+        document_retriever=FakeRetriever(),
+    )
+
+    pending = orchestrator.answer(
+        "Which transactions violate the uploaded policy?",
+        require_sql_approval=True,
+        thread_id="approval-test",
+    )
+    completed = orchestrator.resume_approval("approval-test", decision="approve")
+
+    assert pending.status == "pending_approval"
+    assert pending.sql == "SELECT merchant, amount FROM uploaded_data"
+    assert pending.dataframe is None
+    assert completed.status == "complete"
+    assert completed.dataframe is not None
+
+
+def test_hybrid_approval_rejection_never_executes(monkeypatch) -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=FakeLLM(text="SELECT merchant, amount FROM uploaded_data"),
+        stored_table=_stored_table(),
+        document_retriever=FakeRetriever(),
+    )
+    orchestrator.answer(
+        "Which transactions violate the uploaded policy?",
+        require_sql_approval=True,
+        thread_id="rejection-test",
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "execute_sql",
+        lambda *args, **kwargs: pytest.fail("rejected SQL was executed"),
+    )
+
+    rejected = orchestrator.resume_approval("rejection-test", decision="reject")
+
+    assert rejected.status == "rejected"
+    assert rejected.dataframe is None
+
+
+def test_hybrid_approval_revalidates_safe_edit() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=FakeLLM(text="SELECT merchant, amount FROM uploaded_data"),
+        stored_table=_stored_table(),
+        document_retriever=FakeRetriever(),
+    )
+    orchestrator.answer(
+        "Which transactions violate the uploaded policy?",
+        require_sql_approval=True,
+        thread_id="safe-edit-test",
+    )
+
+    completed = orchestrator.resume_approval(
+        "safe-edit-test",
+        decision="approve",
+        sql="SELECT merchant FROM uploaded_data ORDER BY merchant",
+    )
+
+    assert completed.status == "complete"
+    assert completed.sql == "SELECT merchant FROM uploaded_data ORDER BY merchant"
+    assert completed.dataframe is not None
+
+
+def test_hybrid_corrected_sql_requires_a_second_approval() -> None:
+    class CorrectingHybridLLM(FakeLLM):
+        def generate(self, prompt: str) -> LLMResponse:
+            if "careful document analyst" in prompt:
+                text = "High value transactions require escalation. Source 1"
+            elif "Extract business criteria" in prompt:
+                text = '{"keywords":["high value"]}'
+            elif "The first query failed" in prompt:
+                text = "SELECT merchant FROM uploaded_data ORDER BY merchant"
+            else:
+                text = "SELECT missing_column FROM uploaded_data"
+            return LLMResponse(text=text, model=self.model, provider=self.provider)
+
+    orchestrator = QuestionOrchestrator(
+        llm_client=CorrectingHybridLLM(text="unused"),
+        stored_table=_stored_table(),
+        document_retriever=FakeRetriever(),
+    )
+    first = orchestrator.answer(
+        "Which transactions violate the uploaded policy?",
+        require_sql_approval=True,
+        thread_id="corrected-approval-test",
+    )
+    corrected = orchestrator.resume_approval(
+        "corrected-approval-test",
+        decision="approve",
+    )
+    completed = orchestrator.resume_approval(
+        "corrected-approval-test",
+        decision="approve",
+    )
+
+    assert first.status == "pending_approval"
+    assert corrected.status == "pending_approval"
+    assert corrected.sql == "SELECT merchant FROM uploaded_data ORDER BY merchant"
+    assert completed.status == "complete"
+    assert completed.diagnostics.sql_correction_attempted is True
+
+
+def test_hybrid_approval_rejects_unsafe_edit() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=FakeLLM(text="SELECT merchant, amount FROM uploaded_data"),
+        stored_table=_stored_table(),
+        document_retriever=FakeRetriever(),
+    )
+    orchestrator.answer(
+        "Which transactions violate the uploaded policy?",
+        require_sql_approval=True,
+        thread_id="unsafe-edit-test",
+    )
+
+    with pytest.raises(UnsafeQueryError):
+        orchestrator.resume_approval(
+            "unsafe-edit-test",
+            decision="approve",
+            sql="DROP TABLE uploaded_data",
+        )
 
 
 def test_orchestrator_answers_memory_question() -> None:

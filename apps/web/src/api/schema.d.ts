@@ -158,6 +158,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/messages/{message_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Sql Approval
+         * @description Resume one tenant-owned SQL approval without accepting a client thread ID.
+         */
+        post: operations["decide_sql_approval_api_v1_messages__message_id__approval_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages/{message_id}/exports": {
         parameters: {
             query?: never;
@@ -763,10 +783,25 @@ export interface components {
              */
             status: "alive" | "ready";
         };
+        /** MessageApprovalRequest */
+        MessageApprovalRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            /** Sql */
+            sql?: string | null;
+        };
         /** MessageCreateRequest */
         MessageCreateRequest: {
             /** Question */
             question: string;
+            /**
+             * Require Sql Approval
+             * @default false
+             */
+            require_sql_approval: boolean;
         };
         /** MessageListResponse */
         MessageListResponse: {
@@ -811,6 +846,11 @@ export interface components {
             sources: components["schemas"]["SourceResponse"][];
             /** Sql */
             sql: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "complete" | "pending_approval" | "rejected";
         };
         /**
          * ProvenanceResponse
@@ -1621,6 +1661,77 @@ export interface operations {
                     "application/json": unknown;
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": string;
                     "text/csv": string;
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    decide_sql_approval_api_v1_messages__message_id__approval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Resource not found */

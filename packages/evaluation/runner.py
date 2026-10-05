@@ -90,11 +90,26 @@ def run_case(
     result = None
     category: str | None = None
     error_type: str | None = None
+    approval_interrupted = False
     started = perf_counter()
     try:
-        result = orchestrator.answer(case["question"])
+        approval = case.get("approval")
+        thread_id = f"evaluation:{case['id']}"
+        result = orchestrator.answer(
+            case["question"],
+            require_sql_approval=approval is not None,
+            thread_id=thread_id,
+        )
+        approval_interrupted = result.status == "pending_approval"
+        if approval is not None:
+            result = orchestrator.resume_approval(
+                thread_id,
+                decision=approval["decision"],
+                sql=approval.get("sql"),
+            )
         outcome = "answered"
     except DOMAIN_ERRORS as exc:
+        result = None
         outcome, category, error_type = "refused", error_category(exc), type(exc).__name__
     except Exception as exc:
         outcome, category, error_type = "crashed", "internal", type(exc).__name__
@@ -110,6 +125,7 @@ def run_case(
         retriever=recorder,
         dataset_intact=environment.dataset_intact(dataset) if dataset else None,
         latency_ms=latency_ms,
+        extra={"approval_interrupted": approval_interrupted},
     )
     diagnostics = _safe_diagnostics(observation)
     return CaseResult(

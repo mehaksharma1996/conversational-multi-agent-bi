@@ -22,6 +22,7 @@ CASE_KEYS = {
     "deterministic_only",
     "context",
     "script",
+    "approval",
     "expect",
 }
 REQUIRED_CASE_KEYS = {"id", "capability", "question", "rationale", "context", "expect"}
@@ -42,7 +43,10 @@ EXPECT_KEYS = {
     "min_sources",
     "structured_output_repairs",
     "structured_output_failures",
+    "status",
+    "approval_interrupt",
 }
+APPROVAL_KEYS = {"decision", "sql"}
 SQL_EXPECT_KEYS = {
     "required_columns",
     "required_fragments",
@@ -142,6 +146,10 @@ def _validate_case(case: dict[str, Any], case_id: str, fixtures: FixtureSet) -> 
         raise FixtureError(f"case {case_id} references unknown corpus {context['corpus']!r}.")
 
     _only_keys(case.get("script", {}), SCRIPT_KEYS, f"case {case_id} script")
+    if "approval" in case:
+        _only_keys(case["approval"], APPROVAL_KEYS, f"case {case_id} approval")
+        if case["approval"].get("decision") not in {"approve", "reject"}:
+            raise FixtureError(f"case {case_id} approval.decision must be 'approve' or 'reject'.")
 
     expect = case["expect"]
     _only_keys(expect, EXPECT_KEYS, f"case {case_id} expect")

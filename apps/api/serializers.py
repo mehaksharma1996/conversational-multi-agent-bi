@@ -193,6 +193,7 @@ def message_response(record: MessageRecord) -> MessageResponse:
         id=record.id,
         conversation_id=record.conversation_id,
         role="assistant",
+        status=record.status,
         question=record.question,
         answer=record.answer,
         route=record.route,

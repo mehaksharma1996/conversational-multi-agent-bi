@@ -56,6 +56,24 @@ def evaluate_case(case: dict[str, Any], obs: Observation) -> list[Check]:
                 f"expected {expect['route']}, observed {obs.route}",
             )
         )
+    if "status" in expect:
+        actual_status = obs.result.status if obs.result is not None else None
+        checks.append(
+            Check(
+                "approval.status",
+                actual_status == expect["status"],
+                f"expected {expect['status']}, observed {actual_status}",
+            )
+        )
+    if "approval_interrupt" in expect:
+        interrupted = bool(obs.extra.get("approval_interrupted", False))
+        checks.append(
+            Check(
+                "approval.interrupted",
+                interrupted == expect["approval_interrupt"],
+                f"interrupted: {interrupted}",
+            )
+        )
     if "refusal_category" in expect:
         checks.append(
             Check(

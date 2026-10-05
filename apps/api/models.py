@@ -233,6 +233,12 @@ class ConversationResponse(StrictModel):
 
 class MessageCreateRequest(StrictModel):
     question: str = Field(min_length=1, max_length=4_000)
+    require_sql_approval: bool = False
+
+
+class MessageApprovalRequest(StrictModel):
+    decision: Literal["approve", "reject"]
+    sql: str | None = Field(default=None, min_length=1, max_length=20_000)
 
 
 class SourceResponse(StrictModel):
@@ -265,6 +271,7 @@ class MessageResponse(StrictModel):
     id: str
     conversation_id: str
     role: Literal["assistant"]
+    status: Literal["complete", "pending_approval", "rejected"]
     question: str
     answer: str
     route: Literal["memory", "sql", "rag", "hybrid", "unsupported"]

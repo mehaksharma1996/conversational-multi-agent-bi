@@ -18,6 +18,7 @@ from apps.api.main import create_app
 from apps.api.repository import LocalResourceRepository
 from config.settings import Settings
 from packages.connectors import IdentityContext
+from packages.governance import InMemoryAuditSink
 from src.llm.base import LLMResponse
 from src.utils.identity import LOCAL_DEV_TENANT_ID
 from tests.test_utils import isolated_directory_path
@@ -118,6 +119,30 @@ def _prepare_tabular_context(client: TestClient, workspace_id: str) -> tuple[str
     return dataset_id, str(analysis.json()["id"])
 
 
+def _prepare_hybrid_context(client: TestClient) -> tuple[str, str]:
+    workspace_id = client.post("/api/v1/workspaces").json()["id"]
+    dataset_id, _ = _prepare_tabular_context(client, workspace_id)
+    documents = client.post(
+        f"/api/v1/workspaces/{workspace_id}/document-collections",
+        files=[("files", ("policy.pdf", _pdf_payload(), "application/pdf"))],
+    )
+    assert documents.status_code == 201
+    consent = client.put(
+        f"/api/v1/workspaces/{workspace_id}/consent",
+        json={"accepted": True, "notice_version": "2026-09"},
+    )
+    assert consent.status_code == 200
+    conversation = client.post(
+        f"/api/v1/workspaces/{workspace_id}/conversations",
+        json={
+            "dataset_id": dataset_id,
+            "document_collection_id": documents.json()["id"],
+        },
+    )
+    assert conversation.status_code == 201
+    return workspace_id, str(conversation.json()["id"])
+
+
 def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     tmp_path = isolated_directory_path("api_feature_parity")
     app = create_app(
@@ -178,6 +203,7 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     )
     assert hybrid_message.status_code == 201
     assert hybrid_message.json()["route"] == "hybrid"
+    assert hybrid_message.json()["status"] == "complete"
     assert hybrid_message.json()["sql"].startswith("SELECT")
     assert hybrid_message.json()["rows"][0]["amount"] == 75
 
@@ -271,6 +297,198 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     assert deleted.status_code == 204
     assert not workspace_dir.exists()
     assert client.get(f"/api/v1/conversations/{conversation_id}").status_code == 404
+
+
+def test_sql_approval_api_is_tenant_scoped_revalidated_and_audited() -> None:
+    tmp_path = isolated_directory_path("api_sql_approval")
+    audit_sink = InMemoryAuditSink()
+    app = create_app(
+        settings=_settings(tmp_path),
+        embedder_factory=lambda _model: FakeEmbedder(),
+        llm_client_factory=lambda _settings: FakeLLM(),
+        audit_sink=audit_sink,
+    )
+    client = TestClient(app)
+    workspace_id, conversation_id = _prepare_hybrid_context(client)
+
+    pending = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "question": "Which uploaded transactions violate the policy?",
+            "require_sql_approval": True,
+        },
+    )
+    assert pending.status_code == 201
+    assert pending.json()["status"] == "pending_approval"
+    assert pending.json()["rows"] is None
+    assert pending.json()["sql"].startswith("SELECT")
+    message_id = pending.json()["id"]
+    assert app.state.approval_checkpoints.pending_count(workspace_id) == 1
+    second_question = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"question": "What else matches?"},
+    )
+    assert second_question.status_code == 409
+    assert second_question.json()["error"]["code"] == "sql_approval_already_pending"
+
+    app.dependency_overrides[get_identity] = lambda: IdentityContext(
+        tenant_id="b" * 32,
+        subject="other-user",
+        authentication_mode="test",
+    )
+    try:
+        cross_tenant = client.post(
+            f"/api/v1/messages/{message_id}/approval",
+            json={"decision": "approve"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert cross_tenant.status_code == 404
+
+    approved = client.post(
+        f"/api/v1/messages/{message_id}/approval",
+        json={"decision": "approve"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "complete"
+    assert approved.json()["rows"][0]["amount"] == 75
+    duplicate = client.post(
+        f"/api/v1/messages/{message_id}/approval",
+        json={"decision": "approve"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "sql_approval_not_pending"
+
+    safe_edit_pending = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "question": "Which uploaded transactions violate the policy?",
+            "require_sql_approval": True,
+        },
+    )
+    safe_edit = client.post(
+        f"/api/v1/messages/{safe_edit_pending.json()['id']}/approval",
+        json={
+            "decision": "approve",
+            "sql": 'SELECT "merchant" FROM "uploaded_data" ORDER BY "merchant"',
+        },
+    )
+    assert safe_edit.status_code == 200
+    assert safe_edit.json()["status"] == "complete"
+    assert safe_edit.json()["rows"] == [{"merchant": "=2+2"}, {"merchant": "Safe Merchant"}]
+
+    reject_pending = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "question": "Which uploaded transactions violate the policy?",
+            "require_sql_approval": True,
+        },
+    )
+    rejected = client.post(
+        f"/api/v1/messages/{reject_pending.json()['id']}/approval",
+        json={"decision": "reject"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["rows"] is None
+
+    unsafe_pending = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "question": "Which uploaded transactions violate the policy?",
+            "require_sql_approval": True,
+        },
+    )
+    unsafe = client.post(
+        f"/api/v1/messages/{unsafe_pending.json()['id']}/approval",
+        json={"decision": "approve", "sql": "DROP TABLE uploaded_data"},
+    )
+    assert unsafe.status_code == 422
+    assert unsafe.json()["error"]["code"] == "sql_approval_could_not_be_applied_safely"
+    failed_retry = client.post(
+        f"/api/v1/messages/{unsafe_pending.json()['id']}/approval",
+        json={"decision": "reject"},
+    )
+    assert failed_retry.status_code == 409
+    rejected_export = client.post(
+        f"/api/v1/messages/{unsafe_pending.json()['id']}/exports",
+        json={"format": "csv"},
+    )
+    assert rejected_export.status_code == 409
+    assert rejected_export.json()["error"]["code"] == "message_not_complete"
+    assert app.state.approval_checkpoints.pending_count(workspace_id) == 0
+
+    approval_events = [
+        event
+        for event in audit_sink.events
+        if event.name in {"agent.sql_approved", "agent.sql_rejected"}
+    ]
+    assert [event.name for event in approval_events] == [
+        "agent.sql_approved",
+        "agent.sql_approved",
+        "agent.sql_rejected",
+        "agent.sql_approved",
+    ]
+    assert all("sql" not in event.attributes for event in approval_events)
+    assert approval_events[3].attributes["outcome"] == "failure"
+    assert approval_events[3].attributes["sql_edited"] is True
+
+
+def test_workspace_deletion_removes_pending_sql_checkpoint() -> None:
+    tmp_path = isolated_directory_path("api_sql_approval_cleanup")
+    app = create_app(
+        settings=_settings(tmp_path),
+        embedder_factory=lambda _model: FakeEmbedder(),
+        llm_client_factory=lambda _settings: FakeLLM(),
+    )
+    client = TestClient(app)
+    workspace_id, conversation_id = _prepare_hybrid_context(client)
+    pending = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "question": "Which uploaded transactions violate the policy?",
+            "require_sql_approval": True,
+        },
+    )
+    assert pending.json()["status"] == "pending_approval"
+    assert app.state.approval_checkpoints.pending_count(workspace_id) == 1
+
+    deleted = client.delete(f"/api/v1/workspaces/{workspace_id}")
+
+    assert deleted.status_code == 204
+    assert app.state.approval_checkpoints.pending_count(workspace_id) == 0
+
+
+def test_workspace_expiry_removes_pending_sql_checkpoint() -> None:
+    tmp_path = isolated_directory_path("api_sql_approval_expiry")
+    app = create_app(
+        settings=_settings(tmp_path),
+        embedder_factory=lambda _model: FakeEmbedder(),
+        llm_client_factory=lambda _settings: FakeLLM(),
+    )
+    client = TestClient(app)
+    workspace_id, conversation_id = _prepare_hybrid_context(client)
+    expires_at = datetime.fromisoformat(
+        client.get(f"/api/v1/workspaces/{workspace_id}").json()["expires_at"]
+    )
+    pending = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "question": "Which uploaded transactions violate the policy?",
+            "require_sql_approval": True,
+        },
+    )
+    assert pending.json()["status"] == "pending_approval"
+    assert app.state.approval_checkpoints.pending_count(workspace_id) == 1
+
+    with patch(
+        "apps.api.repository._now",
+        return_value=expires_at + timedelta(seconds=1),
+    ):
+        expired = client.get(f"/api/v1/workspaces/{workspace_id}")
+
+    assert expired.status_code == 404
+    assert app.state.approval_checkpoints.pending_count(workspace_id) == 0
 
 
 def test_document_upload_rejects_non_pdf_before_indexing() -> None:

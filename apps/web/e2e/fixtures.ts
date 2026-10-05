@@ -37,6 +37,7 @@ export const messageFixture = {
   id: "message-1",
   conversation_id: conversationFixture.id,
   role: "assistant",
+  status: "complete",
   question: "What is the escalation threshold?",
   answer: "Transactions over 500 require review.",
   route: "rag",

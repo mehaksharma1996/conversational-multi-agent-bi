@@ -45,6 +45,7 @@ export const messageFixture = {
   id: "message-1",
   conversation_id: conversationFixture.id,
   role: "assistant",
+  status: "complete",
   question: "Which transaction matches the escalation policy?",
   answer: "The North transaction for 900 matches the escalation threshold.",
   route: "hybrid",

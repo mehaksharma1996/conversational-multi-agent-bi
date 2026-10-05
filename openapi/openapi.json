@@ -1057,6 +1057,37 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "MessageApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "MessageApprovalRequest",
+        "type": "object"
+      },
       "MessageCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1065,6 +1096,11 @@
             "minLength": 1,
             "title": "Question",
             "type": "string"
+          },
+          "require_sql_approval": {
+            "default": false,
+            "title": "Require Sql Approval",
+            "type": "boolean"
           }
         },
         "required": [
@@ -1174,12 +1210,22 @@
               }
             ],
             "title": "Sql"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "pending_approval",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "conversation_id",
           "role",
+          "status",
           "question",
           "answer",
           "route",
@@ -2468,6 +2514,99 @@
         "summary": "Get Export Content",
         "tags": [
           "exports"
+        ]
+      }
+    },
+    "/api/v1/messages/{message_id}/approval": {
+      "post": {
+        "description": "Resume one tenant-owned SQL approval without accepting a client thread ID.",
+        "operationId": "decide_sql_approval_api_v1_messages__message_id__approval_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          }
+        },
+        "summary": "Decide Sql Approval",
+        "tags": [
+          "conversations"
         ]
       }
     },

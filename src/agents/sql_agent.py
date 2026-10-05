@@ -50,18 +50,12 @@ def answer_with_sql(
     )
     llm_response = llm_client.generate(prompt)
     sql = extract_sql(llm_response.text)
-    safe_sql = validate_read_query(sql)
+    safe_sql = validate_generated_sql(sql)
     execution_seconds = 0.0
     correction_attempted = False
     started_at = monotonic()
     try:
-        result = execute_read_query(
-            stored_table.database_path,
-            safe_sql,
-            allowed_tables={stored_table.table_name},
-            allowed_columns={stored_table.table_name: set(stored_table.columns)},
-            encryption_key=stored_table.encryption_key,
-        )
+        result = execute_sql(stored_table, safe_sql)
     except (UnsafeQueryError, QueryTimeoutError):
         raise
     except Exception as exc:
@@ -73,16 +67,10 @@ def answer_with_sql(
             error=str(exc),
         )
         retry_response = llm_client.generate(retry_prompt)
-        retry_sql = validate_read_query(extract_sql(retry_response.text))
+        retry_sql = validate_generated_sql(extract_sql(retry_response.text))
         started_at = monotonic()
         try:
-            result = execute_read_query(
-                stored_table.database_path,
-                retry_sql,
-                allowed_tables={stored_table.table_name},
-                allowed_columns={stored_table.table_name: set(stored_table.columns)},
-                encryption_key=stored_table.encryption_key,
-            )
+            result = execute_sql(stored_table, retry_sql)
         except (UnsafeQueryError, QueryTimeoutError):
             raise
         except Exception as retry_exc:
@@ -100,6 +88,28 @@ def answer_with_sql(
         llm_text=llm_response.text,
         execution_seconds=execution_seconds,
         correction_attempted=correction_attempted,
+    )
+
+
+def generate_sql(prompt: str, llm_client: LLMClient) -> tuple[str, str]:
+    """Generate SQL and return the extracted statement plus original model text."""
+    response = llm_client.generate(prompt)
+    return extract_sql(response.text), response.text
+
+
+def validate_generated_sql(sql: str) -> str:
+    """Apply the shared read-query guard to generated or edited SQL."""
+    return validate_read_query(sql)
+
+
+def execute_sql(stored_table: StoredTable, safe_sql: str) -> pd.DataFrame:
+    """Execute already validated SQL against the configured table boundary."""
+    return execute_read_query(
+        stored_table.database_path,
+        safe_sql,
+        allowed_tables={stored_table.table_name},
+        allowed_columns={stored_table.table_name: set(stored_table.columns)},
+        encryption_key=stored_table.encryption_key,
     )
 
 
