@@ -31,13 +31,16 @@ issue text, and (3) long sessions that re-send everything every turn. This folde
    The runner verifies that the selected base contains the runner, quiet checks, and chosen brief.
    It requires a clean primary checkout, creates or resumes
    `work/agent-worktrees/<selector>-<slug>` on `issue/<selector>-<slug>`, sends the prompt on stdin,
-   logs everything to `work/agent-runs/` (git-ignored), and prints only the tail. The primary
-   checkout stays on its current branch and nothing is pushed.
+   logs everything to `work/agent-runs/` (git-ignored), and prints only the final message. The
+   primary checkout stays on its current branch and nothing is pushed.
 
-   Codex receives write access to the issue worktree and the linked worktree's Git metadata so it
-   can create the requested commit without exposing the primary checkout as a writable workspace.
-   The runner treats a zero agent exit as incomplete (`exit=3`) if the worktree is dirty or `HEAD`
-   did not advance, preventing a failed commit from being reported as success.
+   The agent edits the issue worktree but does not receive write access to shared Git metadata. It
+   runs no more than two focused checks and leaves its changes uncommitted. After the model exits,
+   the trusted runner executes the brief's `Check mode` with `scripts.check_all`, outside the model
+   loop, so full test output and retries consume no model tokens. A no-change result is incomplete
+   (`exit=3`); a trusted-check failure is `exit=4`. Review and commit remain explicit human steps.
+   This mirrors OpenAI's [non-interactive automation pattern](https://learn.chatgpt.com/docs/non-interactive-mode):
+   generate changes in a restricted job, then apply or commit them in a separate trusted job.
 
    Linked worktrees do not inherit ignored dependencies. Keep the Python environment activated;
    for a frontend brief, run `npm ci` once from `<worktree>\apps\web` before the live agent run.
@@ -45,24 +48,26 @@ issue text, and (3) long sessions that re-send everything every turn. This folde
 
    `--budget-usd` is a Claude-only hard spend cap. Codex CLI does not expose an equivalent USD or
    token cap through this runner; Codex usage is controlled with the selected model, reasoning
-   effort, narrow brief, concise check output, and `--timeout-minutes` wall-time limit.
+   effort, narrow brief, two-command verification limit, and `--timeout-minutes` wall-time limit.
+   Codex runs use `--ephemeral --json`; the runner prints the final input, cached-input, and output
+   token counters and keeps the JSONL in the run log for later cost analysis.
 
    Unless overridden on the command line, the brief's `Tier:` selects these controls:
 
    | Tier | Codex model | Effort | Claude budget | Wall time |
    |---|---|---|---:|---:|
-   | `small` | `gpt-6-luna` | low | $2 | 20 minutes |
-   | `medium` | `gpt-6-luna` | medium | $5 | 45 minutes |
-   | `strongest` | `gpt-6.1-sol` | medium | $8 | 60 minutes |
+   | `small` | `gpt-6-luna` | low | $2 | 10 minutes |
+   | `medium` | `gpt-6-luna` | medium | $5 | 15 minutes |
+   | `strongest` | `gpt-6.1-sol` | medium | $8 | 30 minutes |
 
    Claude keeps its configured model unless `--model` is supplied. Codex never selects Astra
    automatically. Use `--model`, `--effort`, `--budget-usd`, or `--timeout-minutes` for a deliberate
    per-run override; the dry run prints the resolved values before spending anything.
-3. **Verify quietly.** `python -m scripts.check_all` prints one PASS/FAIL line per check and the
-   last 25 lines of a failing check only. `--only pytest` reruns one check, `--full` adds the
-   OpenAPI gate and web checks, `--e2e` adds Playwright. CI still runs the complete matrix, so do
-   not run Docker or Playwright inside an agent loop.
-4. **Review and push yourself.** Read the diff, push, open the PR, and read CI with
+3. **Verify quietly.** The runner invokes `python -m scripts.check_all` after a successful agent
+   result (`--full` when the brief requests it). It prints one PASS/FAIL line per check and only the
+   last 25 lines of a failure. CI still runs the complete matrix; Docker and Playwright stay out of
+   the agent loop.
+4. **Review, commit, and push yourself.** Read the diff, commit it, push, open the PR, and read CI with
    `gh run view <id> --log-failed | tail -40` rather than the whole log.
 
    The final line printed by the runner includes the exact worktree path. Run review and push

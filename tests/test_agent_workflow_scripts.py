@@ -106,7 +106,7 @@ def test_brief_tier_selects_economical_defaults_and_allows_overrides() -> None:
         effort=None,
         budget_usd=None,
         timeout_minutes=None,
-    ) == run_issue.RunControls("gpt-6-luna", "low", 2.0, 20)
+    ) == run_issue.RunControls("gpt-6-luna", "low", 2.0, 10)
     assert run_issue.resolve_controls(
         "codex",
         "strongest",
@@ -125,7 +125,16 @@ def test_claude_uses_tier_effort_and_budget_without_forcing_a_model() -> None:
         effort=None,
         budget_usd=None,
         timeout_minutes=None,
-    ) == run_issue.RunControls(None, "low", 2.0, 20)
+    ) == run_issue.RunControls(None, "low", 2.0, 10)
+
+
+def test_brief_declares_trusted_check_mode() -> None:
+    assert run_issue.check_mode_for(run_issue.find_brief(23)) == "fast"
+
+    text = "Tier: strongest. Check mode: --full."
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(Path, "read_text", lambda self, encoding: text)
+        assert run_issue.check_mode_for(Path("brief.md")) == "--full"
 
 
 def test_controls_reject_non_positive_limits() -> None:
@@ -162,7 +171,9 @@ def test_build_command_for_claude_caps_spend_and_reads_prompt_from_stdin() -> No
     assert command[:2] == ["claude", "-p"]
     assert command[command.index("--max-budget-usd") + 1] == "2.5"
     assert command[command.index("--model") + 1] == "sonnet"
-    assert "Bash(git *)" in command[command.index("--allowedTools") + 1]
+    allowed = command[command.index("--allowedTools") + 1]
+    assert "Bash(git diff *)" in allowed and "Bash(git status *)" in allowed
+    assert "Bash(git *)" not in allowed
 
 
 def test_build_command_for_codex_is_sandboxed_and_reads_stdin() -> None:
@@ -178,9 +189,10 @@ def test_build_command_for_codex_is_sandboxed_and_reads_stdin() -> None:
     )
 
     assert command[:2] == ["codex", "exec"]
+    assert "--ephemeral" in command and "--json" in command
     assert command[command.index("-s") + 1] == "workspace-write"
     assert command[command.index("-C") + 1] == str(worktree)
-    assert command[command.index("--add-dir") + 1] == str(run_issue.REPO_ROOT / ".git")
+    assert "--add-dir" not in command
     assert 'model_reasoning_effort="medium"' in command
     assert command[-1] == "-" and "-m" not in command
 
@@ -192,13 +204,15 @@ def test_build_command_rejects_unknown_agent() -> None:
         )
 
 
-def test_prompt_points_at_the_brief_and_forbids_pushing() -> None:
+def test_prompt_points_at_brief_and_keeps_expensive_work_outside_model_loop() -> None:
     brief = run_issue.find_brief(23)
 
     prompt = run_issue.build_prompt(23, brief, run_issue.branch_for(brief))
 
     assert "docs/agents/briefs/23-" in prompt
-    assert "scripts.check_all" in prompt and "Do not push" in prompt
+    assert "Do not run\n   `scripts.check_all`" in prompt
+    assert "Leave the changes uncommitted" in prompt
+    assert "trusted runner" in prompt
 
 
 def test_validate_base_rejects_missing_workflow_files(
@@ -276,7 +290,7 @@ def test_prepare_worktree_creates_a_linked_branch_without_switching_primary_chec
     assert all("switch" not in call for call in calls)
 
 
-def test_validate_agent_commit_rejects_dirty_or_unchanged_worktree(
+def test_validate_agent_result_accepts_dirty_worktree_and_rejects_no_op(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     responses = iter(
@@ -288,13 +302,12 @@ def test_validate_agent_commit_rejects_dirty_or_unchanged_worktree(
     )
     monkeypatch.setattr(run_issue, "_git_in_worktree", lambda path, *args: next(responses))
 
-    with pytest.raises(run_issue.SetupError, match="uncommitted changes"):
-        run_issue.validate_agent_commit(tmp_path, "before")
-    with pytest.raises(run_issue.SetupError, match="created no commit"):
-        run_issue.validate_agent_commit(tmp_path, "before")
+    run_issue.validate_agent_result(tmp_path, "before")
+    with pytest.raises(run_issue.SetupError, match="made no changes"):
+        run_issue.validate_agent_result(tmp_path, "before")
 
 
-def test_validate_agent_commit_accepts_clean_advanced_head(
+def test_validate_agent_result_accepts_clean_advanced_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     responses = iter(
@@ -305,7 +318,41 @@ def test_validate_agent_commit_accepts_clean_advanced_head(
     )
     monkeypatch.setattr(run_issue, "_git_in_worktree", lambda path, *args: next(responses))
 
-    run_issue.validate_agent_commit(tmp_path, "before")
+    run_issue.validate_agent_result(tmp_path, "before")
+
+
+def test_verification_command_runs_outside_agent_with_brief_mode() -> None:
+    assert run_issue.verification_command("fast") == [
+        sys.executable,
+        "-m",
+        "scripts.check_all",
+    ]
+    assert run_issue.verification_command("--full")[-1] == "--full"
+
+
+def test_verification_environment_uses_worktree_local_temp(tmp_path: Path) -> None:
+    environment = run_issue.verification_environment(tmp_path)
+
+    expected = str(tmp_path / "work" / "agent-verification-temp")
+    assert environment["TEMP"] == expected
+    assert environment["TMP"] == expected
+    assert environment["TMPDIR"] == expected
+    assert Path(expected).is_dir()
+
+
+def test_codex_token_usage_reads_turn_completion_event() -> None:
+    output = "\n".join(
+        [
+            '{"type":"item.completed","item":{}}',
+            '{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":80,"output_tokens":30}}',
+        ]
+    )
+
+    assert run_issue.codex_token_usage(output) == {
+        "input_tokens": 120,
+        "cached_input_tokens": 80,
+        "output_tokens": 30,
+    }
 
 
 def test_dry_run_prints_plan_without_touching_git(capsys: pytest.CaptureFixture[str]) -> None:
@@ -323,7 +370,8 @@ def test_codex_dry_run_describes_controls_without_claiming_a_spend_cap(
 
     out = capsys.readouterr().out
     assert "no USD or token cap" in out
-    assert "tier: small" in out and "effort=low" in out and "timeout=20m" in out
+    assert "tier: small" in out and "effort=low" in out and "timeout=10m" in out
+    assert "trusted check:" in out
     assert "--max-budget-usd" not in out
 
 
