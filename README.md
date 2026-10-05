@@ -1,8 +1,60 @@
 # Conversational Business Intelligence Workbench
 
+[![CI](https://github.com/mehaksharma1996/conversational-multi-agent-bi/actions/workflows/ci.yml/badge.svg)](https://github.com/mehaksharma1996/conversational-multi-agent-bi/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.12–3.14](https://img.shields.io/badge/python-3.12%E2%80%933.14-3776ab.svg)
+![React + FastAPI](https://img.shields.io/badge/stack-React%20%7C%20FastAPI%20%7C%20LangGraph-61dafb.svg)
+
+**Upload a spreadsheet and a policy PDF, then ask questions in plain English. Every answer shows
+how it was produced, and the model is never trusted to enforce a rule.**
+
 A local-first conversational BI platform with a primary React/FastAPI product
 surface and a developer-only Streamlit compatibility surface over deterministic
 analytics, read-only SQL, document retrieval, and coordinated conversational workflows.
+
+<p align="center">
+  <img src="docs/assets/03-analysis-dashboard.png" alt="Analysis dashboard with summary metrics, capability checks, and Plotly charts" width="49%">
+  <img src="docs/assets/04-conversation.png" alt="Conversation panel showing a memory-route answer with provenance and a request ID" width="49%">
+</p>
+<p align="center">
+  <img src="docs/assets/02-schema-review.png" alt="Schema review step where the analyst confirms each canonical field mapping" width="60%">
+</p>
+
+## Try it in 60 seconds
+
+No API key is needed for the deterministic features (profiling, analytics, anomaly review,
+charts, reports, and session-memory answers).
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.lock
+$env:LOCAL_ONLY_MODE = "true"
+python -m uvicorn apps.api.main:app --port 8000          # terminal 1
+cd apps/web; npm ci; npm run dev                         # terminal 2 -> http://localhost:5173
+```
+
+Upload [`sample_data/transactions.csv`](sample_data/transactions.csv), confirm the schema, run the
+analysis, and ask *"What limitations or unavailable analysis apply here?"*. Add `GEMINI_API_KEY`
+(and drop `LOCAL_ONLY_MODE`) to unlock SQL, document, and hybrid questions, or use
+[Docker Compose](docs/operations/local-containers.md) (`docker compose up -d --build --wait`).
+
+## Why it is different
+
+- **The model proposes; deterministic code enforces.** Generated SQL must pass a parser, table,
+  column and function allowlists, SQLite's authorizer, a read-only connection, a row cap, and a
+  deadline. A model that obeys a poisoned document still cannot run a destructive query.
+- **Answers carry their evidence.** Each reply shows its route (SQL, document RAG, hybrid, or
+  memory), the generated SQL, retrieved sources, citation and quote checks, and a request ID.
+- **Safety is tested, not asserted.** An offline evaluation suite runs 45 cases through the real
+  guards with hard-fail safety gates and a committed baseline, and negative controls prove each
+  check can fail.
+- **Privacy by construction.** Telemetry and audit logs are allowlist-only (no questions, SQL,
+  rows, or document text), audit files are hash-chained per tenant, and `LOCAL_ONLY_MODE`
+  guarantees nothing is sent to Gemini.
+- **Honest about limits.** Anomalies are review candidates, hybrid answers disclose that SQL
+  provenance is a literal-value check, and the [responsible-AI notes](docs/governance/responsible-ai.md)
+  list what is and is not covered.
 
 ## What It Does
 
