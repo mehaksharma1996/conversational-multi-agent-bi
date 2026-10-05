@@ -14,7 +14,8 @@ a split such as ``9a``. The run happens in a persistent linked worktree on branc
 only its tail is printed. Claude can receive a USD cap. Codex is bounded by model, reasoning
 effort, prompt scope, and wall time; the CLI does not expose an equivalent spend cap here.
 
-Exit status is the agent's, 124 for a timeout, or 2 for a setup problem.
+Exit status is the agent's, 124 for a timeout, 3 for an incomplete agent result, or 2 for a setup
+problem.
 """
 
 from __future__ import annotations
@@ -189,6 +190,8 @@ def build_command(
             "workspace-write",
             "-C",
             str(working_dir),
+            "--add-dir",
+            str(REPO_ROOT / ".git"),
             "-o",
             str(last_message_file),
         ]
@@ -248,16 +251,41 @@ def registered_worktrees() -> dict[str, Path]:
 
 
 def _worktree_is_clean(path: Path) -> bool:
-    result = subprocess.run(
-        ["git", "-c", f"safe.directory={path.as_posix()}", "status", "--porcelain"],
+    result = _git_in_worktree(path, "status", "--porcelain")
+    if result.returncode != 0:
+        raise SetupError(f"Could not inspect worktree {path}: {result.stderr.strip()}")
+    return not result.stdout.strip()
+
+
+def _git_in_worktree(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-c", f"safe.directory={path.as_posix()}", *args],
         cwd=path,
         capture_output=True,
         text=True,
         encoding="utf-8",
     )
+
+
+def worktree_head(path: Path) -> str:
+    result = _git_in_worktree(path, "rev-parse", "HEAD")
     if result.returncode != 0:
-        raise SetupError(f"Could not inspect worktree {path}: {result.stderr.strip()}")
-    return not result.stdout.strip()
+        raise SetupError(f"Could not read HEAD in {path}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def validate_agent_commit(path: Path, initial_head: str) -> None:
+    """Reject a nominally successful run that did not leave one or more clean commits."""
+    if not _worktree_is_clean(path):
+        raise SetupError(
+            "Agent exited successfully but left uncommitted changes. Review the worktree; "
+            "the run is incomplete."
+        )
+    if worktree_head(path) == initial_head:
+        raise SetupError(
+            "Agent exited successfully but created no commit. Review the worktree; "
+            "the run is incomplete."
+        )
 
 
 def prepare_worktree(branch: str, base: str, destination: Path) -> Path:
@@ -372,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
                 last_message_file=LOG_DIR / f"{brief.stem}-{args.agent}.last.txt",
                 working_dir=active_worktree,
             )
+        initial_head = worktree_head(active_worktree)
     except SetupError as error:
         print(error, file=sys.stderr)
         return 2
@@ -394,10 +423,15 @@ def main(argv: list[str] | None = None) -> int:
     output = completed.stdout + completed.stderr
     log_file.write_text(output, encoding="utf-8")
     print("\n".join(output.strip().splitlines()[-args.tail :]))
-    print(
-        f"\nexit={completed.returncode} branch={branch} worktree={active_worktree} log={log_file}"
-    )
-    return completed.returncode
+    returncode = completed.returncode
+    if returncode == 0:
+        try:
+            validate_agent_commit(active_worktree, initial_head)
+        except SetupError as error:
+            print(f"\n{error}", file=sys.stderr)
+            returncode = 3
+    print(f"\nexit={returncode} branch={branch} worktree={active_worktree} log={log_file}")
+    return returncode
 
 
 if __name__ == "__main__":

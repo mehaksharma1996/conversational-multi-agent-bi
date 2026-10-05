@@ -34,6 +34,11 @@ issue text, and (3) long sessions that re-send everything every turn. This folde
    logs everything to `work/agent-runs/` (git-ignored), and prints only the tail. The primary
    checkout stays on its current branch and nothing is pushed.
 
+   Codex receives write access to the issue worktree and the linked worktree's Git metadata so it
+   can create the requested commit without exposing the primary checkout as a writable workspace.
+   The runner treats a zero agent exit as incomplete (`exit=3`) if the worktree is dirty or `HEAD`
+   did not advance, preventing a failed commit from being reported as success.
+
    Linked worktrees do not inherit ignored dependencies. Keep the Python environment activated;
    for a frontend brief, run `npm ci` once from `<worktree>\apps\web` before the live agent run.
    The runner never installs dependencies automatically.

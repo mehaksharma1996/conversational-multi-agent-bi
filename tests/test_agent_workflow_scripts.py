@@ -180,6 +180,7 @@ def test_build_command_for_codex_is_sandboxed_and_reads_stdin() -> None:
     assert command[:2] == ["codex", "exec"]
     assert command[command.index("-s") + 1] == "workspace-write"
     assert command[command.index("-C") + 1] == str(worktree)
+    assert command[command.index("--add-dir") + 1] == str(run_issue.REPO_ROOT / ".git")
     assert 'model_reasoning_effort="medium"' in command
     assert command[-1] == "-" and "-m" not in command
 
@@ -273,6 +274,38 @@ def test_prepare_worktree_creates_a_linked_branch_without_switching_primary_chec
         "main",
     ) in calls
     assert all("switch" not in call for call in calls)
+
+
+def test_validate_agent_commit_rejects_dirty_or_unchanged_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    responses = iter(
+        [
+            CompletedProcess(["git"], 0, " M README.md\n", ""),
+            CompletedProcess(["git"], 0, "", ""),
+            CompletedProcess(["git"], 0, "before\n", ""),
+        ]
+    )
+    monkeypatch.setattr(run_issue, "_git_in_worktree", lambda path, *args: next(responses))
+
+    with pytest.raises(run_issue.SetupError, match="uncommitted changes"):
+        run_issue.validate_agent_commit(tmp_path, "before")
+    with pytest.raises(run_issue.SetupError, match="created no commit"):
+        run_issue.validate_agent_commit(tmp_path, "before")
+
+
+def test_validate_agent_commit_accepts_clean_advanced_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    responses = iter(
+        [
+            CompletedProcess(["git"], 0, "", ""),
+            CompletedProcess(["git"], 0, "after\n", ""),
+        ]
+    )
+    monkeypatch.setattr(run_issue, "_git_in_worktree", lambda path, *args: next(responses))
+
+    run_issue.validate_agent_commit(tmp_path, "before")
 
 
 def test_dry_run_prints_plan_without_touching_git(capsys: pytest.CaptureFixture[str]) -> None:
