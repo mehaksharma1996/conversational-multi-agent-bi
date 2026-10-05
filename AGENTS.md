@@ -67,6 +67,10 @@ python -m scripts.run_evaluations
 python -m scripts.check_openapi_compatibility --base-ref origin/main
 ```
 
+Prefer `python -m scripts.check_all` (add `--full` for API or web changes, `--only <name>` to rerun
+one check): it prints one PASS/FAIL line per check and only the tail of a failure. For a roadmap
+issue, read its brief in `docs/agents/briefs/` before exploring; see `docs/agents/README.md`.
+
 Container changes: keep images digest-pinned, non-root, and secret-free, and update
 `tests/test_container_config.py` when a hardening invariant intentionally changes. With Docker
 available, `docker compose up -d --build --wait` then
