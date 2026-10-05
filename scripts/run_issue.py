@@ -10,17 +10,21 @@ repository and the full issue text, which is the main source of wasted tokens::
 
 Briefs live in ``docs/agents/briefs/<selector>-<slug>.md``, where a selector is an issue number or
 a split such as ``9a``. The run happens in a persistent linked worktree on branch
-``issue/<selector>-<slug>``; nothing is pushed. Full agent output goes to ``work/agent-runs/`` and
-only its tail is printed. Claude can receive a USD cap. Codex is bounded by model, reasoning
-effort, prompt scope, and wall time; the CLI does not expose an equivalent spend cap here.
+``issue/<selector>-<slug>``; nothing is pushed or committed. The agent performs at most two focused
+checks, then this trusted runner executes the brief's complete check mode outside the model loop.
+Full agent output goes to ``work/agent-runs/`` and only its tail is printed. Claude can receive a
+USD cap. Codex is bounded by model, reasoning effort, prompt scope, and wall time; its JSON output
+records token usage, but the CLI does not expose an equivalent spend cap here.
 
-Exit status is the agent's, 124 for a timeout, 3 for an incomplete agent result, or 2 for a setup
-problem.
+Exit status is the agent's, 124 for a timeout, 4 for failed trusted verification, 3 for an
+incomplete agent result, or 2 for a setup problem.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -34,14 +38,15 @@ LOG_DIR = REPO_ROOT / "work" / "agent-runs"
 WORKTREES_DIR = REPO_ROOT / "work" / "agent-worktrees"
 BRIEF_SELECTOR = re.compile(r"(?P<issue>[1-9][0-9]*)(?P<part>[a-z]?)\Z")
 BRIEF_TIER = re.compile(r"^Tier:\s*(small|medium|strongest)\b", re.IGNORECASE | re.MULTILINE)
+BRIEF_CHECK_MODE = re.compile(r"Check mode:\s*(fast|--full)\b", re.IGNORECASE)
 REQUIRED_BASE_PATHS = ("scripts/run_issue.py", "scripts/check_all.py")
 CLAUDE_ALLOWED_TOOLS = ",".join(
     [
-        "Bash(git *)",
+        "Bash(git diff *)",
+        "Bash(git status *)",
         "Bash(python *)",
         "Bash(.venv/Scripts/python.exe *)",
         "Bash(npm *)",
-        "Bash(gh issue view *)",
     ]
 )
 PROMPT_TEMPLATE = """You are working on GitHub issue #{issue} in this repository (branch {branch}).
@@ -50,12 +55,13 @@ PROMPT_TEMPLATE = """You are working on GitHub issue #{issue} in this repository
    or explore beyond the files it lists unless a listed fact turns out to be wrong.
 2. Make the smallest change that meets the brief's acceptance criteria. Respect its
    "Do not touch" list.
-3. Verify with `python -m scripts.check_all` (add `--full` if you changed the API, OpenAPI, or
-   apps/web). Rerun a single failing check with `--only <name>`. Never paste full tool logs.
+3. Run at most two narrowly targeted verification commands for the files you changed. Do not run
+   `scripts.check_all`, the full pytest suite, Docker, or Playwright: the trusted runner performs
+   the complete check after you exit. Do not retry the same failed command more than once.
 4. If you change a prompt, retrieval setting, fixture, or safety behavior, update evals/v1 and its
    baseline as described in docs/governance/evaluation.md.
-5. Commit on this branch with a conventional message. Do not push, open a pull request, or
-   comment on or close the issue.
+5. Leave the changes uncommitted. Do not use Git to commit, push, open a pull request, or comment
+   on or close the issue; a trusted step reviews and commits after verification.
 6. Finish with at most 10 lines: what changed, check results, open risks.
 """
 
@@ -73,9 +79,9 @@ class RunControls:
 
 
 TIER_DEFAULTS = {
-    "small": RunControls("gpt-6-luna", "low", 2.0, 20),
-    "medium": RunControls("gpt-6-luna", "medium", 5.0, 45),
-    "strongest": RunControls("gpt-6.1-sol", "medium", 8.0, 60),
+    "small": RunControls("gpt-6-luna", "low", 2.0, 10),
+    "medium": RunControls("gpt-6-luna", "medium", 5.0, 15),
+    "strongest": RunControls("gpt-6.1-sol", "medium", 8.0, 30),
 }
 
 
@@ -126,6 +132,15 @@ def tier_for(brief: Path) -> str:
     match = BRIEF_TIER.search(brief.read_text(encoding="utf-8"))
     if match is None:
         raise SetupError(f"Brief does not declare `Tier: small`, `medium`, or `strongest`: {brief}")
+    return match.group(1).lower()
+
+
+def check_mode_for(brief: Path) -> str:
+    match = BRIEF_CHECK_MODE.search(brief.read_text(encoding="utf-8"))
+    if match is None:
+        raise SetupError(
+            f"Brief does not declare `Check mode: fast` or `Check mode: --full`: {brief}"
+        )
     return match.group(1).lower()
 
 
@@ -186,12 +201,12 @@ def build_command(
         command = [
             executable,
             "exec",
+            "--ephemeral",
+            "--json",
             "-s",
             "workspace-write",
             "-C",
             str(working_dir),
-            "--add-dir",
-            str(REPO_ROOT / ".git"),
             "-o",
             str(last_message_file),
         ]
@@ -274,18 +289,43 @@ def worktree_head(path: Path) -> str:
     return result.stdout.strip()
 
 
-def validate_agent_commit(path: Path, initial_head: str) -> None:
-    """Reject a nominally successful run that did not leave one or more clean commits."""
-    if not _worktree_is_clean(path):
+def validate_agent_result(path: Path, initial_head: str) -> None:
+    """Accept uncommitted edits (preferred) or a commit, but reject a no-op success."""
+    if _worktree_is_clean(path) and worktree_head(path) == initial_head:
         raise SetupError(
-            "Agent exited successfully but left uncommitted changes. Review the worktree; "
-            "the run is incomplete."
+            "Agent exited successfully but made no changes. Review its log; the run is incomplete."
         )
-    if worktree_head(path) == initial_head:
-        raise SetupError(
-            "Agent exited successfully but created no commit. Review the worktree; "
-            "the run is incomplete."
-        )
+
+
+def verification_command(check_mode: str) -> list[str]:
+    command = [sys.executable, "-m", "scripts.check_all"]
+    if check_mode == "--full":
+        command.append("--full")
+    return command
+
+
+def verification_environment(worktree: Path) -> dict[str, str]:
+    """Keep test/process scratch data inside the isolated, git-ignored worktree."""
+    temp_dir = worktree / "work" / "agent-verification-temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    environment = os.environ.copy()
+    environment.update({"TEMP": str(temp_dir), "TMP": str(temp_dir), "TMPDIR": str(temp_dir)})
+    return environment
+
+
+def codex_token_usage(output: str) -> dict[str, int] | None:
+    """Extract the final usage counters from Codex JSONL without depending on other events."""
+    for line in reversed(output.splitlines()):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") != "turn.completed" or not isinstance(event.get("usage"), dict):
+            continue
+        usage = event["usage"]
+        keys = ("input_tokens", "cached_input_tokens", "output_tokens")
+        return {key: int(usage.get(key, 0)) for key in keys}
+    return None
 
 
 def prepare_worktree(branch: str, base: str, destination: Path) -> Path:
@@ -351,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
         brief = find_brief(args.brief)
         issue = issue_number_for(args.brief)
         tier = tier_for(brief)
+        check_mode = check_mode_for(brief)
         controls = resolve_controls(
             args.agent,
             tier,
@@ -366,13 +407,14 @@ def main(argv: list[str] | None = None) -> int:
         if executable is None and not args.dry_run:
             raise SetupError(f"`{args.agent}` was not found on PATH.")
         log_file = LOG_DIR / f"{brief.stem}-{args.agent}.log"
+        last_message_file = LOG_DIR / f"{brief.stem}-{args.agent}.last.txt"
         command = build_command(
             args.agent,
             executable or args.agent,
             model=controls.model,
             effort=controls.effort,
             budget_usd=controls.budget_usd,
-            last_message_file=LOG_DIR / f"{brief.stem}-{args.agent}.last.txt",
+            last_message_file=last_message_file,
             working_dir=planned_worktree,
         )
         prompt = build_prompt(issue, brief, branch)
@@ -386,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"branch: {branch}\nworktree: {planned_worktree}\nbase: {args.base}\ntier: {tier}\n"
                 f"controls: {control}; model={controls.model or 'CLI default'}; "
                 f"effort={controls.effort}; timeout={controls.timeout_minutes}m\n"
+                f"trusted check: {' '.join(verification_command(check_mode))}\n"
                 f"log: {log_file}\ncommand: {' '.join(command)}\n---\n{prompt}"
             )
             return 0
@@ -397,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
                 model=controls.model,
                 effort=controls.effort,
                 budget_usd=controls.budget_usd,
-                last_message_file=LOG_DIR / f"{brief.stem}-{args.agent}.last.txt",
+                last_message_file=last_message_file,
                 working_dir=active_worktree,
             )
         initial_head = worktree_head(active_worktree)
@@ -406,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    last_message_file.unlink(missing_ok=True)
     try:
         completed = subprocess.run(
             command,
@@ -422,14 +466,43 @@ def main(argv: list[str] | None = None) -> int:
         return 124
     output = completed.stdout + completed.stderr
     log_file.write_text(output, encoding="utf-8")
-    print("\n".join(output.strip().splitlines()[-args.tail :]))
+    if args.agent == "codex" and last_message_file.exists():
+        visible_output = last_message_file.read_text(encoding="utf-8", errors="replace")
+    else:
+        visible_output = output
+    print("\n".join(visible_output.strip().splitlines()[-args.tail :]))
+    usage = codex_token_usage(output) if args.agent == "codex" else None
+    if usage is not None:
+        print(
+            "usage: "
+            f"input={usage['input_tokens']} cached_input={usage['cached_input_tokens']} "
+            f"output={usage['output_tokens']}"
+        )
     returncode = completed.returncode
     if returncode == 0:
         try:
-            validate_agent_commit(active_worktree, initial_head)
+            validate_agent_result(active_worktree, initial_head)
         except SetupError as error:
             print(f"\n{error}", file=sys.stderr)
             returncode = 3
+    if returncode == 0:
+        check = subprocess.run(
+            verification_command(check_mode),
+            cwd=active_worktree,
+            env=verification_environment(active_worktree),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        check_output = check.stdout + check.stderr
+        with log_file.open("a", encoding="utf-8") as stream:
+            stream.write("\n\n--- trusted verification ---\n")
+            stream.write(check_output)
+        print("\ntrusted verification:")
+        print("\n".join(check_output.strip().splitlines()[-args.tail :]))
+        if check.returncode != 0:
+            returncode = 4
     print(f"\nexit={returncode} branch={branch} worktree={active_worktree} log={log_file}")
     return returncode
 
