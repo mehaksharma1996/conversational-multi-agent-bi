@@ -74,7 +74,8 @@ class ChromaDocumentStore:
     ) -> None:
         with self._lock:
             self._refresh_collection()
-            self._add_chunks_to(self._collection, chunks, batch_size)
+            embeddings = self._embed_chunks(chunks, batch_size)
+            self._add_chunks_to(self._collection, chunks, embeddings, batch_size)
 
     def replace_chunks(
         self,
@@ -83,20 +84,29 @@ class ChromaDocumentStore:
     ) -> None:
         """Atomically replace this store's contents with chunks.
 
-        Indexes into a temporary staging collection first. Only after every
-        batch has been embedded and added successfully is the existing
+        Every chunk is embedded before Chroma is touched, because embedding is
+        the step that talks to an external model and is where failures really
+        happen. Deleting a staging collection that already received a batch
+        while another collection's index is still unflushed can leave that
+        other collection permanently unreadable (observed with chromadb 1.5.9:
+        "Error creating hnsw segment reader: Nothing found on disk"), so an
+        embedding failure must never reach that cleanup path.
+
+        The chunks are then indexed into a temporary staging collection. Only
+        after every batch has been added successfully is the existing
         collection deleted and the staging collection promoted in its place,
         so a failure partway through never leaves a partial or missing index
         under the canonical collection name.
         """
         with self._lock:
+            embeddings = self._embed_chunks(chunks, batch_size)
             staging_name = f"{self.collection_name}__staging_{uuid4().hex[:8]}"
             staging_collection = self._client.get_or_create_collection(
                 name=staging_name,
                 metadata={"hnsw:space": "cosine"},
             )
             try:
-                self._add_chunks_to(staging_collection, chunks, batch_size)
+                self._add_chunks_to(staging_collection, chunks, embeddings, batch_size)
             except Exception:
                 self._client.delete_collection(name=staging_name)
                 raise
@@ -107,27 +117,36 @@ class ChromaDocumentStore:
             staging_collection.modify(name=self.collection_name)
             self._collection = staging_collection
 
+    def _embed_chunks(self, chunks: list[DocumentChunk], batch_size: int) -> list[list[float]]:
+        """Embed every chunk, in batches, without touching the vector store."""
+        if not chunks:
+            return []
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1.")
+
+        embeddings: list[list[float]] = []
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start : start + batch_size]
+            batch_embeddings = self.embedder.embed_texts([chunk.text for chunk in batch])
+            if len(batch_embeddings) != len(batch):
+                raise ValueError("Embedding count did not match the number of document chunks.")
+            embeddings.extend(batch_embeddings)
+        return embeddings
+
     def _add_chunks_to(
         self,
         collection: Any,
         chunks: list[DocumentChunk],
+        embeddings: list[list[float]],
         batch_size: int,
     ) -> None:
-        if not chunks:
-            return
-        if batch_size < 1:
-            raise ValueError("batch_size must be at least 1.")
-
         for start in range(0, len(chunks), batch_size):
             batch = chunks[start : start + batch_size]
-            embeddings = self.embedder.embed_texts([chunk.text for chunk in batch])
-            if len(embeddings) != len(batch):
-                raise ValueError("Embedding count did not match the number of document chunks.")
             collection.add(
                 ids=[chunk.id for chunk in batch],
                 documents=[chunk.text for chunk in batch],
                 metadatas=[chunk.metadata for chunk in batch],
-                embeddings=embeddings,
+                embeddings=embeddings[start : start + batch_size],
             )
 
     def query(

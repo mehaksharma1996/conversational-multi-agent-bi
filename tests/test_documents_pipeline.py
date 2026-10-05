@@ -274,6 +274,65 @@ def test_replace_chunks_leaves_existing_index_untouched_on_failure() -> None:
     assert collection_names == {good_store.collection_name}
 
 
+def test_embedding_failure_never_creates_a_staging_collection() -> None:
+    persist_dir = isolated_vector_path("replace_chunks_no_staging")
+    store = ChromaDocumentStore(persist_dir=persist_dir, embedder=FakeEmbedder())
+    store.replace_chunks(
+        [DocumentChunk(id="good", text="Refunds require approval.", metadata={"filename": "g.pdf"})]
+    )
+    created: list[str] = []
+    original = store._client.get_or_create_collection
+
+    def recording(*args, **kwargs):
+        created.append(kwargs.get("name", ""))
+        return original(*args, **kwargs)
+
+    store._client.get_or_create_collection = recording
+    store.embedder = FailingAfterFirstBatchEmbedder()
+
+    with pytest.raises(RuntimeError):
+        store.replace_chunks(
+            [
+                DocumentChunk(id=f"bad-{i}", text=f"Chunk {i}.", metadata={"filename": "b.pdf"})
+                for i in range(4)
+            ],
+            batch_size=1,
+        )
+
+    assert created == [], "embedding must fail before any staging collection is created"
+    assert store.count() == 1
+
+
+def test_failed_add_cleans_up_staging_and_keeps_the_existing_collection() -> None:
+    # Only names and counts are asserted here: deleting a staging collection that
+    # already received a batch can make Chroma 1.5.x fail later *queries* against the
+    # live collection, which is why embedding happens before staging is created.
+    persist_dir = isolated_vector_path("replace_chunks_add_failure")
+    store = ChromaDocumentStore(persist_dir=persist_dir, embedder=FakeEmbedder())
+    store.replace_chunks(
+        [DocumentChunk(id="good", text="Refunds require approval.", metadata={"filename": "g.pdf"})]
+    )
+    original_add = store._add_chunks_to
+
+    def add_then_fail(collection, chunks, embeddings, batch_size):
+        original_add(collection, chunks[:1], embeddings[:1], batch_size)
+        raise RuntimeError("vector store write failed")
+
+    store._add_chunks_to = add_then_fail  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        store.replace_chunks(
+            [
+                DocumentChunk(id=f"bad-{i}", text=f"Chunk {i}.", metadata={"filename": "b.pdf"})
+                for i in range(3)
+            ],
+            batch_size=1,
+        )
+
+    assert {c.name for c in store._client.list_collections()} == {store.collection_name}
+    assert store.count() == 1
+
+
 def test_build_rag_prompt_includes_sources() -> None:
     prompt = build_rag_prompt(
         question="What is the refund policy?",
