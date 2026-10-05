@@ -319,9 +319,15 @@ def _rule_based_reasons(
     date_column = mapped.get("date")
     if date_column and date_column in dataframe.columns:
         dates = pd.to_datetime(dataframe[date_column], errors="coerce", format="mixed")
-        off_hours = dates.notna() & ((dates.dt.hour < 6) | (dates.dt.hour >= 22))
-        for position, is_off_hours in enumerate(off_hours.to_numpy()):
-            if is_off_hours:
-                reasons[position].append("The event occurred during off-hours.")
+        # A date-only column parses every value as midnight; treating that as
+        # off-hours would flag every row, so the rule needs real times of day.
+        has_time_of_day = bool(
+            ((dates.dt.hour != 0) | (dates.dt.minute != 0) | (dates.dt.second != 0)).any()
+        )
+        if has_time_of_day:
+            off_hours = dates.notna() & ((dates.dt.hour < 6) | (dates.dt.hour >= 22))
+            for position, is_off_hours in enumerate(off_hours.to_numpy()):
+                if is_off_hours:
+                    reasons[position].append("The event occurred during off-hours.")
 
     return pd.Series((" ".join(row_reasons) for row_reasons in reasons), index=dataframe.index)
