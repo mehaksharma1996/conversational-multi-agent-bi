@@ -5,12 +5,15 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 
+from apps.api.approvals import ApprovalCheckpoints
 from apps.api.dependencies import (
     get_api_settings,
+    get_approval_checkpoints,
     get_document_service,
     get_identity,
     get_llm_client,
@@ -26,6 +29,7 @@ from apps.api.models import (
     DocumentCollectionResponse,
     ExportCreateRequest,
     ExportResponse,
+    MessageApprovalRequest,
     MessageCreateRequest,
     MessageListResponse,
     MessageResponse,
@@ -66,6 +70,7 @@ SettingsDependency = Annotated[Settings, Depends(get_api_settings)]
 DocumentServiceDependency = Annotated[DocumentApplicationService, Depends(get_document_service)]
 LLMDependency = Annotated[LLMClient, Depends(get_llm_client)]
 ObservabilityDependency = Annotated[ApiObservability, Depends(get_observability)]
+ApprovalCheckpointsDependency = Annotated[ApprovalCheckpoints, Depends(get_approval_checkpoints)]
 
 REPORT_CONTENT_RESPONSES = {
     **STANDARD_ERROR_RESPONSES,
@@ -301,8 +306,17 @@ def create_message(
     settings: SettingsDependency,
     llm_client: LLMDependency,
     observability: ObservabilityDependency,
+    approval_checkpoints: ApprovalCheckpointsDependency,
 ) -> MessageResponse:
     conversation = repository.get_conversation(conversation_id, identity.tenant_id)
+    if any(
+        message.status == "pending_approval"
+        for message in repository.list_messages(conversation.id, identity.tenant_id)
+    ):
+        raise ResourceConflictError(
+            "sql_approval_already_pending",
+            "Resolve the pending SQL approval before asking another question.",
+        )
     workspace = repository.get_workspace(conversation.workspace_id, identity.tenant_id)
     if workspace.gemini_configured and workspace.consent_accepted_at is None:
         raise ResourceConflictError(
@@ -329,12 +343,15 @@ def create_message(
             "Confirm the dataset schema mapping before asking data questions.",
         )
 
+    message_id = f"msg_{uuid4().hex}"
+    thread_id = f"{identity.tenant_id}:{conversation.workspace_id}:{message_id}"
     orchestrator = QuestionOrchestrator(
         llm_client=llm_client,
         stored_table=dataset.stored_table if dataset is not None else None,
         document_retriever=documents.retriever if documents is not None else None,
         session_memory=conversation.memory,
         debug_log_raw_content=settings.debug_log_raw_content,
+        checkpointer=approval_checkpoints.saver,
     )
     provider_used = bool(getattr(llm_client, "configured", False))
     llm_attributes = {
@@ -349,7 +366,11 @@ def create_message(
             **llm_attributes,
         ) as operation:
             try:
-                result = orchestrator.answer(command.question)
+                result = orchestrator.answer(
+                    command.question,
+                    require_sql_approval=command.require_sql_approval,
+                    thread_id=thread_id,
+                )
             except RAGAgentError as exc:
                 operation.set(
                     retrieval_candidates=exc.candidates_considered,
@@ -369,6 +390,7 @@ def create_message(
         QueryTimeoutError,
         ValueError,
     ) as exc:
+        approval_checkpoints.discard(conversation.workspace_id, thread_id)
         observability.audit(
             "agent.route_executed",
             identity,
@@ -381,10 +403,15 @@ def create_message(
         )
         raise ApiError(422, "question_could_not_be_answered_safely", str(exc)) from exc
 
+    if result.status == "pending_approval":
+        approval_checkpoints.register(conversation.workspace_id, thread_id)
+    else:
+        approval_checkpoints.discard(conversation.workspace_id, thread_id)
     memory = conversation.memory
-    if memory is not None:
+    if memory is not None and result.status == "complete":
         memory = remember_question(memory, command.question, result.sql)
     record = repository.add_message(
+        message_id=message_id,
         conversation_id=conversation.id,
         tenant_id=identity.tenant_id,
         question=command.question,
@@ -398,6 +425,8 @@ def create_message(
         max_dataframes=settings.max_chat_dataframes_retained,
         request_id=current_request_id() or "unknown",
         diagnostics=result.diagnostics,
+        status=result.status,
+        checkpoint_thread_id=(thread_id if result.status == "pending_approval" else None),
     )
     observability.audit(
         "agent.route_executed",
@@ -411,6 +440,139 @@ def create_message(
         source_count=len(result.sources or ()),
         grounding_status=result.diagnostics.grounding_status,
         **llm_attributes,
+    )
+    return message_response(record)
+
+
+@router.post(
+    "/messages/{message_id}/approval",
+    response_model=MessageResponse,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["conversations"],
+)
+def decide_sql_approval(
+    message_id: str,
+    command: MessageApprovalRequest,
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+    settings: SettingsDependency,
+    llm_client: LLMDependency,
+    observability: ObservabilityDependency,
+    approval_checkpoints: ApprovalCheckpointsDependency,
+) -> MessageResponse:
+    """Resume one tenant-owned SQL approval without accepting a client thread ID."""
+    message = repository.get_message(message_id, identity.tenant_id)
+    if message.status != "pending_approval" or message.checkpoint_thread_id is None:
+        raise ResourceConflictError(
+            "sql_approval_not_pending",
+            "This message no longer has a pending SQL approval.",
+        )
+
+    conversation = repository.get_conversation(
+        message.conversation_id,
+        identity.tenant_id,
+    )
+    dataset = (
+        repository.get_dataset(conversation.dataset_id, identity.tenant_id)
+        if conversation.dataset_id is not None
+        else None
+    )
+    documents = (
+        repository.get_document_collection(
+            conversation.document_collection_id,
+            identity.tenant_id,
+        )
+        if conversation.document_collection_id is not None
+        else None
+    )
+    orchestrator = QuestionOrchestrator(
+        llm_client=llm_client,
+        stored_table=dataset.stored_table if dataset is not None else None,
+        document_retriever=documents.retriever if documents is not None else None,
+        session_memory=conversation.memory,
+        debug_log_raw_content=settings.debug_log_raw_content,
+        checkpointer=approval_checkpoints.saver,
+    )
+    sql_edited = command.sql is not None and command.sql != message.sql
+    audit_action = "agent.sql_approved" if command.decision == "approve" else "agent.sql_rejected"
+    try:
+        result = orchestrator.resume_approval(
+            message.checkpoint_thread_id,
+            decision=command.decision,
+            sql=command.sql,
+        )
+    except (
+        LLMConfigurationError,
+        LLMGenerationError,
+        SQLAgentError,
+        RAGAgentError,
+        UnsafeQueryError,
+        QueryTimeoutError,
+        ValueError,
+    ) as exc:
+        repository.resolve_message(
+            message_id=message.id,
+            tenant_id=identity.tenant_id,
+            answer="SQL approval failed safely. No table query result was retained.",
+            route=message.route,
+            sql=message.sql,
+            dataframe=None,
+            sources=message.sources,
+            diagnostics=message.diagnostics,
+            status="rejected",
+            memory=conversation.memory,
+        )
+        approval_checkpoints.discard(
+            conversation.workspace_id,
+            message.checkpoint_thread_id,
+        )
+        observability.audit(
+            audit_action,
+            identity,
+            resource_id=message.id,
+            outcome="failure",
+            error_category=error_category(exc),
+            sql_edited=sql_edited,
+        )
+        raise ApiError(422, "sql_approval_could_not_be_applied_safely", str(exc)) from exc
+
+    if result.status not in {"complete", "pending_approval", "rejected"}:
+        raise ApiError(
+            500,
+            "sql_approval_incomplete",
+            "The SQL approval did not reach a terminal state.",
+        )
+    memory = conversation.memory
+    if memory is not None and result.status == "complete":
+        memory = remember_question(memory, message.question, result.sql)
+    record = repository.resolve_message(
+        message_id=message.id,
+        tenant_id=identity.tenant_id,
+        answer=result.answer,
+        route=result.route,
+        sql=result.sql,
+        dataframe=result.dataframe,
+        sources=tuple(result.sources or ()),
+        diagnostics=result.diagnostics,
+        status=result.status,
+        memory=memory,
+    )
+    if result.status == "pending_approval":
+        approval_checkpoints.register(
+            conversation.workspace_id,
+            message.checkpoint_thread_id,
+        )
+    else:
+        approval_checkpoints.discard(
+            conversation.workspace_id,
+            message.checkpoint_thread_id,
+        )
+    observability.audit(
+        audit_action,
+        identity,
+        resource_id=record.id,
+        outcome="success",
+        sql_edited=sql_edited,
     )
     return message_response(record)
 
@@ -510,6 +672,11 @@ def create_export(
     observability: ObservabilityDependency,
 ) -> ExportResponse:
     message = repository.get_message(message_id, identity.tenant_id)
+    if message.status != "complete":
+        raise ResourceConflictError(
+            "message_not_complete",
+            "Only completed messages can be exported.",
+        )
     if message.dataframe is None:
         raise ResourceConflictError(
             "message_has_no_tabular_result",

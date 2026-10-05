@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from apps.api.approvals import ApprovalCheckpoints
 from apps.api.observability import ApiObservability
 from apps.api.repository import LocalResourceRepository
 from config.settings import Settings
@@ -32,6 +33,10 @@ def get_repository(request: Request) -> LocalResourceRepository:
 
 def get_observability(request: Request) -> ApiObservability:
     return request.app.state.observability
+
+
+def get_approval_checkpoints(request: Request) -> ApprovalCheckpoints:
+    return request.app.state.approval_checkpoints
 
 
 def get_tabular_service(request: Request) -> TabularApplicationService:

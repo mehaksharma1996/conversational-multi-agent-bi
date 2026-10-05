@@ -181,12 +181,27 @@ export async function createConversation(
 export async function askQuestion(
   conversationId: string,
   question: string,
+  requireSqlApproval = false,
 ): Promise<Message> {
   const { data, error, response } = await api.POST(
     "/api/v1/conversations/{conversation_id}/messages",
     {
       params: { path: { conversation_id: conversationId } },
-      body: { question },
+      body: { question, require_sql_approval: requireSqlApproval },
+    },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function decideSqlApproval(
+  messageId: string,
+  decision: "approve" | "reject",
+): Promise<Message> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/messages/{message_id}/approval",
+    {
+      params: { path: { message_id: messageId } },
+      body: { decision, sql: null },
     },
   );
   return unwrap(data, error, response);

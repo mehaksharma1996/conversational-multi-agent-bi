@@ -160,6 +160,12 @@ now exercise the Compose stack, an in-repo OpenAPI compatibility gate rejects br
 and [ADR 0011](docs/adr/0011-streamlit-disposition.md) retains Streamlit only until the documented
 authentication, durability, retention, and independent-exercise conditions are met.
 
+The conversational workflow now exposes its SQL generation, validation, execution, and bounded
+correction steps as [explicit LangGraph nodes](docs/architecture/langgraph-sql-approval.md). Hybrid
+questions can opt into a process-local approval interrupt that shows the validated SQL before any
+table query runs; approval, edits, rejection, tenant isolation, and checkpoint cleanup are covered
+by API, evaluation, accessibility, and deterministic-provider browser tests.
+
 ## Quick start with Docker
 
 ```powershell

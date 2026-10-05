@@ -10,6 +10,7 @@ import {
   createConversation,
   createDataset,
   createWorkspace,
+  decideSqlApproval,
   listWorkbookSheets,
   runAnalysis,
   uploadDocuments,
@@ -41,6 +42,7 @@ vi.mock("./api/client", async (importOriginal) => {
     acceptConsent: vi.fn(),
     createConversation: vi.fn(),
     askQuestion: vi.fn(),
+    decideSqlApproval: vi.fn(),
   };
 });
 
@@ -56,6 +58,7 @@ describe("tabular analysis journey", () => {
     vi.mocked(acceptConsent).mockResolvedValue();
     vi.mocked(createConversation).mockResolvedValue(conversationFixture);
     vi.mocked(askQuestion).mockResolvedValue(messageFixture);
+    vi.mocked(decideSqlApproval).mockResolvedValue(messageFixture);
   });
 
   it("moves from upload through schema confirmation to deterministic results", async () => {
@@ -113,6 +116,44 @@ describe("tabular analysis journey", () => {
     await user.click(screen.getByText("Retrieved document sources"));
     expect(screen.getByText("policy.pdf, page 2")).toBeVisible();
     expect(createConversation).toHaveBeenCalledWith("workspace-1", null, "documents-1");
-    expect(askQuestion).toHaveBeenCalledWith("conversation-1", messageFixture.question);
+    expect(askQuestion).toHaveBeenCalledWith("conversation-1", messageFixture.question, false);
+  });
+
+  it("pauses hybrid SQL for an explicit keyboard-accessible approval", async () => {
+    const user = userEvent.setup();
+    const pendingMessage = {
+      ...messageFixture,
+      status: "pending_approval" as const,
+      answer: "",
+      rows: null,
+    };
+    vi.mocked(askQuestion).mockResolvedValueOnce(pendingMessage);
+    render(<App />);
+
+    await screen.findByText("Local workspace ready");
+    await user.upload(
+      screen.getByLabelText("PDF documents"),
+      new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
+    await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "Require approval before hybrid SQL runs" }),
+    );
+    await user.type(screen.getByLabelText("Business question"), messageFixture.question);
+    await user.click(screen.getByRole("button", { name: "Ask workbench" }));
+
+    expect(await screen.findByText("Review the proposed SQL", { exact: false })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve SQL" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reject SQL" })).toBeVisible();
+    expect(askQuestion).toHaveBeenCalledWith(
+      "conversation-1",
+      messageFixture.question,
+      true,
+    );
+    await user.click(screen.getByRole("button", { name: "Approve SQL" }));
+
+    expect(decideSqlApproval).toHaveBeenCalledWith("message-1", "approve");
+    expect(await screen.findByText(messageFixture.answer)).toBeVisible();
   });
 });

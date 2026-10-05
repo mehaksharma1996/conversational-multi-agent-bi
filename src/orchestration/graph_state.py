@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported"]
+AnswerStatus = Literal["complete", "pending_approval", "rejected"]
 GroundingStatus = Literal["not_applicable", "checked_no_issues", "uncited", "warnings"]
 CriteriaProvenance = Literal[
     "not_applicable",
@@ -56,3 +57,22 @@ class QuestionGraphState(TypedDict, total=False):
     sources: list[str]
     error: str
     diagnostics: AnswerDiagnostics
+    status: AnswerStatus
+    require_sql_approval: bool
+    document_result: Any
+    criteria: dict[str, Any]
+    criteria_provenance: CriteriaProvenance
+    criteria_rejected_keys: int
+    criteria_dropped_values: int
+    sql_question: str
+    sql_prompt: str
+    sql_candidate: str
+    sql_model_text: str
+    validated_sql: str
+    sql_error: str
+    sql_correction_attempts: int
+    sql_execution_seconds: float
+    approval_resumed: bool
+    approval_decision: Literal["approve", "reject"]
+    approval_sql: str | None
+    sql_terminal_failure: bool

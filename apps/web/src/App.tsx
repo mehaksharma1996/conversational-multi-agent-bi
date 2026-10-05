@@ -10,6 +10,7 @@ import {
   createReport,
   createResultExport,
   createWorkspace,
+  decideSqlApproval,
   deleteWorkspace,
   downloadReport,
   downloadResultExport,
@@ -192,7 +193,7 @@ export default function App() {
     }
   };
 
-  const handleQuestion = async (question: string) => {
+  const handleQuestion = async (question: string, requireSqlApproval: boolean) => {
     if (!workspace) return;
     setTask("conversation");
     setError(null);
@@ -203,8 +204,30 @@ export default function App() {
         documents?.id ?? null,
       );
       if (!conversation) setConversation(activeConversation);
-      const message = await askQuestion(activeConversation.id, question);
+      const message = await askQuestion(
+        activeConversation.id,
+        question,
+        requireSqlApproval,
+      );
       setMessages((current) => [...current, message]);
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
+  const handleApproval = async (
+    message: Message,
+    decision: "approve" | "reject",
+  ) => {
+    setTask("conversation");
+    setError(null);
+    try {
+      const resolved = await decideSqlApproval(message.id, decision);
+      setMessages((current) =>
+        current.map((item) => (item.id === resolved.id ? resolved : item)),
+      );
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -432,6 +455,7 @@ export default function App() {
               hasContext={dataset?.status === "ready" || documents !== null}
               onAcceptConsent={handleConsent}
               onAsk={handleQuestion}
+              onApproval={handleApproval}
               onExport={handleResultExport}
             />
           ) : null}

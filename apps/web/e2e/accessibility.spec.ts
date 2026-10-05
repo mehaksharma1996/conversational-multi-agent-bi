@@ -130,6 +130,46 @@ test("axe baseline: chat answer and provenance warning", async ({ page }) => {
   await expectNoAxeViolations(page);
 });
 
+test("axe baseline: pending SQL approval controls", async ({ page }) => {
+  const pendingMessage = {
+    ...messageFixture,
+    status: "pending_approval",
+    answer: "",
+    route: "hybrid",
+    sql: 'SELECT "merchant", "amount" FROM "uploaded_data"',
+    rows: null,
+    provenance: { ...messageFixture.provenance, criteria_provenance: "traced" },
+  };
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "POST" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 201, json: { ...workspaceFixture, consent_accepted: true } });
+    } else if (request.method() === "POST" && path.endsWith("/document-collections")) {
+      await route.fulfill({ status: 201, json: documentCollectionFixture });
+    } else if (request.method() === "POST" && path.endsWith("/conversations")) {
+      await route.fulfill({ status: 201, json: conversationFixture });
+    } else if (request.method() === "POST" && path.endsWith("/messages")) {
+      await route.fulfill({ status: 201, json: pendingMessage });
+    } else {
+      await route.abort("failed");
+    }
+  });
+  await page.goto("/");
+  await page.getByLabel("PDF documents").setInputFiles({
+    name: "policy.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF policy"),
+  });
+  await page.getByRole("button", { name: "Upload and index PDFs" }).click();
+  await page.getByLabel("Business question").fill(messageFixture.question);
+  await page.getByRole("button", { name: "Ask workbench" }).click();
+
+  await expect(page.getByRole("button", { name: "Approve SQL" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reject SQL" })).toBeVisible();
+  await expectNoAxeViolations(page);
+});
+
 test("axe baseline: error banner", async ({ page }) => {
   await page.route("**/api/v1/workspaces", (route) =>
     route.fulfill({

@@ -122,6 +122,9 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--cyan); }
 .source-list { color: var(--muted); line-height: 1.65; }
 .empty-state { padding: 1.4rem; border: 1px dashed #394b64; border-radius: .75rem; color: var(--muted); text-align: center; }
 .question-composer { display: grid; gap: .65rem; }
+.approval-option { display: flex; align-items: center; gap: .55rem; color: var(--muted); }
+.approval-controls { margin-top: 1rem; padding: .9rem 1rem; border: 1px solid #49627f; border-radius: .65rem; background: #0b1728; }
+.approval-controls p { margin: 0; color: var(--muted); }
 .question-composer textarea { width: 100%; resize: vertical; padding: .8rem; border: 1px solid #394b64; border-radius: .65rem; color: #e5edf8; background: #091221; line-height: 1.5; }
 .question-composer .button { justify-self: start; }
 footer { padding: 2rem; border-top: 1px solid var(--border); color: var(--muted); text-align: center; font-size: .8rem; }

@@ -69,6 +69,25 @@
     }
   },
   {
+    "id": "sql-correction-exhaustion-refuses-safely",
+    "capability": "text_to_sql",
+    "question": "Show the total for the unavailable measure.",
+    "rationale": "The explicit graph correction loop stops after one retry and returns a safe refusal when both queries fail.",
+    "context": {"dataset": "transactions"},
+    "script": {
+      "sql": [
+        "SELECT SUM(\"amount\") AS \"total\" FROM \"uploaded_data\" GROUP BY",
+        "SELECT SUM(\"amount\") AS \"total\" FROM \"uploaded_data\" ORDER BY"
+      ]
+    },
+    "expect": {
+      "outcome": "refused",
+      "route": "sql",
+      "refusal_category": "sql_generation",
+      "llm_generation_calls": {"exact": 2}
+    }
+  },
+  {
     "id": "sql-select-all-is-row-capped",
     "capability": "text_to_sql",
     "question": "List every event.",

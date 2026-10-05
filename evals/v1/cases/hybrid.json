@@ -515,5 +515,77 @@
       "structured_output_failures": 0
     },
     "deterministic_only": true
+  },
+  {
+    "id": "hybrid-sql-approval-resumes-after-review",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "Opt-in approval interrupts after validation and the unchanged approved query executes only after resume.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {"thresholds": [500]},
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500 ORDER BY \"amount\" DESC"
+      ]
+    },
+    "approval": {"decision": "approve"},
+    "expect": {
+      "outcome": "answered",
+      "route": "hybrid",
+      "status": "complete",
+      "approval_interrupt": true,
+      "sql": {
+        "required_fragments": ["amount > 500"],
+        "row_count": 4
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-sql-approval-rejection-does-not-execute",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "Rejecting the proposed SQL terminates the checkpoint without producing result rows.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {"thresholds": [500]},
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500 ORDER BY \"amount\" DESC"
+      ]
+    },
+    "approval": {"decision": "reject"},
+    "expect": {
+      "outcome": "answered",
+      "route": "hybrid",
+      "status": "rejected",
+      "approval_interrupt": true,
+      "answer_contains": ["rejected"]
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-sql-approval-unsafe-edit-is-refused",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "An edited approval is routed through the same guard and destructive SQL fails closed.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {"thresholds": [500]},
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500 ORDER BY \"amount\" DESC"
+      ]
+    },
+    "approval": {"decision": "approve", "sql": "DROP TABLE uploaded_data"},
+    "expect": {
+      "outcome": "refused",
+      "route": "hybrid",
+      "refusal_category": "unsafe_query",
+      "unsafe_request": true,
+      "approval_interrupt": true
+    },
+    "deterministic_only": true
   }
 ]

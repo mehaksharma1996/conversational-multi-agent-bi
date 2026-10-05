@@ -10,7 +10,8 @@ interface ConversationPanelProps {
   busy: boolean;
   hasContext: boolean;
   onAcceptConsent: () => Promise<void>;
-  onAsk: (question: string) => Promise<void>;
+  onAsk: (question: string, requireSqlApproval: boolean) => Promise<void>;
+  onApproval: (message: Message, decision: "approve" | "reject") => Promise<void>;
   onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
 }
 
@@ -56,16 +57,19 @@ export function ConversationPanel({
   hasContext,
   onAcceptConsent,
   onAsk,
+  onApproval,
   onExport,
 }: ConversationPanelProps) {
   const [question, setQuestion] = useState("");
+  const [requireSqlApproval, setRequireSqlApproval] = useState(false);
   const consentBlocked = workspace.consent_required && !workspace.consent_accepted;
+  const approvalPending = messages.some((message) => message.status === "pending_approval");
 
   const submit = () => {
     const trimmed = question.trim();
     if (!trimmed) return;
     setQuestion("");
-    void onAsk(trimmed);
+    void onAsk(trimmed, requireSqlApproval);
   };
 
   return (
@@ -105,10 +109,23 @@ export function ConversationPanel({
             </article>
             <article className="chat-message chat-message--assistant">
               <div className="message-meta"><span>Workbench</span><span className="route-badge">{message.route} route</span></div>
-              <p className="answer-text">{message.answer}</p>
+              <p className="answer-text">
+                {message.status === "pending_approval"
+                  ? "Review the proposed SQL before it can access the uploaded table."
+                  : message.answer}
+              </p>
               <AnswerProvenance message={message} />
               {message.sql ? <pre className="sql-block"><code>{message.sql}</code></pre> : null}
-              {message.rows && message.rows.length > 0 ? (
+              {message.status === "pending_approval" ? (
+                <div className="approval-controls" role="group" aria-label="SQL approval decision">
+                  <p>Criteria provenance: {message.provenance.criteria_provenance.replaceAll("_", " ")}</p>
+                  <div className="button-row">
+                    <button className="button button--primary" type="button" disabled={busy} onClick={() => void onApproval(message, "approve")}>Approve SQL</button>
+                    <button className="button button--secondary" type="button" disabled={busy} onClick={() => void onApproval(message, "reject")}>Reject SQL</button>
+                  </div>
+                </div>
+              ) : null}
+              {message.status === "complete" && message.rows && message.rows.length > 0 ? (
                 <>
                   <ResultTable rows={message.rows} />
                   <div className="button-row">
@@ -131,8 +148,12 @@ export function ConversationPanel({
           id="business-question"
           rows={3}
           value={question}
-          disabled={busy || !hasContext || consentBlocked}
-          placeholder="Which uploaded transactions appear to match the escalation policy?"
+          disabled={busy || !hasContext || consentBlocked || approvalPending}
+          placeholder={
+            approvalPending
+              ? "Resolve the pending SQL approval before asking another question."
+              : "Which uploaded transactions appear to match the escalation policy?"
+          }
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -141,7 +162,16 @@ export function ConversationPanel({
             }
           }}
         />
-        <button className="button button--primary" type="button" disabled={busy || !hasContext || consentBlocked || !question.trim()} onClick={submit}>
+        <label className="approval-option">
+          <input
+            type="checkbox"
+            checked={requireSqlApproval}
+            disabled={busy || !hasContext || consentBlocked || approvalPending}
+            onChange={(event) => setRequireSqlApproval(event.target.checked)}
+          />
+          Require approval before hybrid SQL runs
+        </label>
+        <button className="button button--primary" type="button" disabled={busy || !hasContext || consentBlocked || approvalPending || !question.trim()} onClick={submit}>
           {busy ? "Analyzing question…" : "Ask workbench"}
         </button>
       </div>

@@ -73,6 +73,8 @@ prove the checks can fail):
   enforced again by SQLite's authorizer at execution time.
 - A read-only connection, a 500-row cap, and a 5-second deadline.
 - One bounded correction attempt for execution errors; the corrected SQL is re-validated.
+- Hybrid questions can opt into a human approval interrupt after validation and before execution.
+  Approval and optional edits pass through the same guard again; rejection produces no rows.
 - Sample values shown to the model are PII-redacted, and can be omitted entirely with
   `GEMINI_EXCLUDE_SAMPLE_VALUES`.
 - Route classification and hybrid criteria extraction validate against strict schemas; a
@@ -87,6 +89,8 @@ Residual risks:
   cases only.
 - Ambiguous questions get one interpretation; the model does not ask for clarification.
 - The row cap silently truncates large results.
+- Approval improves reviewability, not semantic correctness. A reviewer must still check that the
+  proposed SQL implements the cited policy and intended business question.
 
 ## RAG grounding and citation limitations
 

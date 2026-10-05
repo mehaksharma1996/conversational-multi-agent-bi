@@ -8,6 +8,7 @@ from time import perf_counter
 
 from fastapi import FastAPI, Request
 
+from apps.api.approvals import ApprovalCheckpoints
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
@@ -71,7 +72,10 @@ def create_app(
         audit_sink=audit_sink or JsonlAuditSink(active_settings.audit_dir),
     )
     application.state.observability = observability
-    application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(observability)
+    application.state.approval_checkpoints = ApprovalCheckpoints()
+    application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(
+        observability, application.state.approval_checkpoints
+    )
     application.state.tabular_service = TabularApplicationService()
     active_embedder_factory = embedder_factory or SentenceTransformerEmbedder
     application.state.document_service = DocumentApplicationService(active_embedder_factory)
@@ -167,10 +171,13 @@ def _stop(app: FastAPI) -> None:
 
 def _workspace_lifecycle_listener(
     observability: ApiObservability,
+    approval_checkpoints: ApprovalCheckpoints,
 ) -> Callable[[str, WorkspaceRecord, str], None]:
     """Audit workspace lifecycle from the stored (server-side) record's tenant."""
 
     def listener(event: str, workspace: WorkspaceRecord, reason: str) -> None:
+        if event in {"expired", "deleted"}:
+            approval_checkpoints.delete_workspace(workspace.id)
         observability.telemetry.emit(
             "workspace.lifecycle",
             tenant_id=workspace.tenant_id,
