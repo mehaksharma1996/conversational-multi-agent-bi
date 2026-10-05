@@ -104,6 +104,21 @@ def test_anomaly_detection_adds_rule_based_reasons_and_spreadsheet_rows() -> Non
     assert bool(first_row["is_rule_anomaly"]) is True
 
 
+def test_date_only_columns_are_not_flagged_as_off_hours() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "transaction_date": [f"2026-01-0{day}" for day in range(1, 9)],
+            "amount": [10, 12, 11, 13, 12, 14, 11, 999],
+            "merchant": ["A", "B", "C", "D", "E", "F", "G", "H"],
+        }
+    )
+
+    report = _anomalies_for(dataframe)
+
+    assert report.rule_flagged_count == 0
+    assert not report.flagged_rows["reason"].str.contains("off-hours").any()
+
+
 def test_anomaly_report_separates_model_and_rule_flag_counts() -> None:
     dataframe = pd.DataFrame(
         {
