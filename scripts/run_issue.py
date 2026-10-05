@@ -6,7 +6,7 @@ repository and the full issue text, which is the main source of wasted tokens::
     python -m scripts.run_issue 23 --agent claude --dry-run
     python -m scripts.run_issue 23 --agent claude --model sonnet --budget-usd 4
     python -m scripts.run_issue 23 --agent codex --model gpt-6-luna --effort medium
-    python -m scripts.run_issue 9a --agent codex --model gpt-6.1-sol --effort medium
+    python -m scripts.run_issue 9a --agent codex --model gpt-6-sol --effort medium
 
 Briefs live in ``docs/agents/briefs/<selector>-<slug>.md``, where a selector is an issue number or
 a split such as ``9a``. The run happens in a persistent linked worktree on branch
@@ -81,7 +81,7 @@ class RunControls:
 TIER_DEFAULTS = {
     "small": RunControls("gpt-6-luna", "low", 2.0, 10),
     "medium": RunControls("gpt-6-luna", "medium", 5.0, 15),
-    "strongest": RunControls("gpt-6.1-sol", "medium", 8.0, 30),
+    "strongest": RunControls("gpt-6-sol", "medium", 8.0, 30),
 }
 
 
@@ -216,6 +216,46 @@ def build_command(
             command += ["-c", f'model_reasoning_effort="{effort}"']
         return [*command, "-"]
     raise SetupError(f"Unknown agent: {agent}")
+
+
+def available_codex_models(executable: str) -> tuple[str, ...]:
+    """Read the signed-in account's catalog without starting a metered agent turn."""
+    completed = subprocess.run(
+        [executable, "debug", "models"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        suffix = f": {detail}" if detail else "."
+        raise SetupError(f"Could not read the Codex model catalog{suffix}")
+    try:
+        payload = json.loads(completed.stdout)
+        models = payload["models"]
+        slugs = tuple(
+            model["slug"]
+            for model in models
+            if isinstance(model, dict) and isinstance(model.get("slug"), str)
+        )
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise SetupError("Codex returned an invalid model catalog.") from error
+    if not slugs:
+        raise SetupError("Codex returned an empty model catalog.")
+    return slugs
+
+
+def validate_codex_model(executable: str, model: str) -> None:
+    """Fail before inference when a selected model is unavailable to this account."""
+    available = available_codex_models(executable)
+    if model in available:
+        return
+    choices = ", ".join(available)
+    raise SetupError(
+        f"Codex model `{model}` is not available to the signed-in account. "
+        f"Available models: {choices}. Choose one with --model or update the tier default."
+    )
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -406,6 +446,8 @@ def main(argv: list[str] | None = None) -> int:
         executable = shutil.which(args.agent)
         if executable is None and not args.dry_run:
             raise SetupError(f"`{args.agent}` was not found on PATH.")
+        if args.agent == "codex" and not args.dry_run and controls.model is not None:
+            validate_codex_model(executable or args.agent, controls.model)
         log_file = LOG_DIR / f"{brief.stem}-{args.agent}.log"
         last_message_file = LOG_DIR / f"{brief.stem}-{args.agent}.last.txt"
         command = build_command(
