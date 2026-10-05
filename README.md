@@ -485,6 +485,7 @@ those controls before hosting it for untrusted users.
 
 ## Current Limitations
 
+- Deliberate non-goals and their revisit triggers are recorded in [ADR 0012](docs/adr/0012-deliberate-non-goals.md).
 - Schema mapping remains heuristic until confirmed by the user.
 - Retrieval relevance is model- and document-dependent.
 - Hybrid policy-to-SQL translation must be reviewed before operational use.

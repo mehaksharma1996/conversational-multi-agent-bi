@@ -18,6 +18,7 @@ React/FastAPI runtime became the primary local product.
 | [0009](0009-streamlit-migration.md) | Streamlit migration and exit criteria | Accepted; disposition decided by 0011 |
 | [0010](0010-local-container-release.md) | Local container release and restart-persistence waiver | Accepted |
 | [0011](0011-streamlit-disposition.md) | Retain Streamlit as a developer-only compatibility surface | Accepted |
+| [0012](0012-deliberate-non-goals.md) | Deliberate non-goals for the local BI product | Accepted |
 
 ## ADR lifecycle
 
