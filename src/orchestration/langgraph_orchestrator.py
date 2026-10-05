@@ -7,15 +7,16 @@ import logging
 import re
 from dataclasses import dataclass, field, replace
 from time import monotonic
-from typing import cast
 
 import pandas as pd
 from langgraph.graph import END, StateGraph
+from pydantic import ValidationError
 
 from src.agents.rag_agent import RAGAnswer, answer_with_documents
 from src.agents.sql_agent import answer_with_sql, summarize_sql_result
 from src.documents.retriever import Retriever
-from src.llm.base import LLMClient
+from src.llm.base import LLMClient, SchemaT
+from src.llm.structured import HybridCriteria, RouteDecision
 from src.memory.session_memory import SessionMemory, answer_from_memory
 from src.orchestration.graph_state import (
     AnswerDiagnostics,
@@ -109,11 +110,15 @@ class QuestionOrchestrator:
         self.session_memory = session_memory
         self.debug_log_raw_content = debug_log_raw_content
         self.last_route: RouteName | None = None
+        self._structured_repairs = 0
+        self._structured_failures = 0
         self._graph = self._build_graph()
 
     def answer(self, question: str) -> OrchestratorResult:
         started_at = monotonic()
         self.last_route = None
+        self._structured_repairs = 0
+        self._structured_failures = 0
         initial_state: QuestionGraphState = {"question": question}
         final_state = self._graph.invoke(initial_state)
         result = OrchestratorResult(
@@ -123,7 +128,11 @@ class QuestionOrchestrator:
             dataframe=final_state.get("dataframe"),
             sources=final_state.get("sources"),
             error=final_state.get("error"),
-            diagnostics=final_state.get("diagnostics", AnswerDiagnostics()),
+            diagnostics=replace(
+                final_state.get("diagnostics", AnswerDiagnostics()),
+                structured_output_repairs=self._structured_repairs,
+                structured_output_failures=self._structured_failures,
+            ),
         )
         LOGGER.info(
             "question_answered route=%s elapsed_seconds=%.3f question_length=%d has_sql=%s",
@@ -215,14 +224,13 @@ Question: {question}
 Return JSON only: {{"route": "route_name", "confidence": 0.0}}
 """
         try:
-            response = self.llm_client.generate(prompt)
-            payload = _parse_json_object(response.text)
-            route = payload.get("route")
-            confidence = float(payload.get("confidence", 0.0))
-        except (RuntimeError, TypeError, ValueError):
+            decision = self._generate_validated(prompt, RouteDecision)
+            route = decision.route
+            confidence = decision.confidence
+        except (RuntimeError, TypeError, ValueError, ValidationError):
             return None
         if route in available_routes and confidence >= 0.55:
-            return cast(RouteName, route)
+            return route
         return None
 
     def _memory_node(self, state: QuestionGraphState) -> QuestionGraphState:
@@ -392,10 +400,10 @@ Question: {question}
 Excerpts: {json.dumps(excerpts, ensure_ascii=True)}
 """
         try:
-            response = self.llm_client.generate(prompt)
-            raw_criteria = _parse_json_object(response.text)
+            parsed = self._generate_validated(prompt, HybridCriteria)
+            raw_criteria = parsed.model_dump(exclude_none=True)
             sanitized = _sanitize_hybrid_criteria(raw_criteria, excerpts)
-        except (RuntimeError, ValueError):
+        except (RuntimeError, ValueError, ValidationError):
             return _ExtractedCriteria(
                 criteria={"relevant_excerpts": excerpts},
                 provenance="excerpt_fallback",
@@ -409,6 +417,26 @@ Excerpts: {json.dumps(excerpts, ensure_ascii=True)}
                 "no_structured_criteria" if not _flatten_criteria_values(sanitized) else "traced"
             ),
         )
+
+    def _generate_validated(self, prompt: str, schema: type[SchemaT]) -> SchemaT:
+        structured = getattr(self.llm_client, "generate_structured", None)
+        for attempt in range(2):
+            try:
+                if callable(structured):
+                    return structured(prompt, schema)
+                response = self.llm_client.generate(prompt)
+                return schema.model_validate(_parse_json_object(response.text))
+            except (ValidationError, ValueError, TypeError):
+                if attempt:
+                    self._structured_failures += 1
+                    raise ValueError("structured_validation") from None
+                self._structured_repairs += 1
+                category = "schema_validation"
+                prompt = (
+                    f"{prompt}\nThe previous response failed {category}. "
+                    "Return corrected JSON only."
+                )
+        raise ValueError("structured_validation")
 
     def _unsupported_node(self, state: QuestionGraphState) -> QuestionGraphState:
         return {

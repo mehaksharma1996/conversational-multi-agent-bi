@@ -75,6 +75,9 @@ prove the checks can fail):
 - One bounded correction attempt for execution errors; the corrected SQL is re-validated.
 - Sample values shown to the model are PII-redacted, and can be omitted entirely with
   `GEMINI_EXCLUDE_SAMPLE_VALUES`.
+- Route classification and hybrid criteria extraction validate against strict schemas; a
+  malformed output receives at most one repair attempt that reports only a validation category.
+  Repair and validation failure counts are recorded without retaining output content.
 
 Residual risks:
 
@@ -106,8 +109,9 @@ Limitations:
 
 ## Hybrid-route provenance limitations
 
-Implemented: a model extracts criteria as a flat object; keys outside an allowlist are
-rejected; string values that do not literally appear in the retrieved excerpts are dropped;
+Implemented: a model extracts criteria through a strict schema limited to six keys; malformed
+outputs get at most one bounded repair and otherwise fall back to excerpt provenance. String
+values that do not literally appear in the retrieved excerpts are dropped;
 size is bounded; the result reports `traced`, `unreferenced`, `no_structured_criteria`, or
 `excerpt_fallback`; if the generated SQL is refused the route degrades to the document answer
 with an explicit notice.

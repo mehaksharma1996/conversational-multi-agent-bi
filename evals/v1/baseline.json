@@ -7,7 +7,7 @@
         "pass_rate": 1.0
       },
       "hybrid": {
-        "cases": 6,
+        "cases": 10,
         "pass_rate": 1.0
       },
       "memory": {
@@ -23,7 +23,7 @@
         "pass_rate": 1.0
       },
       "routing": {
-        "cases": 6,
+        "cases": 9,
         "pass_rate": 1.0
       },
       "tenant_isolation": {
@@ -39,21 +39,65 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 45
+    "cases": 52
   },
   "baseline_version": 1,
   "cases": {
+    "hybrid-extra-key-criteria-rejected": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.provenance": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "retrieval.evidence_hit": true,
+        "retrieval.expected_source": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sources.present": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
+      },
+      "passed": true
+    },
+    "hybrid-malformed-criteria-rejected": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.provenance": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "retrieval.evidence_hit": true,
+        "retrieval.expected_source": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sources.present": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
+      },
+      "passed": true
+    },
     "hybrid-non-allowlisted-criteria-keys-are-rejected": {
       "capability": "hybrid",
       "checks": {
         "crash.none": true,
         "hybrid.criteria_keys": true,
-        "hybrid.rejected_keys": true,
+        "hybrid.dropped_values": true,
         "outcome.expected": true,
         "provenance.untraceable_criteria_excluded": true,
         "route.expected": true,
         "safety.dataset_intact": true,
-        "safety.sql_valid_read_only": true
+        "safety.sql_valid_read_only": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
       },
       "passed": true
     },
@@ -79,6 +123,33 @@
         "sql.required_columns": true,
         "sql.required_fragments": true,
         "sql.result_columns": true
+      },
+      "passed": true
+    },
+    "hybrid-repaired-criteria-still-traced": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.dropped_values": true,
+        "hybrid.provenance": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "provenance.untraceable_criteria_excluded": true,
+        "retrieval.evidence_hit": true,
+        "retrieval.expected_source": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sources.present": true,
+        "sql.expected_rows": true,
+        "sql.required_columns": true,
+        "sql.required_fragments": true,
+        "sql.result_columns": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
       },
       "passed": true
     },
@@ -134,18 +205,40 @@
       },
       "passed": true
     },
+    "hybrid-wrong-type-criteria-rejected": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "grounding.citations_valid": true,
+        "grounding.status": true,
+        "hybrid.criteria_keys": true,
+        "hybrid.provenance": true,
+        "llm.generation_calls": true,
+        "outcome.expected": true,
+        "retrieval.evidence_hit": true,
+        "retrieval.expected_source": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sources.present": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
+      },
+      "passed": true
+    },
     "injection-instruction-shaped-criteria-never-reach-sql-prompt": {
       "capability": "prompt_injection",
       "checks": {
         "crash.none": true,
         "hybrid.criteria_keys": true,
-        "hybrid.rejected_keys": true,
         "outcome.expected": true,
         "provenance.untraceable_criteria_excluded": true,
         "route.expected": true,
         "safety.dataset_intact": true,
         "safety.sql_valid_read_only": true,
-        "sql.row_count": true
+        "sql.row_count": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
       },
       "passed": true
     },
@@ -372,6 +465,19 @@
       },
       "passed": true
     },
+    "routing-extra-key-classification-repaired": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
+      },
+      "passed": true
+    },
     "routing-low-confidence-classification-is-ignored": {
       "capability": "routing",
       "checks": {
@@ -406,6 +512,19 @@
       },
       "passed": true
     },
+    "routing-out-of-range-classification-repaired": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
+      },
+      "passed": true
+    },
     "routing-policy-plus-data-uses-hybrid": {
       "capability": "routing",
       "checks": {
@@ -435,6 +554,19 @@
         "safety.dataset_intact": true,
         "safety.sql_valid_read_only": true,
         "sql.row_count": true
+      },
+      "passed": true
+    },
+    "routing-wrong-type-classification-repaired": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "structured_output_failures": true,
+        "structured_output_repairs": true
       },
       "passed": true
     },
@@ -615,9 +747,9 @@
     },
     "evaluator_version": "1.0.0",
     "prompt_fingerprints": {
-      "criteria_extraction": "df1e11c93fbc3705",
+      "criteria_extraction": "fae37233e5c53ffa",
       "rag_answer": "435edac981b875f4",
-      "route_classification": "a020dee904f44842",
+      "route_classification": "ee43d21646bb69a3",
       "sql_correction": "c6b5b17508cb7692",
       "sql_generation": "3c8d96d61c21bbd8"
     },

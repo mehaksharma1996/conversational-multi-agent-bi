@@ -77,6 +77,11 @@ def evaluate_case(case: dict[str, Any], obs: Observation) -> list[Check]:
                 f"{sources} source(s), need {expect['min_sources']}",
             )
         )
+    if obs.result is not None:
+        for name in ("structured_output_repairs", "structured_output_failures"):
+            if name in expect:
+                actual = getattr(obs.result.diagnostics, name)
+                checks.append(Check(name, actual == expect[name], str(actual)))
     if obs.result is not None and obs.result.sql:
         checks.extend(_sql_safety(obs.result))
     if "sql" in expect:

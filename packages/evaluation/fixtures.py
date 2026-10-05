@@ -40,6 +40,8 @@ EXPECT_KEYS = {
     "prompts",
     "answer_contains",
     "min_sources",
+    "structured_output_repairs",
+    "structured_output_failures",
 }
 SQL_EXPECT_KEYS = {
     "required_columns",

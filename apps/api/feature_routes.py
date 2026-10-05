@@ -589,6 +589,8 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
         "retrieval_duplicates_skipped": diagnostics.retrieval_duplicates_skipped,
         "sql_row_count": diagnostics.sql_row_count,
         "sql_correction_attempted": diagnostics.sql_correction_attempted,
+        "structured_output_repairs": diagnostics.structured_output_repairs,
+        "structured_output_failures": diagnostics.structured_output_failures,
     }
     if diagnostics.sql_execution_seconds is not None:
         attributes["sql_duration_ms"] = diagnostics.sql_execution_seconds * 1000
