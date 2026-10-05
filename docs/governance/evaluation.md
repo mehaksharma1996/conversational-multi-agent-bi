@@ -26,10 +26,10 @@ precision/recall, or PII recall on real data. The opt-in live mode gives a limit
 
 | Capability | Properties checked (examples) |
 |---|---|
-| `routing` | Expected route; unavailable-route and low-confidence or malformed classifications ignored |
+| `routing` | Expected route; unavailable-route and low-confidence or malformed classifications ignored; schema-invalid outputs get one bounded repair |
 | `text_to_sql` | Read-only validity; required columns/fragments; expected rows and columns; row cap; one bounded correction; refusal of DROP/PRAGMA/ATTACH/catalog reads/disallowed functions; statement tail discarded; dataset intact afterwards |
 | `document_rag` | Evidence retrieved from the expected source; irrelevant chunks rejected; citation present and valid; quotes verbatim; uncited and warning statuses reported; **no model call without evidence** |
-| `hybrid` | Criteria keys allowlisted; untraceable values dropped and absent from the SQL prompt; `traced` / `unreferenced` / `excerpt_fallback` provenance; safe fallback to the document answer |
+| `hybrid` | Criteria outputs are schema validated and repaired at most once; criteria keys allowlisted; untraceable values dropped and absent from the SQL prompt; `traced` / `unreferenced` / `excerpt_fallback` provenance; safe fallback to the document answer |
 | `memory` | Deterministic answers with zero generation calls; unanswerable memory questions fall through to guarded SQL |
 | `unsupported` | No-input and write requests refused without calling the model or altering data |
 | `privacy_redaction` | E-mail, phone, and SSN patterns and table sample values never appear in a model prompt |
@@ -68,7 +68,7 @@ Exit status: `0` gates passed, `1` gates failed, `2` fixture or usage error. `--
 machine-readable JSON report (`evals/results/` is git-ignored) containing metadata
 (dataset version/revision, evaluator version, provider/model, embedding, retrieval settings, prompt
 fingerprints), aggregates (per capability, per check, latency), the gate outcome, and per-case checks with
-diagnostic counts. Reports contain no question text, SQL, rows, or document text. Token usage is `null`
+diagnostic counts, including content-free structured-output repair and failure counts. Reports contain no question text, SQL, rows, document text, or invalid structured output. Token usage is `null`
 in deterministic mode because no provider is called.
 
 `pytest` also runs the whole suite and the gate, so a regression fails the ordinary test run in CI.

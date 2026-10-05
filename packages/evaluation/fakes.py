@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from copy import deepcopy
 from hashlib import sha256
 from typing import Any
 
@@ -79,7 +80,7 @@ class ScriptedLLM(RecordingLLM):
 
     def __init__(self, script: dict[str, Any]) -> None:
         super().__init__()
-        self._script = script
+        self._script = deepcopy(script)
         self._sql_responses = list(script.get("sql", []))
         # Without a classification script the "model" is unconfigured, so only the
         # deterministic router runs, exactly as in local-only mode.
@@ -88,7 +89,7 @@ class ScriptedLLM(RecordingLLM):
     def generate(self, prompt: str) -> LLMResponse:
         kind = self.record(prompt)
         if kind == "classification":
-            classification = self._script["classification"]
+            classification = self._next("classification")
             text = (
                 classification
                 if isinstance(classification, str)
@@ -101,7 +102,7 @@ class ScriptedLLM(RecordingLLM):
         elif kind == "rag":
             text = self._require("rag_answer", kind)
         elif kind == "criteria":
-            criteria = self._require("criteria", kind)
+            criteria = self._next("criteria")
             text = criteria if isinstance(criteria, str) else json.dumps(criteria, sort_keys=True)
         else:
             raise UnscriptedPromptError("Unrecognized prompt shape.")
@@ -111,6 +112,14 @@ class ScriptedLLM(RecordingLLM):
         if key not in self._script:
             raise UnscriptedPromptError(f"Fixture does not script a {kind!r} response.")
         return self._script[key]
+
+    def _next(self, key: str) -> Any:
+        value = self._require(key, key)
+        if isinstance(value, list):
+            if not value:
+                raise UnscriptedPromptError(f"No scripted {key!r} response remains.")
+            value = value.pop(0)
+        return value
 
 
 class CountingLLM(RecordingLLM):

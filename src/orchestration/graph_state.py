@@ -43,6 +43,8 @@ class AnswerDiagnostics:
     criteria_dropped_values: int = 0
     criteria_provenance: CriteriaProvenance = "not_applicable"
     hybrid_fell_back_to_documents: bool = False
+    structured_output_repairs: int = 0
+    structured_output_failures: int = 0
 
 
 class QuestionGraphState(TypedDict, total=False):

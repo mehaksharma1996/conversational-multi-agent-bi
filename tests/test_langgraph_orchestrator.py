@@ -260,6 +260,46 @@ def test_sanitize_hybrid_criteria_keeps_allowed_traceable_values() -> None:
     assert sanitized == {"categories": ["urgent"], "keywords": ["compliance"]}
 
 
+def test_structured_output_repair_is_bounded_and_text_only_fallback_works() -> None:
+    class SequenceLLM(FakeLLM):
+        configured: bool = True
+
+        def __init__(self):
+            super().__init__(text="not json")
+            self.responses = ["not json", '{"route":"sql","confidence":0.9}', "SELECT 1"]
+            self.calls = 0
+
+        def generate(self, prompt: str) -> LLMResponse:
+            self.calls += 1
+            return LLMResponse(self.responses.pop(0), self.model, self.provider)
+
+    llm = SequenceLLM()
+    orchestrator = QuestionOrchestrator(llm, stored_table=_stored_table())
+    assert orchestrator._classify_route("How many transactions are there?", False) == "sql"
+
+    assert llm.calls == 2
+    assert orchestrator._structured_repairs == 1
+    assert orchestrator._structured_failures == 0
+
+
+def test_structured_output_never_repairs_more_than_once() -> None:
+    class InvalidLLM(FakeLLM):
+        configured: bool = True
+        calls = 0
+
+        def generate(self, prompt: str) -> LLMResponse:
+            self.calls += 1
+            return LLMResponse("invalid-secret-payload", self.model, self.provider)
+
+    llm = InvalidLLM(text="unused")
+    orchestrator = QuestionOrchestrator(llm, stored_table=_stored_table())
+    assert orchestrator._classify_route("How many transactions are there?", False) is None
+
+    assert llm.calls == 2
+    assert orchestrator._structured_repairs == 1
+    assert orchestrator._structured_failures == 1
+
+
 def test_sanitize_hybrid_criteria_drops_disallowed_keys() -> None:
     excerpts = ["Transactions over $10,000 require compliance review."]
 

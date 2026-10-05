@@ -56,6 +56,8 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "sql_duration_ms": "float",
     "sql_row_count": "int",
     "sql_correction_attempted": "bool",
+    "structured_output_repairs": "int",
+    "structured_output_failures": "int",
     "grounding_status": "token",
     "invalid_citation_count": "int",
     "unverified_quote_count": "int",
