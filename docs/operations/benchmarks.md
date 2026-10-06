@@ -87,7 +87,11 @@ exercised; only its eligibility check runs.
    collection. PDF extraction scales at ~2.2–2.5 ms/page. With the real SentenceTransformer, embedding
    will add a per-chunk cost that this offline harness deliberately does not measure.
 
-## Inputs for issue #10 (not implemented here)
+## Inputs for issue #10
+
+Peak memory, real-embedder indexing, report rendering, and the classifier path are now measured in
+[request budgets](request-budgets.md) (`python -m scripts.measure_limits`). The notes below are the
+original inputs from #31b.
 
 - Request-budget evidence: for the sizes above, deterministic compute (profile + bundle) is ~2.2 s at
   50,000 rows and PDF index ~0.55 s at 60 pages with the hashing embedder, so the long poles in a real
