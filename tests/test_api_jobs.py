@@ -115,12 +115,14 @@ def test_job_reads_and_cancellation_hide_foreign_tenant_jobs(job_rig: JobRig) ->
         assert client.get("/api/v1/jobs").json() == {"items": [], "next_cursor": None}
         missing = client.get(f"/api/v1/jobs/{record.id}")
         cancel = client.delete(f"/api/v1/jobs/{record.id}")
+        retry = client.post(f"/api/v1/jobs/{record.id}/retry")
     finally:
         app.dependency_overrides.clear()
 
-    assert missing.status_code == cancel.status_code == 404
+    assert missing.status_code == cancel.status_code == retry.status_code == 404
     assert missing.json()["error"]["code"] == "resource_not_found"
     assert cancel.json()["error"]["code"] == "resource_not_found"
+    assert retry.json()["error"]["code"] == "resource_not_found"
 
 
 def test_cancellation_is_idempotent_and_explicitly_best_effort(job_rig: JobRig) -> None:
@@ -173,3 +175,37 @@ def test_closing_a_poll_response_does_not_cancel_running_work(job_rig: JobRig) -
     assert executor.get(record.id, LOCAL_DEV_TENANT_ID).status is JobStatus.RUNNING
     release.set()
     assert executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2).status is JobStatus.SUCCEEDED
+
+
+def test_failed_job_retry_is_explicit_bounded_and_not_replayable_after_success(
+    job_rig: JobRig,
+) -> None:
+    _, client, executor = job_rig
+    attempts = 0
+
+    def flaky(_context: JobContext) -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("private provider detail")
+        return "ok"
+
+    record = _submit(executor, "test.retry", flaky)
+    failed = executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2)
+    assert failed.status is JobStatus.FAILED
+    assert failed.retryable
+
+    retried = client.post(f"/api/v1/jobs/{record.id}/retry")
+    assert retried.status_code == 202
+    assert retried.json()["attempt"] == 2
+    assert retried.json()["status"] == "queued"
+    assert retried.headers["Cache-Control"] == "no-store"
+    assert retried.headers["Location"] == f"/api/v1/jobs/{record.id}"
+    assert retried.headers["Retry-After"] == "1"
+    assert "private provider detail" not in retried.text
+
+    assert executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2).status is JobStatus.SUCCEEDED
+    conflict = client.post(f"/api/v1/jobs/{record.id}/retry")
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "job_not_retryable"
+    assert attempts == 2

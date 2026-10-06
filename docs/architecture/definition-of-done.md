@@ -26,7 +26,7 @@ Summary: **27 met / 2 waived / 9 open** across 38 acceptance and definition-of-d
 | 17 | Human-review requirements and limitations visible for anomaly, RAG, and hybrid | Met | `AnalysisDashboard`, `AnswerProvenance`, responsible-AI doc |
 | 18 | Audit covers auth, upload, analysis, model use, export, deletion, retention, and configuration | Open | Existing events omit full auth/configuration/retention policy coverage: [#18](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/18) |
 | 19 | Deletion tests verify all stores, jobs, caches, and temporary artifacts | Open | Current workspace graph/files are tested; future jobs/caches and verified cleanup are [#18](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/18) |
-| 20 | Request/job correlation spans browser through telemetry/audit | Open | Job records carry originating request IDs and have an HTTP control plane; operation wiring is [#17](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/17), and exporter/trace completion is [#15](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/15) |
+| 20 | Request/job correlation spans browser through telemetry/audit | Open | Job records and the HTTP control plane carry originating request IDs; exporter/trace completion is [#15](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/15) |
 | 21 | Privacy-safe metrics/traces cover reliability and resource signals | Open | Allowlist logs exist; exporter/metrics/traces are [#15](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/15) |
 | 22 | Optional telemetry profile diagnoses injected failures | Open | No exporter/profile: [#15](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/15) |
 | 23 | Multi-stage non-root images and complete health-checked Compose | Met | container config tests and CI `containers` job |
@@ -52,7 +52,6 @@ Summary: **27 met / 2 waived / 9 open** across 38 acceptance and definition-of-d
 |---|---|
 | [#9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9) | API OIDC authentication/authorization and roles |
 | [#12](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/12) | Durable metadata, migrations, recovery, workspace backup/restore |
-| [#17](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/17) | Job operation wiring plus pagination, streaming, idempotency, cancellation, timeout/retry semantics |
 | [#15](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/15) | Telemetry exporter, metrics/tracing, SLIs/SLOs, profile |
 | [#18](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/18) | Retention/deletion/export governance, classification, registries, audit lifecycle |
 | [#16](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/16) | Image/SBOM/license/threat-model/vector-encryption security |

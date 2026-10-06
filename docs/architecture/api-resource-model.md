@@ -14,7 +14,7 @@ an API in this iteration.
 - UTC timestamps use RFC 3339 strings.
 - Mutating retryable requests accept an idempotency key.
 - Responses return `X-Request-ID`; failures use the safe error envelope below.
-- Job polling, cursor pagination, cancellation, and future create-operation idempotency are specified
+- Job polling/retry/cancellation, cursor pagination, streaming, and create-operation idempotency are specified
   in the [job HTTP contract](job-http-contract.md).
 
 ```json
@@ -53,7 +53,7 @@ an API in this iteration.
 | `DELETE /workspaces/{workspace_id}` | Reset and delete all owned artifacts | May return a job for verified cleanup. |
 | `POST /workspaces/{workspace_id}/tabular-uploads` | Upload CSV/Excel | Enforce byte limit before parsing. |
 | `GET /tabular-uploads/{upload_id}/sheets` | List Excel sheets | CSV returns an empty list. |
-| `POST /tabular-uploads/{upload_id}/dataset` | Select sheet and normalize/profile | Returns dataset or job. |
+| `POST /tabular-uploads/{upload_id}/dataset` | Select sheet and normalize/profile | Synchronous in v1; automatic retry is unsafe. |
 | `GET /datasets/{dataset_id}` | Read dataset metadata/profile | Does not return the full source by default. |
 | `PUT /datasets/{dataset_id}/schema-mapping` | Confirm canonical mapping | Validates type compatibility and uniqueness. |
 | `POST /datasets/{dataset_id}/analyses` | Run deterministic analysis | Includes anomaly configuration. |
@@ -61,15 +61,16 @@ an API in this iteration.
 | `POST /workspaces/{workspace_id}/document-collections` | Upload/index PDFs | Enforce byte/page/chunk limits. |
 | `GET /document-collections/{collection_id}` | Read index status and document metadata | No raw excerpts by default. |
 | `POST /workspaces/{workspace_id}/conversations` | Start bounded conversation | References current dataset/collection versions. |
-| `POST /conversations/{conversation_id}/messages` | Ask a question | Returns route, answer, SQL/result, sources, or a job. |
+| `POST /conversations/{conversation_id}/messages` | Ask a question | Synchronous in v1; duplicates may repeat model/SQL work. |
 | `GET /conversations/{conversation_id}/messages` | Read paginated history | Dataframe retention remains bounded. |
-| `POST /analyses/{analysis_id}/reports` | Generate Markdown/PDF report | PDF may use a job. |
-| `GET /reports/{report_id}/content` | Stream a report | Correct content disposition and media type. |
+| `POST /analyses/{analysis_id}/reports` | Generate a report resource | Synchronous in v1; duplicates create distinct resources. |
+| `GET /reports/{report_id}/content` | Stream a report | Exact length/disposition; no ranges; full retry after disconnect. |
 | `POST /messages/{message_id}/exports` | Create safe CSV/XLSX result export | Spreadsheet neutralization is mandatory. |
-| `GET /exports/{export_id}/content` | Stream export | Tenant-owned and expiring. |
+| `GET /exports/{export_id}/content` | Stream export | Tenant-owned; exact length/disposition; no ranges. |
 | `GET /jobs` | List tenant-owned jobs | Stable opaque cursor pagination; content-free metadata only. |
 | `GET /jobs/{job_id}` | Read job status/progress metadata | Ownership enforced; result payload stays behind its owning resource. |
 | `DELETE /jobs/{job_id}` | Request cancellation | Best effort with explicit final state. |
+| `POST /jobs/{job_id}/retry` | Retry a failed job | One bounded attempt; other states conflict. |
 | `GET /health/live` | Process liveness | No external dependency disclosure. |
 | `GET /health/ready` | Dependency and migration readiness | Safe aggregate status only. |
 

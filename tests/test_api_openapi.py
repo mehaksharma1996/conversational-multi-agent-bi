@@ -30,6 +30,7 @@ def test_openapi_contract_is_versioned_and_never_accepts_tenant_authority() -> N
     assert "/api/v1/workspaces/{workspace_id}" in paths
     assert "/api/v1/jobs" in paths
     assert "/api/v1/jobs/{job_id}" in paths
+    assert "/api/v1/jobs/{job_id}/retry" in paths
 
 
 def test_job_openapi_contract_declares_pagination_and_cancellation_responses() -> None:
@@ -42,6 +43,53 @@ def test_job_openapi_contract_declares_pagination_and_cancellation_responses() -
     assert parameters["limit"]["schema"]["maximum"] == 100
     assert "cursor" in parameters
     assert set(cancel_operation["responses"]) >= {"200", "202", "404", "422"}
+
+
+def test_openapi_declares_message_pagination_download_headers_and_retry() -> None:
+    contract = create_app().openapi()
+    paths = contract["paths"]
+
+    messages = paths["/api/v1/conversations/{conversation_id}/messages"]["get"]
+    parameters = {parameter["name"]: parameter for parameter in messages["parameters"]}
+    assert parameters["limit"]["schema"]["minimum"] == 1
+    assert parameters["limit"]["schema"]["maximum"] == 100
+    assert "cursor" in parameters
+
+    retry = paths["/api/v1/jobs/{job_id}/retry"]["post"]
+    assert retry["responses"]["202"]
+    for path in ("/api/v1/reports/{report_id}/content", "/api/v1/exports/{export_id}/content"):
+        headers = paths[path]["get"]["responses"]["200"]["headers"]
+        assert set(headers) == {
+            "Accept-Ranges",
+            "Cache-Control",
+            "Content-Disposition",
+            "Content-Length",
+        }
+
+
+def test_every_create_operation_declares_idempotency_and_timeout_semantics() -> None:
+    contract = create_app().openapi()
+    create_paths = {
+        "/api/v1/workspaces": True,
+        "/api/v1/workspaces/{workspace_id}/tabular-uploads": False,
+        "/api/v1/tabular-uploads/{upload_id}/dataset": False,
+        "/api/v1/datasets/{dataset_id}/analyses": False,
+        "/api/v1/workspaces/{workspace_id}/document-collections": False,
+        "/api/v1/workspaces/{workspace_id}/conversations": False,
+        "/api/v1/conversations/{conversation_id}/messages": False,
+        "/api/v1/analyses/{analysis_id}/reports": False,
+        "/api/v1/messages/{message_id}/exports": False,
+    }
+
+    for path, supports_key in create_paths.items():
+        description = contract["paths"][path]["post"]["description"]
+        assert "Idempotency-Key" in description
+        assert "process restart" in description
+        assert "timeout" in description
+        if supports_key:
+            assert "same key replays" in description
+        else:
+            assert "does not support" in description
 
 
 def test_openapi_declares_bearer_auth_for_api_resources_but_not_health() -> None:

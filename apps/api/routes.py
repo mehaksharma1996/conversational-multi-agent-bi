@@ -21,6 +21,10 @@ from apps.api.errors import (
     ApiError,
     ResourceConflictError,
 )
+from apps.api.http_semantics import (
+    NON_IDEMPOTENT_CREATE_SEMANTICS,
+    WORKSPACE_CREATE_SEMANTICS,
+)
 from apps.api.models import (
     AnalysisCreateRequest,
     AnalysisResponse,
@@ -72,6 +76,7 @@ RateLimiterDependency = Annotated[InMemoryRateLimiter, Depends(get_rate_limiter)
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["workspaces"],
+    description=WORKSPACE_CREATE_SEMANTICS,
 )
 def create_workspace(
     identity: IdentityDependency,
@@ -115,6 +120,7 @@ def get_workspace(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["tabular uploads"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 async def upload_tabular_file(
     workspace_id: str,
@@ -210,6 +216,7 @@ def list_workbook_sheets(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["datasets"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 def create_dataset(
     upload_id: str,
@@ -332,6 +339,7 @@ def confirm_schema_mapping(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["analyses"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 def create_analysis(
     dataset_id: str,

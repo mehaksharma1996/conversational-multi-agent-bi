@@ -343,6 +343,7 @@ class MessageResponse(StrictModel):
 class MessageListResponse(StrictModel):
     conversation_id: str
     messages: list[MessageResponse]
+    next_cursor: str | None
 
 
 class ReportCreateRequest(StrictModel):
