@@ -56,6 +56,7 @@ whether it succeeds or fails. Attributes (all allowlisted, no content):
 | `duration_ms` | Wall time of the call, including the provider client's own retries |
 | `llm_prompt_tokens`, `llm_output_tokens` | Reported by the provider; **absent** when it does not report them |
 | `llm_estimated_cost_microusd` | Estimate in millionths of a USD; present only when both prices below are configured and tokens were reported |
+| `llm_fallbacks` | How many configured providers failed before the one that answered (0 when the primary answered); `llm_provider`/`llm_model` then name the provider that really answered |
 | `llm_retries` | Provider-client retries inside this call (a structured-output *repair* is a separate call and a separate event) |
 | `outcome`, `error_category` | `success` / `failure` and a safe category |
 

@@ -323,6 +323,7 @@ def test_api_emits_one_llm_call_event_per_model_call_with_only_allowlisted_attri
         "duration_ms",
         "outcome",
         "llm_retries",
+        "llm_fallbacks",
         "llm_prompt_tokens",
         "llm_output_tokens",
         "llm_estimated_cost_microusd",

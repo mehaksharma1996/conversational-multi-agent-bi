@@ -473,6 +473,13 @@
             ],
             "title": "Accepted At"
           },
+          "data_recipients": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Recipients",
+            "type": "array"
+          },
           "notice_version": {
             "anyOf": [
               {
@@ -1707,6 +1714,13 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "data_recipients": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Data Recipients",
+            "type": "array"
           },
           "expires_at": {
             "format": "date-time",

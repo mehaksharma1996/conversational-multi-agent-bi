@@ -655,6 +655,8 @@ export interface components {
             accepted: boolean;
             /** Accepted At */
             accepted_at: string | null;
+            /** Data Recipients */
+            data_recipients?: string[];
             /** Notice Version */
             notice_version: string | null;
             /** Required */
@@ -1127,6 +1129,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Data Recipients */
+            data_recipients?: string[];
             /**
              * Expires At
              * Format: date-time

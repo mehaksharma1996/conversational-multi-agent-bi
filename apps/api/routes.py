@@ -83,7 +83,8 @@ def create_workspace(
         tenant_id=identity.tenant_id,
         authentication_mode=identity.authentication_mode,
         idempotency_key=idempotency_key,
-        gemini_configured=settings.gemini_configured,
+        gemini_configured=settings.hosted_model_configured,
+        data_recipients=settings.hosted_recipients(),
         local_only_mode=settings.local_only_mode,
     )
     return workspace_response(record)

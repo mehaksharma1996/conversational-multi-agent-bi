@@ -60,6 +60,8 @@ class WorkspaceRecord:
     consent_notice_version: str | None
     consent_accepted_at: datetime | None
     created_at: datetime
+    data_recipients: tuple[str, ...] = ()
+    consent_recipients: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -263,6 +265,7 @@ class LocalResourceRepository:
         idempotency_key: str | None,
         *,
         gemini_configured: bool = False,
+        data_recipients: tuple[str, ...] = (),
         local_only_mode: bool = False,
     ) -> WorkspaceRecord:
         with self._lock:
@@ -279,6 +282,7 @@ class LocalResourceRepository:
                 authentication_mode=authentication_mode,
                 expires_at=_now() + timedelta(hours=self.retention_hours),
                 gemini_configured=gemini_configured,
+                data_recipients=data_recipients,
                 local_only_mode=local_only_mode,
                 consent_notice_version=None,
                 consent_accepted_at=None,
@@ -299,6 +303,7 @@ class LocalResourceRepository:
         workspace_id: str,
         tenant_id: str,
         notice_version: str,
+        recipients: tuple[str, ...] = (),
     ) -> WorkspaceRecord:
         with self._lock:
             workspace = self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
@@ -306,6 +311,7 @@ class LocalResourceRepository:
                 workspace,
                 consent_notice_version=notice_version,
                 consent_accepted_at=_now(),
+                consent_recipients=recipients,
             )
             self._workspaces[workspace_id] = updated
             return self._touch_workspace_unlocked(updated)

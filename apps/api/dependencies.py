@@ -150,6 +150,7 @@ def get_llm_client(
             outcome=record.outcome,
             error_category=record.error_category,
             llm_retries=record.retries,
+            llm_fallbacks=record.fallbacks,
             llm_prompt_tokens=record.prompt_tokens,
             llm_output_tokens=record.output_tokens,
             llm_estimated_cost_microusd=(
