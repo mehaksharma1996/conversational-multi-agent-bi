@@ -90,6 +90,13 @@ def _enforce_csrf(request: Request, session: BrowserSession) -> None:
     origin_ok = allowed_origin is not None and origin == allowed_origin
     token_ok = hmac.compare_digest(supplied.encode(), session.csrf_token.encode())
     if not (origin_ok and token_ok):
+        observability: ApiObservability = request.app.state.observability
+        observability.audit_tenant(
+            "auth.csrf_rejected",
+            session.tenant_id,
+            authentication_mode="oidc",
+            reason="origin_mismatch" if not origin_ok else "token_mismatch",
+        )
         raise CsrfError()
 
 

@@ -53,8 +53,17 @@ AUDIT_ACTIONS: frozenset[str] = frozenset(
         "report.downloaded",
         "export.created",
         "export.downloaded",
+        "auth.login_succeeded",
+        "auth.login_failed",
+        "auth.logout",
+        "auth.csrf_rejected",
+        "authz.denied",
     }
 )
+
+# Pre-identity events (a login that failed after it was started) have no verified subject, so they
+# are filed under this reserved tenant. Derived tenant IDs are 32 hex characters and cannot collide.
+ANONYMOUS_TENANT_ID = "anonymous"
 
 # name -> declared value shape understood by ``clean_attribute``.
 AUDIT_ATTRIBUTES: dict[str, str] = {
@@ -64,6 +73,7 @@ AUDIT_ATTRIBUTES: dict[str, str] = {
     "reason": "token",
     "route": "token",
     "outcome": "token",
+    "capability": "token",
     "error_category": "token",
     "format": "token",
     "size_bytes": "int",

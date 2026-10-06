@@ -22,6 +22,7 @@ from apps.api.errors import (
     ApiError,
     AuthenticationUnavailableError,
 )
+from apps.api.observability import ApiObservability
 from apps.api.oidc_login import (
     LOGIN_BINDING_COOKIE,
     PENDING_LOGIN_TTL_SECONDS,
@@ -35,6 +36,7 @@ from apps.api.sessions import (
     InMemorySessionStore,
 )
 from config.settings import Settings
+from packages.governance import ANONYMOUS_TENANT_ID
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -54,6 +56,10 @@ def _login_service(request: Request) -> OidcLoginService:
     if service is None:
         raise ApiError(404, "login_not_configured", "Browser sign-in is not configured.")
     return service
+
+
+def _observability(request: Request) -> ApiObservability:
+    return request.app.state.observability
 
 
 def _redirect(path: str) -> RedirectResponse:
@@ -132,10 +138,26 @@ def callback(
         session_id, session = service.complete(
             code=None if error else code, state=state, binding=binding
         )
-    except LoginFailedError:
+    except LoginFailedError as exc:
+        if exc.audited:
+            _observability(request).audit_tenant(
+                "auth.login_failed",
+                ANONYMOUS_TENANT_ID,
+                authentication_mode="oidc",
+                reason=exc.reason,
+            )
         return _redirect(FAILED_PATH)
     except AuthenticationUnavailableError:
+        _observability(request).audit_tenant(
+            "auth.login_failed",
+            ANONYMOUS_TENANT_ID,
+            authentication_mode="oidc",
+            reason="provider_unavailable",
+        )
         return _redirect(UNAVAILABLE_PATH)
+    _observability(request).audit_tenant(
+        "auth.login_succeeded", session.tenant_id, authentication_mode="oidc"
+    )
     response = _redirect(SIGNED_IN_PATH)
     remaining = max(1, int(session.expires_at - time.time()))
     response.set_cookie(
@@ -168,9 +190,12 @@ def read_session(session: BrowserSessionDependency, response: Response) -> Sessi
     responses=STANDARD_ERROR_RESPONSES,
     summary="End the current browser session",
 )
-def logout(request: Request, _session: BrowserSessionDependency) -> Response:
+def logout(request: Request, session: BrowserSessionDependency) -> Response:
     store: InMemorySessionStore = request.app.state.session_store
     store.revoke(request.cookies[SESSION_COOKIE_NAME])
+    _observability(request).audit_tenant(
+        "auth.logout", session.tenant_id, authentication_mode="oidc"
+    )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(SESSION_COOKIE_NAME, **COOKIE_ATTRIBUTES)
     response.headers["Cache-Control"] = "no-store"

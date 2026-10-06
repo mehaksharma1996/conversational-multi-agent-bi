@@ -46,6 +46,22 @@ class ApiObservability:
             **attributes,
         )
 
+    def audit_tenant(
+        self,
+        action: str,
+        tenant_id: str,
+        *,
+        resource_id: str | None = None,
+        **attributes: object,
+    ) -> AuditEvent | None:
+        """Audit with a tenant from trusted server-side state (verified session or subject)."""
+        return self.recorder.record(
+            action,
+            tenant_id=tenant_id,
+            resource_id=resource_id,
+            **attributes,
+        )
+
     def operation(
         self,
         name: str,

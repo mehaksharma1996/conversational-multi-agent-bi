@@ -44,7 +44,16 @@ class IdTokenVerifier(Protocol):
 
 
 class LoginFailedError(Exception):
-    """The login attempt is invalid; details are deliberately not carried."""
+    """The login attempt is invalid. Carries only an allowlisted reason token, never details.
+
+    ``audited`` is true only once a pending login was matched to the browser that started it, so
+    anonymous garbage requests cannot grow the audit log.
+    """
+
+    def __init__(self, reason: str = "invalid_request", *, audited: bool = False) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.audited = audited
 
 
 @dataclass(frozen=True)
@@ -162,8 +171,10 @@ class OidcLoginService:
         pending = self._pending.consume(
             state or "", binding if binding and len(binding) <= MAX_BINDING_CHARS else ""
         )
-        if pending is None or not code or len(code) > MAX_CODE_CHARS:
-            raise LoginFailedError
+        if pending is None:
+            raise LoginFailedError("invalid_request")
+        if not code or len(code) > MAX_CODE_CHARS:
+            raise LoginFailedError("no_authorization_code", audited=True)
         form = {
             "grant_type": "authorization_code",
             "code": code,
@@ -173,16 +184,19 @@ class OidcLoginService:
         }
         if self._client_secret is not None:
             form["client_secret"] = self._client_secret
-        response = self._exchange(self._token_endpoint, form, self._timeout)
+        try:
+            response = self._exchange(self._token_endpoint, form, self._timeout)
+        except LoginFailedError as exc:
+            raise LoginFailedError("token_exchange_rejected", audited=True) from exc
         id_token = response.get("id_token")
         if not isinstance(id_token, str) or len(id_token) > MAX_BEARER_TOKEN_CHARS:
-            raise LoginFailedError
+            raise LoginFailedError("invalid_token_response", audited=True)
         try:
             verified = self._verifier.verify_id_token(
                 id_token, client_id=self._client_id, nonce=pending.nonce
             )
         except AuthenticationError as exc:
-            raise LoginFailedError from exc
+            raise LoginFailedError("id_token_rejected", audited=True) from exc
         # Provider access/refresh tokens in `response` are intentionally dropped here.
         return self._sessions.create(
             subject=verified.subject,
