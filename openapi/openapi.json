@@ -231,6 +231,29 @@
         "title": "AnomalyResponse",
         "type": "object"
       },
+      "AuthConfigResponse": {
+        "description": "Lets the SPA tell local development (no sign-in) from OIDC (sign-in required).",
+        "properties": {
+          "login_available": {
+            "title": "Login Available",
+            "type": "boolean"
+          },
+          "mode": {
+            "enum": [
+              "local",
+              "oidc"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "login_available"
+        ],
+        "title": "AuthConfigResponse",
+        "type": "object"
+      },
       "Body_create_document_collection_api_v1_workspaces__workspace_id__document_collections_post": {
         "properties": {
           "files": {
@@ -2064,6 +2087,27 @@
           }
         },
         "summary": "Complete browser sign-in",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/config": {
+      "get": {
+        "operationId": "read_auth_config_api_v1_auth_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Describe how this deployment authenticates browsers",
         "tags": [
           "authentication"
         ]

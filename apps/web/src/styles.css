@@ -143,3 +143,8 @@ footer { padding: 2rem; border-top: 1px solid var(--border); color: var(--muted)
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+.auth-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .75rem; padding: .5rem 1.25rem; border-bottom: 1px solid var(--border); background: var(--surface-raised); color: var(--muted); font-size: .85rem; }
+.auth-screen { display: grid; justify-items: start; gap: 1rem; max-width: 36rem; margin: 0 auto; padding: 4rem 1.25rem; }
+.auth-screen h1 { margin: 0; }
+.auth-screen p { margin: 0; color: var(--muted); }
+

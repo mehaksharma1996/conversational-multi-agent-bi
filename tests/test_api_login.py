@@ -523,3 +523,31 @@ def test_secret_without_login_and_login_in_local_mode_are_rejected() -> None:
             replace(local, **override).validate_identity_configuration()
 
     _login_settings("login_ok").validate_identity_configuration()
+
+
+# --- auth config -------------------------------------------------------------------------------
+
+
+def test_auth_config_is_public_and_reports_mode_and_login_availability(harness: Harness) -> None:
+    response = harness.client.get("/api/v1/auth/config")
+
+    assert response.status_code == 200
+    assert response.json() == {"mode": "oidc", "login_available": True}
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_auth_config_reflects_unconfigured_login_and_local_mode() -> None:
+    key = RSAKey.generate_key(auto_kid=True)
+    oidc_only = create_app(
+        settings=_settings(isolated_directory_path("cfg_off")), identity_provider=_provider(key)
+    )
+    local = create_app(settings=_settings(isolated_directory_path("cfg_local"), auth_mode="local"))
+
+    assert TestClient(oidc_only).get("/api/v1/auth/config").json() == {
+        "mode": "oidc",
+        "login_available": False,
+    }
+    assert TestClient(local).get("/api/v1/auth/config").json() == {
+        "mode": "local",
+        "login_available": False,
+    }

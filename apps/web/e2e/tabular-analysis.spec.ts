@@ -14,6 +14,10 @@ test("analyst reviews the schema before running deterministic analysis", async (
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/auth/config") {
+      await route.fallback();
+      return;
+    }
 
     if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: workspaceFixture });
@@ -67,6 +71,10 @@ test("analyst indexes a PDF and receives a consented cited answer", async ({ pag
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/auth/config") {
+      await route.fallback();
+      return;
+    }
 
     if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: workspaceFixture });

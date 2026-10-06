@@ -35,19 +35,18 @@ environment variables, never baked into images or build arguments. See
 ### Exposure warning
 
 Compose defaults to `API_AUTH_MODE=local`, where every request runs as one fixed development
-identity. The API can verify OIDC Bearer JWTs when `API_AUTH_MODE=oidc` and the issuer, audience,
-JWKS URL, and asymmetric algorithms are configured, but the bundled React client does not yet
-perform browser sign-in or attach tokens. Logout, CSRF, and the final CORS policy also remain
-open under issue #9. Browser sessions (login/callback with PKCE, cookie, CSRF, logout) are implemented per ADR 0013
-but the React client has no sign-in UI yet. Access logs record paths without query strings. API authorization is capability-based: local mode grants every capability to its
-single loopback-only user, while OIDC mode grants only what the verified `OIDC_ROLES_CLAIM` roles
-(`viewer`, `analyst`, `workspace_admin`) map to. Compose therefore publishes the web port on `127.0.0.1` only; do not change the
-mapping to `0.0.0.0` or put the service on a shared network yet.
+identity with every capability. With `API_AUTH_MODE=oidc` the API verifies OIDC Bearer JWTs for API
+clients and, when the `OIDC_*` browser-login settings and `WEB_ORIGIN` are configured, signs browsers
+in with an authorization-code + PKCE flow and an HttpOnly session cookie (ADR 0013). The React client
+asks `GET /api/v1/auth/config` how to authenticate, shows a sign-in screen when needed, sends the
+per-session CSRF token on state-changing requests, and returns to sign-in when a session expires.
+Capabilities come only from the verified `OIDC_ROLES_CLAIM` roles (`viewer`, `analyst`,
+`workspace_admin`). API and nginx access logs record paths without query strings so authorization
+codes never reach logs.
 
-The OIDC foundation is intended for direct API clients during this phase. Required settings are
-listed in `.env.example`. The API validates `iss`, `aud`, `sub`, `exp`, optional time claims, and the
-configured asymmetric signature algorithm against a bounded in-memory JWKS cache. Partial OIDC
-configuration fails startup rather than activating local mode.
+Compose still publishes the web port on `127.0.0.1` only. Do not change the mapping to `0.0.0.0` or
+put the service on a shared network until the remaining issue #9 work (authentication audit events
+and a Docker-validated stack) is complete.
 
 Change the port with `WEB_PORT` (default `8080`).
 

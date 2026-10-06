@@ -328,7 +328,8 @@ environment. The callback verifies `state`, a login-binding cookie, the PKCE ver
 signature, issuer, audience, expiry, and nonce, then discards every provider token. API and nginx access
 logs omit query strings so authorization codes never reach logs.
 
-Browser authentication is not complete: the React sign-in UI and audit events are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
+The React client implements sign-in, sign-out, CSRF-token handling, and expired-session recovery.
+Authentication and authorization audit events and Docker-validated deployment are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
 Keep the packaged web application loopback-only until those slices are complete.
 
 The developer-only Streamlit compatibility surface supports native OIDC login (`st.login()`/`st.user`) for
