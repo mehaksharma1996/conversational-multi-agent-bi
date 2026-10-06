@@ -25,6 +25,8 @@ from src.utils.identity import LOCAL_DEV_TENANT_ID, derive_tenant_id
 
 MAX_JWKS_BYTES = 1_000_000
 MAX_BEARER_TOKEN_CHARS = 16_384
+MAX_ROLE_CLAIM_ITEMS = 32
+MAX_ROLE_CHARS = 64
 
 JwksFetcher = Callable[[str, float], dict[str, Any]]
 
@@ -60,6 +62,7 @@ class OidcBearerIdentityProvider:
         clock_skew_seconds: int,
         jwks_cache_seconds: int,
         http_timeout_seconds: float,
+        roles_claim: str = "roles",
         jwks_fetcher: JwksFetcher | None = None,
         monotonic_clock: Callable[[], float] = monotonic,
     ) -> None:
@@ -70,6 +73,7 @@ class OidcBearerIdentityProvider:
         self._clock_skew_seconds = clock_skew_seconds
         self._jwks_cache_seconds = jwks_cache_seconds
         self._http_timeout_seconds = http_timeout_seconds
+        self._roles_claim = roles_claim
         self._jwks_fetcher = jwks_fetcher or _fetch_jwks
         self._monotonic_clock = monotonic_clock
         self._keys: KeySet | None = None
@@ -107,6 +111,7 @@ class OidcBearerIdentityProvider:
             tenant_id=derive_tenant_id(subject),
             subject=subject,
             authentication_mode="oidc",
+            roles=_roles_from_claims(token.claims, self._roles_claim),
         )
 
     def _get_keys(self) -> KeySet:
@@ -149,7 +154,18 @@ def build_identity_provider(
         clock_skew_seconds=settings.oidc_clock_skew_seconds,
         jwks_cache_seconds=settings.oidc_jwks_cache_seconds,
         http_timeout_seconds=settings.oidc_http_timeout_seconds,
+        roles_claim=settings.oidc_roles_claim,
         jwks_fetcher=jwks_fetcher,
+    )
+
+
+def _roles_from_claims(claims: dict[str, Any], claim_name: str) -> frozenset[str]:
+    """Read a bounded list of role strings; any other shape yields no roles (fail closed)."""
+    value = claims.get(claim_name)
+    if not isinstance(value, list) or len(value) > MAX_ROLE_CLAIM_ITEMS:
+        return frozenset()
+    return frozenset(
+        role for role in value if isinstance(role, str) and 0 < len(role) <= MAX_ROLE_CHARS
     )
 
 

@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Header, UploadFile, status
 
+from apps.api.authorization import Capability, requires
 from apps.api.dependencies import (
     get_api_settings,
     get_identity,
@@ -63,6 +64,7 @@ ObservabilityDependency = Annotated[ApiObservability, Depends(get_observability)
 
 @router.post(
     "/workspaces",
+    dependencies=[requires(Capability.DATA_WRITE)],
     response_model=WorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -89,6 +91,7 @@ def create_workspace(
 
 @router.get(
     "/workspaces/{workspace_id}",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=WorkspaceResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["workspaces"],
@@ -103,6 +106,7 @@ def get_workspace(
 
 @router.post(
     "/workspaces/{workspace_id}/tabular-uploads",
+    dependencies=[requires(Capability.DATA_WRITE)],
     response_model=TabularUploadResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -165,6 +169,7 @@ async def upload_tabular_file(
 
 @router.get(
     "/tabular-uploads/{upload_id}/sheets",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=WorkbookSheetsResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["tabular uploads"],
@@ -187,6 +192,7 @@ def list_workbook_sheets(
 
 @router.post(
     "/tabular-uploads/{upload_id}/dataset",
+    dependencies=[requires(Capability.DATA_WRITE)],
     response_model=DatasetResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -237,6 +243,7 @@ def create_dataset(
 
 @router.get(
     "/datasets/{dataset_id}",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=DatasetResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["datasets"],
@@ -251,6 +258,7 @@ def get_dataset(
 
 @router.put(
     "/datasets/{dataset_id}/schema-mapping",
+    dependencies=[requires(Capability.DATA_WRITE)],
     response_model=DatasetResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["datasets"],
@@ -306,6 +314,7 @@ def confirm_schema_mapping(
 
 @router.post(
     "/datasets/{dataset_id}/analyses",
+    dependencies=[requires(Capability.ANALYSIS_RUN)],
     response_model=AnalysisResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -389,6 +398,7 @@ def create_analysis(
 
 @router.get(
     "/analyses/{analysis_id}",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=AnalysisResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["analyses"],

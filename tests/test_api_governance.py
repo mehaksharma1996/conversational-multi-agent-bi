@@ -308,7 +308,10 @@ def test_audit_streams_are_isolated_between_authenticated_tenants() -> None:
     )
 
     app.dependency_overrides[get_identity] = lambda: IdentityContext(
-        tenant_id=OTHER_TENANT, subject="other", authentication_mode="test"
+        tenant_id=OTHER_TENANT,
+        subject="other",
+        authentication_mode="test",
+        roles=frozenset({"workspace_admin"}),
     )
     try:
         attacks = [

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, statu
 from fastapi.responses import StreamingResponse
 
 from apps.api.approvals import ApprovalCheckpoints
+from apps.api.authorization import Capability, requires
 from apps.api.dependencies import (
     get_api_settings,
     get_approval_checkpoints,
@@ -98,6 +99,7 @@ EXPORT_CONTENT_RESPONSES = {
 
 @router.put(
     "/workspaces/{workspace_id}/consent",
+    dependencies=[requires(Capability.WORKSPACE_ADMIN)],
     response_model=ConsentResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["workspaces"],
@@ -132,6 +134,7 @@ def accept_gemini_consent(
 
 @router.delete(
     "/workspaces/{workspace_id}",
+    dependencies=[requires(Capability.WORKSPACE_ADMIN)],
     status_code=status.HTTP_204_NO_CONTENT,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["workspaces"],
@@ -147,6 +150,7 @@ def delete_workspace(
 
 @router.post(
     "/workspaces/{workspace_id}/document-collections",
+    dependencies=[requires(Capability.DATA_WRITE)],
     response_model=DocumentCollectionResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -236,6 +240,7 @@ async def create_document_collection(
 
 @router.get(
     "/document-collections/{collection_id}",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=DocumentCollectionResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["documents"],
@@ -252,6 +257,7 @@ def get_document_collection(
 
 @router.post(
     "/workspaces/{workspace_id}/conversations",
+    dependencies=[requires(Capability.ANALYSIS_RUN)],
     response_model=ConversationResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -279,6 +285,7 @@ def create_conversation(
 
 @router.get(
     "/conversations/{conversation_id}",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=ConversationResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
@@ -293,6 +300,7 @@ def get_conversation(
 
 @router.post(
     "/conversations/{conversation_id}/messages",
+    dependencies=[requires(Capability.ANALYSIS_RUN)],
     response_model=MessageResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -446,6 +454,7 @@ def create_message(
 
 @router.post(
     "/messages/{message_id}/approval",
+    dependencies=[requires(Capability.ANALYSIS_RUN)],
     response_model=MessageResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
@@ -579,6 +588,7 @@ def decide_sql_approval(
 
 @router.get(
     "/conversations/{conversation_id}/messages",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=MessageListResponse,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
@@ -594,6 +604,7 @@ def list_messages(
 
 @router.post(
     "/analyses/{analysis_id}/reports",
+    dependencies=[requires(Capability.REPORT_EXPORT)],
     response_model=ReportResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -623,6 +634,7 @@ def create_report(
 
 @router.get(
     "/reports/{report_id}/content",
+    dependencies=[requires(Capability.REPORT_EXPORT)],
     responses=REPORT_CONTENT_RESPONSES,
     tags=["reports"],
 )
@@ -659,6 +671,7 @@ def get_report_content(
 
 @router.post(
     "/messages/{message_id}/exports",
+    dependencies=[requires(Capability.REPORT_EXPORT)],
     response_model=ExportResponse,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
@@ -721,6 +734,7 @@ def create_export(
 
 @router.get(
     "/exports/{export_id}/content",
+    dependencies=[requires(Capability.REPORT_EXPORT)],
     responses=EXPORT_CONTENT_RESPONSES,
     tags=["exports"],
 )
