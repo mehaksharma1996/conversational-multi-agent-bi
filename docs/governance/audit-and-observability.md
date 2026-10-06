@@ -90,6 +90,8 @@ Each event has: `name`, `occurred_at` (UTC), `tenant_id`, `request_id`, optional
 |---|---|---|
 | `workspace.created` | A new workspace is created (idempotent replays are not re-audited) | authentication mode, Gemini/local-only flags, reason |
 | `workspace.expired` | Retention expiry removes a workspace | reason `retention_expired` |
+| `config.recorded` | First start with this audit log: the governed configuration (system tenant) | `config_hash`, `llm_provider`, `llm_model`, `authentication_mode`, `local_only_mode`, `durable_metadata` |
+| `config.changed` | A later start whose governed configuration differs (system tenant) | as above plus `previous_config_hash` |
 | `workspace.deleted` | The owner deletes a workspace | reason `user_requested` |
 | `workspace.exported` | The owner downloads the workspace export (`GET /workspaces/{id}/export`) | `size_bytes`, `file_count`; never file names or content |
 | `consent.accepted` | Gemini data-sharing notice accepted | notice version |
@@ -117,7 +119,14 @@ Deliberately *not* audited, because an unauthenticated caller can trigger them a
 credentials; unknown `state`; and callbacks without the login binding cookie. Those still appear as `http.request` telemetry with a status code and error code. A caller who
 starts a real login and then fails it can still add `auth.login_failed` lines to the `anonymous` file; there is no rate limit or rotation, so monitor its size.
 
-Not audited yet: reset-vs-delete distinction, configuration changes, and retention cleanup performed by Streamlit's separate sweep.
+**Configuration and model changes** are audited at startup under the reserved `system` tenant (`system.jsonl`, same hash chain and rotation as every tenant): the first start records
+`config.recorded`, a start whose governed settings differ from the last record emits `config.changed` with both hashes, and an unchanged start records nothing. The hash covers the provider
+chain, model names, embedding model, index backend, hybrid retrieval, hosted recipients, local-only mode, authentication mode, durable metadata, retention hours, and the sweep switch. Secrets
+(API keys, encryption keys, DSNs, client secrets) are never an input, so rotating one is not a governed change. A change made while the service is running by editing the environment takes
+effect, and is therefore recorded, at the next start. Prompt changes are governed in git and `evals/v1/prompt-registry.json`
+([policy](model-and-prompt-change-policy.md)).
+
+Not audited yet: reset-vs-delete distinction, and retention cleanup performed by Streamlit's separate sweep.
 
 ### Trust and privacy rules
 

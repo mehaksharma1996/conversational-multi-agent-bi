@@ -236,7 +236,10 @@ def test_sweep_is_opt_in_and_audited_when_enabled() -> None:
     with TestClient(disabled_app):
         pass
     assert orphan.exists()
-    assert disabled_audit.events == []
+    # Startup records the service configuration under the reserved system tenant; no user tenant
+    # has any event when the sweep is off.
+    assert [e.name for e in disabled_audit.events] == ["config.recorded"]
+    assert {e.tenant_id for e in disabled_audit.events} == {"system"}
 
     enabled_app, telemetry, audit = _app(tmp_path, sweep_orphaned_workspaces=True)
     with TestClient(enabled_app):

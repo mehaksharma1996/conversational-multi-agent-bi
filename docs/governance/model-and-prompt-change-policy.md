@@ -39,7 +39,8 @@ Inline prompts inside a larger function are registered by that function's qualif
 3. If the change adds a **new hosted recipient**, the consent notice must be updated and re-requested (the
    consent record already names every hosted provider; a configuration that adds one requires consent again).
 4. Operators who override `GEMINI_MODEL` at runtime are outside this registry by design; their choice is
-   visible in telemetry (`llm_model`) but is not approved by this process.
+   visible in telemetry (`llm_model`) and is recorded in the audit chain as `config.changed`, but it is not
+   approved by this process.
 
 ## Rollback
 
@@ -58,8 +59,10 @@ Inline prompts inside a larger function are registered by that function's qualif
 
 ## Known gaps
 
-- Changes are recorded in git, not as runtime audit events; an operator who changes a model by environment
-  variable leaves no audit record, only telemetry.
+- Prompt changes are recorded in git and the registry, not as runtime audit events. Runtime model and
+  provider changes (including an operator override by environment variable) are audited at the next start as
+  `config.changed` with a configuration hash ([audit document](audit-and-observability.md)); the audit proves
+  *that* and *when* the configuration changed, not who changed it or whether the change was approved.
 - The registry hashes prompt-building code, not rendered prompts, so a change to data fed into a prompt
   (for example sample-value redaction) is covered by the evaluation suite rather than the registry.
 - Approval is a maintainer review; there is no separate sign-off workflow.

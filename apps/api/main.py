@@ -28,7 +28,7 @@ from apps.api.sessions import InMemorySessionStore
 from config.settings import Settings, get_settings
 from packages.analytics import TabularApplicationService
 from packages.connectors import AuditSink
-from packages.governance import JsonlAuditSink
+from packages.governance import JsonlAuditSink, record_configuration
 from packages.jobs import InMemoryJobStore, InProcessJobExecutor
 from packages.observability import (
     LoggingTelemetrySink,
@@ -238,6 +238,37 @@ def _build_login_service(
     return OidcLoginService(settings=settings, verifier=provider, sessions=sessions)
 
 
+def _record_configuration(settings: Settings, observability: ApiObservability) -> None:
+    """Audit the governed configuration at startup: new or changed values, never secrets."""
+    providers = "+".join(settings.llm_providers) or "none"
+    values: dict[str, str | bool | int | None] = {
+        "llm_providers": providers,
+        "gemini_model": settings.gemini_model,
+        "gemini_model_fast": settings.gemini_model_fast,
+        "anthropic_model": settings.anthropic_model,
+        "ollama_model": settings.ollama_model,
+        "embedding_model": settings.embedding_model,
+        "document_index_backend": settings.document_index_backend,
+        "retrieval_hybrid": settings.retrieval_hybrid,
+        "local_only_mode": settings.local_only_mode,
+        "api_auth_mode": settings.api_auth_mode,
+        "durable_metadata": settings.durable_metadata,
+        "session_retention_hours": settings.session_retention_hours,
+        "sweep_orphaned_workspaces": settings.sweep_orphaned_workspaces,
+        "hosted_recipients": "+".join(settings.hosted_recipients()),
+    }
+    record_configuration(
+        observability.recorder,
+        observability.audit_sink,
+        values,
+        llm_provider=providers,
+        llm_model=settings.gemini_model,
+        authentication_mode=settings.api_auth_mode,
+        local_only_mode=settings.local_only_mode,
+        durable_metadata=settings.durable_metadata,
+    )
+
+
 def _start(app: FastAPI) -> None:
     """Fail closed on unusable storage, optionally sweep orphans, and announce startup."""
     settings: Settings = app.state.settings
@@ -268,6 +299,7 @@ def _start(app: FastAPI) -> None:
                 resource_id=workspace_id,
                 reason="orphan_swept",
             )
+    _record_configuration(settings, observability)
     observability.telemetry.emit(
         "service.started",
         gemini_configured=settings.hosted_model_configured,
