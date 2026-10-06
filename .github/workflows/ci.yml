@@ -70,6 +70,11 @@ jobs:
         # Deterministic and credential-free: scripted model, hashing embedder,
         # real guards. Fails on critical safety checks, regressions, or drift.
         run: python -m scripts.run_evaluations --output evals/results/latest.json
+      - name: Dependency license policy
+        # Python (installed lock) and npm (package-lock.json) licenses against
+        # security/license-policy.toml; see docs/security/license-policy.md.
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: python -m scripts.check_licenses
       - name: Verify and compatibility-check OpenAPI
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         env:
@@ -154,6 +159,43 @@ jobs:
           echo "api image: ${api_bytes} bytes; web image: ${web_bytes} bytes"
           test "${api_bytes}" -lt 4500000000
           test "${web_bytes}" -lt 150000000
+      # Policy and exception process: docs/security/image-scanning.md. The action is pinned to a
+      # commit SHA (Dependabot's github-actions ecosystem keeps it current via the version comment).
+      - name: SBOM for the API image (CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: conversational-bi/api:local
+          format: cyclonedx
+          output: sbom-api.cdx.json
+      - name: SBOM for the web image (CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: conversational-bi/web:local
+          format: cyclonedx
+          output: sbom-web.cdx.json
+      - name: Scan the API image (fixable HIGH and CRITICAL vulnerabilities fail the build)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: conversational-bi/api:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+      - name: Scan the web image (fixable HIGH and CRITICAL vulnerabilities fail the build)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: conversational-bi/web:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+      - name: Upload SBOMs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-sboms
+          path: sbom-*.cdx.json
+          if-no-files-found: ignore
       - name: Start the stack (health-checked)
         run: docker compose up -d --wait --wait-timeout 300
       - name: Smoke test (journey, hardening, restart, audit persistence)

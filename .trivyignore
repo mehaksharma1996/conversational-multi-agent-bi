@@ -1,0 +1,8 @@
+# Reviewed exceptions to the image vulnerability gate (docs/security/image-scanning.md).
+# One identifier per entry, each preceded by a comment with: why it does not apply or is
+# accepted, the compensating control, the reviewer/date, and an expiry (statement
+# `exp:YYYY-MM-DD` after the id makes Trivy stop honouring it on that date).
+#
+# Example:
+#   # CVE-2026-0000: only reachable through the standalone server we do not run. 2026-10-06.
+#   CVE-2026-0000 exp:2026-12-31
