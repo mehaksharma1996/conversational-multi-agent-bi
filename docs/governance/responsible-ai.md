@@ -226,8 +226,10 @@ Implemented:
 
 Limitations:
 
-- API resource metadata is process-local. A restart loses every record, and workspace directories
-  under `APP_DATA_DIR/api/` from before the restart become orphaned until removed manually.
+- With `DURABLE_METADATA=true` (set by Compose; [ADR 0022](../adr/0022-durable-workspace-metadata.md)),
+  workspaces, consent, and uploaded files survive a restart; datasets, analyses, chats, exports, and
+  document indexes are still process-local and are lost, and without the flag every record is lost and the
+  directories are orphaned until swept.
 - Chroma vector storage is not encrypted at rest.
 - There is no retention or rotation policy for the audit files.
 - Deletion is not independently verified beyond the directory no longer existing.
