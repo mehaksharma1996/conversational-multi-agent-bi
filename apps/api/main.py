@@ -131,6 +131,7 @@ def create_app(
         application.state.approval_checkpoints,
         application.state.rate_limiter,
         application.state.embedding_cache,
+        application.state.job_executor,
     )
     application.state.tabular_service = TabularApplicationService()
     active_embedder_factory = embedder_factory or SentenceTransformerEmbedder
@@ -299,6 +300,7 @@ def _workspace_lifecycle_listener(
     approval_checkpoints: ApprovalCheckpoints,
     rate_limiter: InMemoryRateLimiter,
     embedding_cache: EmbeddingVectorCache,
+    job_executor: InProcessJobExecutor,
 ) -> Callable[[str, WorkspaceRecord, str], None]:
     """Audit workspace lifecycle from the stored (server-side) record's tenant."""
 
@@ -307,6 +309,7 @@ def _workspace_lifecycle_listener(
             approval_checkpoints.delete_workspace(workspace.id)
             rate_limiter.delete_workspace(workspace.tenant_id, workspace.id)
             embedding_cache.delete_workspace(workspace.tenant_id, workspace.id)
+            job_executor.purge_workspace(workspace.tenant_id, workspace.id)
         observability.telemetry.emit(
             "workspace.lifecycle",
             tenant_id=workspace.tenant_id,
