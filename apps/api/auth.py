@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from threading import Lock
 from time import monotonic
 from typing import Any, Protocol
@@ -29,6 +30,15 @@ MAX_ROLE_CLAIM_ITEMS = 32
 MAX_ROLE_CHARS = 64
 
 JwksFetcher = Callable[[str, float], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class VerifiedLogin:
+    """Identity facts from a verified ID token; the token itself is never retained."""
+
+    subject: str
+    roles: frozenset[str]
+    expires_at: float
 
 
 class RequestIdentityProvider(Protocol):
@@ -87,18 +97,48 @@ class OidcBearerIdentityProvider:
             or len(bearer_token) > MAX_BEARER_TOKEN_CHARS
         ):
             raise AuthenticationError()
+        claims = self._verified_claims(bearer_token, audience=self._audience)
+        subject = claims["sub"]
+        return IdentityContext(
+            tenant_id=derive_tenant_id(subject),
+            subject=subject,
+            authentication_mode="oidc",
+            roles=_roles_from_claims(claims, self._roles_claim),
+        )
+
+    def verify_id_token(self, id_token: str, *, client_id: str, nonce: str) -> VerifiedLogin:
+        """Verify a code-flow ID token (signature, issuer, client audience, nonce, expiry)."""
+        if not id_token.strip() or len(id_token) > MAX_BEARER_TOKEN_CHARS:
+            raise AuthenticationError()
+        claims = self._verified_claims(id_token, audience=client_id, nonce=nonce)
+        expires_at = claims["exp"]
+        if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+            raise AuthenticationError()
+        return VerifiedLogin(
+            subject=claims["sub"],
+            roles=_roles_from_claims(claims, self._roles_claim),
+            expires_at=float(expires_at),
+        )
+
+    def _verified_claims(
+        self, token_text: str, *, audience: str, nonce: str | None = None
+    ) -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        if nonce is not None:
+            extra["nonce"] = {"essential": True, "value": nonce}
         try:
             token = jwt.decode(
-                bearer_token,
+                token_text,
                 self._get_keys(),
                 algorithms=self._allowed_algorithms,
             )
             JWTClaimsRegistry(
                 leeway=self._clock_skew_seconds,
                 iss={"essential": True, "value": self._issuer},
-                aud={"essential": True, "value": self._audience},
+                aud={"essential": True, "value": audience},
                 sub={"essential": True},
                 exp={"essential": True},
+                **extra,
             ).validate(token.claims)
             subject = token.claims.get("sub")
             if not isinstance(subject, str) or not subject.strip():
@@ -107,12 +147,7 @@ class OidcBearerIdentityProvider:
             raise
         except (JoseError, TypeError, ValueError, UnicodeError) as exc:
             raise AuthenticationError() from exc
-        return IdentityContext(
-            tenant_id=derive_tenant_id(subject),
-            subject=subject,
-            authentication_mode="oidc",
-            roles=_roles_from_claims(token.claims, self._roles_claim),
-        )
+        return dict(token.claims)
 
     def _get_keys(self) -> KeySet:
         now = self._monotonic_clock()

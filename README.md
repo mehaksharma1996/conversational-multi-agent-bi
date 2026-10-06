@@ -320,8 +320,15 @@ or sent to the browser), with `X-CSRF-Token` plus `Origin` (`WEB_ORIGIN`) verifi
 cookie-authenticated state-changing request, `GET /api/v1/auth/session`, and `POST /api/v1/auth/logout`.
 The API sends no CORS headers; the product is same-origin through the nginx proxy.
 
-This is not yet completed browser authentication: sessions can be consumed and ended, but the OAuth
-login/callback that creates them and the React sign-in UI are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
+Sign-in is an authorization-code + PKCE flow run by the API (`GET /api/v1/auth/login`, then
+`/api/v1/auth/callback`). Configure `OIDC_AUTHORIZATION_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`,
+`OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` (`WEB_ORIGIN` + `/api/v1/auth/callback`), and `WEB_ORIGIN` together;
+partial configuration fails startup, and the optional `OIDC_CLIENT_SECRET` belongs only in your untracked
+environment. The callback verifies `state`, a login-binding cookie, the PKCE verifier, and the ID token's
+signature, issuer, audience, expiry, and nonce, then discards every provider token. API and nginx access
+logs omit query strings so authorization codes never reach logs.
+
+Browser authentication is not complete: the React sign-in UI and audit events are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
 Keep the packaged web application loopback-only until those slices are complete.
 
 The developer-only Streamlit compatibility surface supports native OIDC login (`st.login()`/`st.user`) for

@@ -303,3 +303,13 @@ def test_nginx_resolves_the_api_at_request_time_so_upgrades_do_not_strand_the_pr
     assert "resolver 127.0.0.11" in NGINX
     assert "set $api_upstream http://api:8000;" in NGINX
     assert "proxy_pass http://api:8000" not in NGINX
+
+
+def test_access_logs_never_record_query_strings_that_carry_the_oidc_code() -> None:
+    log_format = NGINX.split("log_format path_only", 1)[1].split("server {", 1)[0]
+
+    assert "--no-access-log" in DOCKERFILE_API
+    assert "$uri" in log_format
+    assert "$request " not in log_format and "$request_uri" not in log_format
+    assert "$args" not in log_format and "$query_string" not in log_format
+    assert "access_log /var/log/nginx/access.log path_only;" in NGINX
