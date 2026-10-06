@@ -37,11 +37,18 @@ def test_openapi_declares_bearer_auth_for_api_resources_but_not_health() -> None
         "type": "http",
         "scheme": "bearer",
     }
+    assert contract["components"]["securitySchemes"]["APIKeyCookie"] == {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-bi_session",
+    }
     for path, operations in contract["paths"].items():
         for operation in operations.values():
             if not isinstance(operation, dict) or "responses" not in operation:
                 continue
-            if path.startswith("/api/v1/"):
-                assert operation["security"] == [{"HTTPBearer": []}]
+            if path.startswith("/api/v1/auth/"):
+                assert operation["security"] == [{"APIKeyCookie": []}]
+            elif path.startswith("/api/v1/"):
+                assert operation["security"] == [{"HTTPBearer": []}, {"APIKeyCookie": []}]
             if path.startswith("/health/"):
                 assert "security" not in operation

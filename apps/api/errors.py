@@ -63,6 +63,15 @@ class AuthorizationError(ApiError):
         )
 
 
+class CsrfError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(
+            403,
+            "csrf_failed",
+            "The request could not be verified as coming from the application.",
+        )
+
+
 class AuthenticationUnavailableError(ApiError):
     def __init__(self) -> None:
         super().__init__(

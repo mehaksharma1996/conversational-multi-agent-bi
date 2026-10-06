@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 
 from apps.api.approvals import ApprovalCheckpoints
 from apps.api.auth import RequestIdentityProvider, build_identity_provider
+from apps.api.auth_routes import router as auth_router
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
@@ -17,6 +18,7 @@ from apps.api.models import ErrorResponse, HealthResponse
 from apps.api.observability import ApiObservability
 from apps.api.repository import LocalResourceRepository, WorkspaceRecord
 from apps.api.routes import router
+from apps.api.sessions import InMemorySessionStore
 from config.settings import Settings, get_settings
 from packages.analytics import TabularApplicationService
 from packages.connectors import AuditSink
@@ -42,6 +44,7 @@ def create_app(
     telemetry_sink: TelemetrySink | None = None,
     audit_sink: AuditSink | None = None,
     identity_provider: RequestIdentityProvider | None = None,
+    session_store: InMemorySessionStore | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
@@ -67,6 +70,7 @@ def create_app(
     application.state.identity_provider = identity_provider or build_identity_provider(
         active_settings
     )
+    application.state.session_store = _build_session_store(active_settings, session_store)
     application.state.repository = repository or LocalResourceRepository(
         storage_root=active_settings.app_data_dir / "api",
         retention_hours=active_settings.session_retention_hours,
@@ -134,9 +138,22 @@ def create_app(
             raise ApiError(503, "service_not_ready", "The API is not ready to accept work.")
         return HealthResponse(status="ready")
 
+    application.include_router(auth_router)
     application.include_router(router)
     application.include_router(feature_router)
     return application
+
+
+def _build_session_store(
+    settings: Settings, injected: InMemorySessionStore | None
+) -> InMemorySessionStore | None:
+    """Browser sessions exist only in OIDC mode; local mode never reads a session cookie."""
+    if settings.api_auth_mode != "oidc":
+        return None
+    return injected or InMemorySessionStore(
+        max_age_seconds=settings.session_max_age_seconds,
+        idle_timeout_seconds=settings.session_idle_timeout_seconds,
+    )
 
 
 def _start(app: FastAPI) -> None:

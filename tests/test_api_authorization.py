@@ -36,6 +36,19 @@ def _app(signing_key: RSAKey, name: str) -> FastAPI:
     )
 
 
+# Session endpoints authenticate with the session cookie itself (a caller can only read or end its
+# own session), so they intentionally declare no capability. Any other unprotected route is a bug.
+SESSION_ROUTES = {"/api/v1/auth/session", "/api/v1/auth/logout"}
+
+
+def test_only_the_session_endpoints_are_exempt_from_capabilities(signing_key: RSAKey) -> None:
+    app = _app(signing_key, "authz_session_routes")
+
+    published = {path for path in app.openapi()["paths"] if path.startswith("/api/v1/auth/")}
+
+    assert published == SESSION_ROUTES
+
+
 def _headers(signing_key: RSAKey, subject: str = "user-123", **claims: Any) -> dict[str, str]:
     return {"Authorization": f"Bearer {_token(signing_key, sub=subject, **claims)}"}
 
@@ -52,7 +65,7 @@ def _api_routes(app: FastAPI) -> list[APIRoute]:
     published = {
         (method.upper(), path)
         for path, operations in app.openapi()["paths"].items()
-        if path.startswith("/api/v1")
+        if path.startswith("/api/v1") and path not in SESSION_ROUTES
         for method in operations
     }
     assert declared == published

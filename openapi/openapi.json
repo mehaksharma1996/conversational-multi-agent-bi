@@ -1495,6 +1495,34 @@
         "title": "SchemaMappingUpdateRequest",
         "type": "object"
       },
+      "SessionResponse": {
+        "description": "What the SPA may know: its CSRF value, roles for UI gating, and when the session ends.",
+        "properties": {
+          "csrf_token": {
+            "title": "Csrf Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "csrf_token",
+          "roles",
+          "expires_at"
+        ],
+        "title": "SessionResponse",
+        "type": "object"
+      },
       "SourceResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1643,6 +1671,11 @@
       }
     },
     "securitySchemes": {
+      "APIKeyCookie": {
+        "in": "cookie",
+        "name": "__Host-bi_session",
+        "type": "apiKey"
+      },
       "HTTPBearer": {
         "scheme": "bearer",
         "type": "http"
@@ -1765,6 +1798,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Get Analysis",
@@ -1892,11 +1928,219 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Report",
         "tags": [
           "reports"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "End the current browser session",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/session": {
+      "get": {
+        "operationId": "read_session_api_v1_auth_session_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Describe the current browser session",
+        "tags": [
+          "authentication"
         ]
       }
     },
@@ -2009,6 +2253,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Get Conversation",
@@ -2126,6 +2373,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "List Messages",
@@ -2251,6 +2501,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Message",
@@ -2368,6 +2621,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Get Dataset",
@@ -2495,6 +2751,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Analysis",
@@ -2622,6 +2881,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Confirm Schema Mapping",
@@ -2739,6 +3001,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Get Document Collection",
@@ -2865,6 +3130,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Get Export Content",
@@ -2993,6 +3261,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Decide Sql Approval",
@@ -3120,6 +3391,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Export",
@@ -3257,6 +3531,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Get Report Content",
@@ -3384,6 +3661,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Dataset",
@@ -3501,6 +3781,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "List Workbook Sheets",
@@ -3627,6 +3910,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Workspace",
@@ -3737,6 +4023,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Delete Workspace",
@@ -3852,6 +4141,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Get Workspace",
@@ -3979,6 +4271,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Accept Gemini Consent",
@@ -4106,6 +4401,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Conversation",
@@ -4233,6 +4531,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Create Document Collection",
@@ -4360,6 +4661,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
           }
         ],
         "summary": "Upload Tabular File",

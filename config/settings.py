@@ -58,6 +58,9 @@ class Settings:
     oidc_jwks_cache_seconds: int = 300
     oidc_http_timeout_seconds: float = 5.0
     oidc_roles_claim: str = "roles"
+    web_origin: str | None = None
+    session_max_age_seconds: int = 28_800
+    session_idle_timeout_seconds: int = 1_800
 
     @property
     def audit_dir(self) -> Path:
@@ -75,7 +78,7 @@ class Settings:
 
         oidc_values = (self.oidc_issuer_url, self.oidc_audience, self.oidc_jwks_url)
         if self.api_auth_mode == "local":
-            if any(value is not None for value in oidc_values):
+            if any(value is not None for value in (*oidc_values, self.web_origin)):
                 raise ValueError(
                     "OIDC settings require API_AUTH_MODE=oidc; refusing a silent local fallback."
                 )
@@ -119,6 +122,14 @@ class Settings:
             raise ValueError("OIDC_HTTP_TIMEOUT_SECONDS must be greater than zero.")
         if not self.oidc_roles_claim.strip() or len(self.oidc_roles_claim) > 64:
             raise ValueError("OIDC_ROLES_CLAIM must be a claim name of 1 to 64 characters.")
+        if self.web_origin is not None:
+            _validate_web_origin(self.web_origin)
+        if self.session_idle_timeout_seconds < 60:
+            raise ValueError("API_SESSION_IDLE_TIMEOUT_SECONDS must be at least 60.")
+        if self.session_max_age_seconds < self.session_idle_timeout_seconds:
+            raise ValueError(
+                "API_SESSION_MAX_AGE_SECONDS must not be shorter than the idle timeout."
+            )
 
     @property
     def session_dir(self) -> Path | None:
@@ -182,9 +193,32 @@ def get_settings() -> Settings:
         oidc_jwks_cache_seconds=_positive_int("OIDC_JWKS_CACHE_SECONDS", 300),
         oidc_http_timeout_seconds=_positive_float("OIDC_HTTP_TIMEOUT_SECONDS", 5.0),
         oidc_roles_claim=os.getenv("OIDC_ROLES_CLAIM", "roles").strip() or "roles",
+        web_origin=_optional_text("WEB_ORIGIN"),
+        session_max_age_seconds=_positive_int("API_SESSION_MAX_AGE_SECONDS", 28_800),
+        session_idle_timeout_seconds=_positive_int("API_SESSION_IDLE_TIMEOUT_SECONDS", 1_800),
     )
     settings.validate_identity_configuration()
     return settings
+
+
+def _validate_web_origin(value: str) -> None:
+    """Accept only a bare HTTPS origin; plain HTTP is allowed solely for loopback development."""
+    parsed = urlparse(value)
+    loopback = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    scheme_ok = parsed.scheme == "https" or (parsed.scheme == "http" and loopback)
+    if (
+        not scheme_ok
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            "WEB_ORIGIN must be a bare HTTPS origin (HTTP only for loopback), "
+            "without a path, query, fragment, or credentials."
+        )
 
 
 def _positive_int(name: str, default: int) -> int:
