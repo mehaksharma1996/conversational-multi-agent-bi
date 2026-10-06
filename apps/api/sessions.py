@@ -17,6 +17,8 @@ from threading import Lock
 
 SESSION_COOKIE_NAME = "__Host-bi_session"
 CSRF_HEADER_NAME = "X-CSRF-Token"
+# Attributes shared by every cookie this API sets or clears, so set/delete always match.
+COOKIE_ATTRIBUTES = {"path": "/", "secure": True, "httponly": True, "samesite": "lax"}
 MAX_SESSIONS = 10_000
 _MAX_IDENTIFIER_CHARS = 128
 

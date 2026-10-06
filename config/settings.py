@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -18,6 +18,8 @@ load_dotenv()
 # 0.91-1.0. 0.7 sits in the gap, rejecting off-topic retrieval while still
 # accepting on-topic questions phrased differently from the source text.
 DEFAULT_RETRIEVAL_MAX_DISTANCE = 0.7
+CALLBACK_PATH = "/api/v1/auth/callback"
+_SCOPE_PATTERN = re.compile(r"[A-Za-z0-9._:/-]{1,64}")
 ALLOWED_OIDC_SIGNING_ALGORITHMS = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"})
 
 
@@ -61,6 +63,16 @@ class Settings:
     web_origin: str | None = None
     session_max_age_seconds: int = 28_800
     session_idle_timeout_seconds: int = 1_800
+    oidc_authorization_endpoint: str | None = None
+    oidc_token_endpoint: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = field(default=None, repr=False)
+    oidc_redirect_uri: str | None = None
+    oidc_scopes: tuple[str, ...] = ("openid",)
+
+    @property
+    def oidc_login_configured(self) -> bool:
+        return self.oidc_client_id is not None
 
     @property
     def audit_dir(self) -> Path:
@@ -78,7 +90,15 @@ class Settings:
 
         oidc_values = (self.oidc_issuer_url, self.oidc_audience, self.oidc_jwks_url)
         if self.api_auth_mode == "local":
-            if any(value is not None for value in (*oidc_values, self.web_origin)):
+            if any(
+                value is not None
+                for value in (
+                    *oidc_values,
+                    self.web_origin,
+                    *self._login_values(),
+                    self.oidc_client_secret,
+                )
+            ):
                 raise ValueError(
                     "OIDC settings require API_AUTH_MODE=oidc; refusing a silent local fallback."
                 )
@@ -124,12 +144,75 @@ class Settings:
             raise ValueError("OIDC_ROLES_CLAIM must be a claim name of 1 to 64 characters.")
         if self.web_origin is not None:
             _validate_web_origin(self.web_origin)
+        self._validate_login_configuration()
         if self.session_idle_timeout_seconds < 60:
             raise ValueError("API_SESSION_IDLE_TIMEOUT_SECONDS must be at least 60.")
         if self.session_max_age_seconds < self.session_idle_timeout_seconds:
             raise ValueError(
                 "API_SESSION_MAX_AGE_SECONDS must not be shorter than the idle timeout."
             )
+
+    def _login_values(self) -> tuple[str | None, ...]:
+        return (
+            self.oidc_authorization_endpoint,
+            self.oidc_token_endpoint,
+            self.oidc_client_id,
+            self.oidc_redirect_uri,
+        )
+
+    def _validate_login_configuration(self) -> None:
+        """Browser login is all-or-nothing; partial configuration fails startup."""
+        if all(value is None for value in self._login_values()):
+            if self.oidc_client_secret is not None:
+                raise ValueError("OIDC_CLIENT_SECRET requires the browser login settings.")
+            return
+        missing = [
+            name
+            for name, value in (
+                ("OIDC_AUTHORIZATION_ENDPOINT", self.oidc_authorization_endpoint),
+                ("OIDC_TOKEN_ENDPOINT", self.oidc_token_endpoint),
+                ("OIDC_CLIENT_ID", self.oidc_client_id),
+                ("OIDC_REDIRECT_URI", self.oidc_redirect_uri),
+                ("WEB_ORIGIN", self.web_origin),
+            )
+            if value is None or not value.strip()
+        ]
+        if missing:
+            raise ValueError(f"Browser login requires: {', '.join(missing)}.")
+        assert self.oidc_authorization_endpoint and self.oidc_token_endpoint
+        assert self.oidc_redirect_uri and self.web_origin and self.oidc_client_id
+        for name, value in (
+            ("OIDC_AUTHORIZATION_ENDPOINT", self.oidc_authorization_endpoint),
+            ("OIDC_TOKEN_ENDPOINT", self.oidc_token_endpoint),
+        ):
+            parsed = urlparse(value)
+            if (
+                parsed.scheme != "https"
+                or not parsed.netloc
+                or parsed.username is not None
+                or parsed.fragment
+            ):
+                raise ValueError(f"{name} must be an HTTPS URL without credentials or fragment.")
+        redirect = urlparse(self.oidc_redirect_uri)
+        origin = urlparse(self.web_origin)
+        if (
+            (redirect.scheme, redirect.netloc) != (origin.scheme, origin.netloc)
+            or redirect.path != CALLBACK_PATH
+            or redirect.query
+            or redirect.fragment
+        ):
+            raise ValueError(
+                f"OIDC_REDIRECT_URI must be WEB_ORIGIN plus {CALLBACK_PATH}, "
+                "with no query or fragment."
+            )
+        if "openid" not in self.oidc_scopes or any(
+            not _SCOPE_PATTERN.fullmatch(scope) for scope in self.oidc_scopes
+        ):
+            raise ValueError("OIDC_SCOPES must include 'openid' and contain only scope tokens.")
+        if len(self.oidc_client_id) > 256 or (
+            self.oidc_client_secret is not None and not self.oidc_client_secret.strip()
+        ):
+            raise ValueError("OIDC_CLIENT_ID or OIDC_CLIENT_SECRET is invalid.")
 
     @property
     def session_dir(self) -> Path | None:
@@ -196,6 +279,12 @@ def get_settings() -> Settings:
         web_origin=_optional_text("WEB_ORIGIN"),
         session_max_age_seconds=_positive_int("API_SESSION_MAX_AGE_SECONDS", 28_800),
         session_idle_timeout_seconds=_positive_int("API_SESSION_IDLE_TIMEOUT_SECONDS", 1_800),
+        oidc_authorization_endpoint=_optional_text("OIDC_AUTHORIZATION_ENDPOINT"),
+        oidc_token_endpoint=_optional_text("OIDC_TOKEN_ENDPOINT"),
+        oidc_client_id=_optional_text("OIDC_CLIENT_ID"),
+        oidc_client_secret=_optional_text("OIDC_CLIENT_SECRET"),
+        oidc_redirect_uri=_optional_text("OIDC_REDIRECT_URI"),
+        oidc_scopes=_scopes("OIDC_SCOPES"),
     )
     settings.validate_identity_configuration()
     return settings
@@ -257,6 +346,13 @@ def _optional_text(name: str) -> str | None:
     if raw is None or not raw.strip():
         return None
     return raw.strip()
+
+
+def _scopes(name: str) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return ("openid",)
+    return tuple(raw.split())
 
 
 def _csv_values(name: str, default: tuple[str, ...]) -> tuple[str, ...]:

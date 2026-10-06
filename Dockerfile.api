@@ -80,4 +80,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
 
 # Exec form so uvicorn is PID 1's child under `init: true` and receives SIGTERM;
 # in-flight requests get 20 seconds to finish before shutdown.
-CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header", "--timeout-graceful-shutdown", "20"]
+CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header", "--no-access-log", "--timeout-graceful-shutdown", "20"]

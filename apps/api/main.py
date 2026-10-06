@@ -16,6 +16,7 @@ from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
 from apps.api.models import ErrorResponse, HealthResponse
 from apps.api.observability import ApiObservability
+from apps.api.oidc_login import IdTokenVerifier, OidcLoginService
 from apps.api.repository import LocalResourceRepository, WorkspaceRecord
 from apps.api.routes import router
 from apps.api.sessions import InMemorySessionStore
@@ -45,6 +46,7 @@ def create_app(
     audit_sink: AuditSink | None = None,
     identity_provider: RequestIdentityProvider | None = None,
     session_store: InMemorySessionStore | None = None,
+    login_service: OidcLoginService | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
@@ -71,6 +73,12 @@ def create_app(
         active_settings
     )
     application.state.session_store = _build_session_store(active_settings, session_store)
+    application.state.login_service = _build_login_service(
+        active_settings,
+        application.state.identity_provider,
+        application.state.session_store,
+        login_service,
+    )
     application.state.repository = repository or LocalResourceRepository(
         storage_root=active_settings.app_data_dir / "api",
         retention_hours=active_settings.session_retention_hours,
@@ -154,6 +162,22 @@ def _build_session_store(
         max_age_seconds=settings.session_max_age_seconds,
         idle_timeout_seconds=settings.session_idle_timeout_seconds,
     )
+
+
+def _build_login_service(
+    settings: Settings,
+    provider: object,
+    sessions: InMemorySessionStore | None,
+    injected: OidcLoginService | None,
+) -> OidcLoginService | None:
+    """Enable browser sign-in only when fully configured; never half-enabled."""
+    if injected is not None:
+        return injected
+    if not settings.oidc_login_configured:
+        return None
+    if sessions is None or not isinstance(provider, IdTokenVerifier):
+        raise ValueError("Browser sign-in requires the OIDC identity provider and session store.")
+    return OidcLoginService(settings=settings, verifier=provider, sessions=sessions)
 
 
 def _start(app: FastAPI) -> None:
