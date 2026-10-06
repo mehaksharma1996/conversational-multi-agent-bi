@@ -31,8 +31,8 @@ unsafe-contention defect).
 4. **Define the job contract before any operation is made asynchronous** (slice #10b), as a
    framework-neutral package executed by a bounded in-process executor: tenant-owned records with owner,
    operation, status (`queued`, `running`, `succeeded`, `failed`, `cancelled`, `expired`), progress,
-   result or safe error, idempotency key, creation/expiry time, retry count, cancellation state, and the
-   originating request ID for correlation. Terminal states are final; a retry creates a new attempt of
+   result or safe error, an idempotency scope with a request fingerprint, creation and expiry times,
+   retry count, cancellation state, and the originating request ID for correlation. Terminal states are final; a retry creates a new attempt of
    the same job only from `failed`; cancellation is best effort and explicit per operation. Execution
    concurrency is capped globally so memory is bounded. The contract must not carry user content
    (questions, rows, document text) in records, telemetry, or audit.
