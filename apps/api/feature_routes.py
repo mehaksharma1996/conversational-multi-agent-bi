@@ -8,6 +8,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from apps.api.approvals import ApprovalCheckpoints
@@ -215,7 +216,10 @@ async def create_document_collection(
             identity,
             size_bytes=total_bytes,
         ) as operation:
-            indexed = service.index(
+            # Extraction, embedding, and index writes are blocking and can run for many seconds;
+            # keep them off the event loop so health checks and other requests stay responsive.
+            indexed = await run_in_threadpool(
+                service.index,
                 IndexDocumentsCommand(
                     documents=tuple(payloads),
                     persist_dir=repository.workspace_dir(workspace_id, identity.tenant_id)
@@ -236,7 +240,7 @@ async def create_document_collection(
                     pgvector_auto_migrate=settings.postgres_auto_migrate,
                     cache_tenant_id=identity.tenant_id,
                     cache_workspace_id=workspace_id,
-                )
+                ),
             )
             operation.set(
                 document_count=len(indexed.filenames),
