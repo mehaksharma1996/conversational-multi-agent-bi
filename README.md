@@ -314,9 +314,14 @@ nothing and receive a 403 `permission_denied`. Local mode explicitly grants ever
 loopback-only development user; no other mode receives implicit permissions. Headers, query strings, and
 bodies never supply tenant, role, or capability.
 
-This is API authentication and authorization, not completed browser authentication. The bundled React
-client does not yet run an OAuth redirect/callback or attach tokens, and logout, CSRF, and the
-final CORS policy remain [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
+Browser transport follows [ADR 0013](docs/adr/0013-browser-authentication-transport.md): a backend
+session in an opaque `__Host-` HttpOnly, Secure, SameSite=Lax cookie (provider tokens are never stored
+or sent to the browser), with `X-CSRF-Token` plus `Origin` (`WEB_ORIGIN`) verification on every
+cookie-authenticated state-changing request, `GET /api/v1/auth/session`, and `POST /api/v1/auth/logout`.
+The API sends no CORS headers; the product is same-origin through the nginx proxy.
+
+This is not yet completed browser authentication: sessions can be consumed and ended, but the OAuth
+login/callback that creates them and the React sign-in UI are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
 Keep the packaged web application loopback-only until those slices are complete.
 
 The developer-only Streamlit compatibility surface supports native OIDC login (`st.login()`/`st.user`) for
