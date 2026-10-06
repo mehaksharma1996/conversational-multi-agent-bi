@@ -1,5 +1,27 @@
 # Repository Guidance
 
+## Codex Five-Hour Usage Guardrail
+
+- Use the account-level five-hour **Usage remaining** percentage as the control signal. The weekly
+  percentage does not trigger this guardrail unless the user explicitly says otherwise.
+- Check the five-hour percentage before starting material issue work and again after substantial
+  implementation or verification milestones. Use an available first-party usage-status capability.
+  If the percentage cannot be read programmatically, tell the user and ask for the current five-hour
+  percentage before starting or continuing substantial changes.
+- Above 15% remaining, work normally.
+- At or below 15% remaining, do not start a new issue or substantial subtask. Finish the current
+  atomic operation and prepare to wrap up.
+- At or below 10% remaining, make no additional tracked-file changes, including code, tests,
+  documentation, configuration, generated files, dependency files, or formatting changes. Only:
+  1. run appropriate verification that does not intentionally modify tracked files;
+  2. review and commit the work already completed;
+  3. push the branch to the repository; and
+  4. provide a complete Claude Code handoff prompt containing the objective, branch and commit,
+     completed changes, verification results, known failures or risks, remaining work, and exact
+     recommended next steps.
+- Git commit and push operations and writing the handoff response are allowed after the 10% cutoff;
+  new implementation changes are not.
+
 ## Project Purpose
 
 This is a conversational business intelligence application for uploaded CSV,
