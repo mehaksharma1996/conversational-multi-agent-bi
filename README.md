@@ -296,6 +296,15 @@ Which uploaded transactions appear to match the escalation policy?
 The final question activates the hybrid route when both table data and document
 context are available.
 
+## MCP server
+
+`python -m apps.mcp` exposes one dataset (and optionally its indexed PDFs) to an MCP host over stdio with
+three read-only tools: `get_dataset_profile`, `query_table` (one guarded `SELECT`), and `search_documents`.
+It reuses the same SQL guard and retriever as the API, fixes tenant and data scope in server configuration
+(no tool argument can change them), labels every result as untrusted data with provenance, and has no write
+tools. See [docs/operations/mcp-server.md](docs/operations/mcp-server.md) and
+[ADR 0014](docs/adr/0014-mcp-server.md).
+
 ## Authentication
 
 The FastAPI boundary has two explicit identity modes. The default `API_AUTH_MODE=local` uses one

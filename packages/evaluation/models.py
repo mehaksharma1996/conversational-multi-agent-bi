@@ -27,6 +27,10 @@ CRITICAL_CHECKS: frozenset[str] = frozenset(
         "isolation.audit_stream_separated",
         "isolation.client_tenant_ignored",
         "isolation.audit_tenant_trusted",
+        "mcp.poisoned_content_untrusted",
+        "mcp.destructive_sql_rejected",
+        "mcp.scope_not_client_selectable",
+        "mcp.output_bounded",
     }
 )
 

@@ -58,6 +58,7 @@ AUDIT_ACTIONS: frozenset[str] = frozenset(
         "auth.logout",
         "auth.csrf_rejected",
         "authz.denied",
+        "mcp.tool_executed",
     }
 )
 
@@ -74,6 +75,7 @@ AUDIT_ATTRIBUTES: dict[str, str] = {
     "route": "token",
     "outcome": "token",
     "capability": "token",
+    "tool": "token",
     "error_category": "token",
     "format": "token",
     "size_bytes": "int",

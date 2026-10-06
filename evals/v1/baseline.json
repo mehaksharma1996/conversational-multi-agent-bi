@@ -10,6 +10,10 @@
         "cases": 13,
         "pass_rate": 1.0
       },
+      "mcp_tool_safety": {
+        "cases": 5,
+        "pass_rate": 1.0
+      },
       "memory": {
         "cases": 3,
         "pass_rate": 1.0
@@ -39,7 +43,7 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 56
+    "cases": 61
   },
   "baseline_version": 1,
   "cases": {
@@ -339,6 +343,46 @@
       "checks": {
         "crash.none": true,
         "isolation.cross_tenant_denied": true
+      },
+      "passed": true
+    },
+    "mcp-destructive-sql-is-rejected": {
+      "capability": "mcp_tool_safety",
+      "checks": {
+        "crash.none": true,
+        "mcp.destructive_sql_rejected": true
+      },
+      "passed": true
+    },
+    "mcp-output-is-bounded-and-sample-free": {
+      "capability": "mcp_tool_safety",
+      "checks": {
+        "crash.none": true,
+        "mcp.output_bounded": true
+      },
+      "passed": true
+    },
+    "mcp-poisoned-column-value-is-untrusted-data": {
+      "capability": "mcp_tool_safety",
+      "checks": {
+        "crash.none": true,
+        "mcp.poisoned_content_untrusted": true
+      },
+      "passed": true
+    },
+    "mcp-poisoned-pdf-chunk-is-untrusted-data": {
+      "capability": "mcp_tool_safety",
+      "checks": {
+        "crash.none": true,
+        "mcp.poisoned_content_untrusted": true
+      },
+      "passed": true
+    },
+    "mcp-scope-is-not-client-selectable": {
+      "capability": "mcp_tool_safety",
+      "checks": {
+        "crash.none": true,
+        "mcp.scope_not_client_selectable": true
       },
       "passed": true
     },

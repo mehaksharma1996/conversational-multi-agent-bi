@@ -20,6 +20,7 @@ React/FastAPI runtime became the primary local product.
 | [0011](0011-streamlit-disposition.md) | Retain Streamlit as a developer-only compatibility surface | Accepted |
 | [0012](0012-deliberate-non-goals.md) | Deliberate non-goals for the local BI product | Accepted |
 | [0013](0013-browser-authentication-transport.md) | Browser authentication transport (BFF session, CSRF, no CORS) | Accepted |
+| [0014](0014-mcp-server.md) | Read-only MCP server over the guarded data core (stdio) | Accepted |
 
 ## ADR lifecycle
 

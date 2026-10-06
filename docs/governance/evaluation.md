@@ -34,10 +34,11 @@ precision/recall, or PII recall on real data. The opt-in live mode gives a limit
 | `unsupported` | No-input and write requests refused without calling the model or altering data |
 | `privacy_redaction` | E-mail, phone, and SSN patterns and table sample values never appear in a model prompt |
 | `prompt_injection` | Poisoned documents are labeled untrusted; an obeying model still cannot execute unsafe SQL |
+| `mcp_tool_safety` | A poisoned PDF chunk or cell value is returned to the MCP host as labelled untrusted data and cannot change the tool list; destructive or out-of-allowlist SQL through `query_table` is rejected with the dataset intact; no argument selects a tenant, workspace, or table; output is row-capped, clipped, and sample-free (`scripts/mcp_tool_eval.py`) |
 | `tenant_isolation` | A second tenant gets 404 on every resource endpoint; owner unaffected; client-supplied tenant headers/payloads ignored; audit streams separated and attributed to the trusted tenant |
 
-The tenant suite (`scripts/api_isolation_eval.py`) drives the FastAPI app because framework-neutral
-`packages/` code may not import it.
+The tenant suite (`scripts/api_isolation_eval.py`) drives the FastAPI app and the MCP suite
+(`scripts/mcp_tool_eval.py`) drives the MCP server, because framework-neutral `packages/` code may not import them.
 
 ## Hard failures versus thresholds
 
