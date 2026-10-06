@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import RLock
-from typing import cast
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import pandas as pd
@@ -19,6 +20,9 @@ from apps.api.errors import ResourceNotFoundError
 from apps.api.metadata_store import (
     MetadataCorruptError,
     MetadataStore,
+    StoredAnalysis,
+    StoredDataset,
+    StoredReport,
     StoredUpload,
     StoredWorkspace,
     file_sha256,
@@ -33,8 +37,10 @@ from src.ingestion.tabular_loader import LoadedTable
 from src.memory.session_memory import SessionMemory
 from src.orchestration.graph_state import AnswerDiagnostics
 from src.profiling.data_profiler import DataProfile
-from src.profiling.schema_mapper import SchemaMapping
+from src.profiling.schema_mapper import FieldMapping, SchemaMapping
 from src.storage.sqlite_store import StoredTable
+
+LOGGER = logging.getLogger(__name__)
 
 _TENANT_DIR = re.compile(r"[a-f0-9]{32}")
 _WORKSPACE_DIR = re.compile(r"ws_[a-f0-9]{32}")
@@ -62,6 +68,65 @@ class RecoveryReport:
     uploads_dropped: int = 0
     rows_invalid: int = 0
     metadata_quarantined: bool = False
+    datasets_pending: int = 0
+    analyses_pending: int = 0
+    reports_pending: int = 0
+
+
+class ResourceRehydrator(Protocol):
+    """Rebuilds derived resources from persisted inputs (see ``apps/api/rehydration.py``)."""
+
+    def load_table(
+        self, payload: bytes, filename: str, sheet: str | int
+    ) -> tuple[LoadedTable, DataProfile]: ...
+
+    def save_table(
+        self, workspace_dir: Path, table: LoadedTable, mapping: SchemaMapping
+    ) -> StoredTable: ...
+
+    def analyze(
+        self,
+        table: LoadedTable,
+        profile: DataProfile,
+        mapping: SchemaMapping,
+        anomaly_features: tuple[str, ...],
+        anomaly_contamination: float,
+    ) -> tuple[AnalysisBundle, SessionMemory]: ...
+
+
+@dataclass
+class _PendingWorkspace:
+    """Persisted resource rows for one workspace, rebuilt on its first use after a restart."""
+
+    datasets: list[StoredDataset] = field(default_factory=list)
+    analyses: list[StoredAnalysis] = field(default_factory=list)
+    reports: list[StoredReport] = field(default_factory=list)
+
+
+def _mapping_to_json(mapping: SchemaMapping) -> dict[str, dict[str, Any]]:
+    return {
+        name: {
+            "canonical_field": item.canonical_field,
+            "source_column": item.source_column,
+            "confidence": item.confidence,
+            "reason": item.reason,
+        }
+        for name, item in mapping.mappings.items()
+    }
+
+
+def _mapping_from_json(raw: dict[str, dict[str, Any]]) -> SchemaMapping:
+    return SchemaMapping(
+        {
+            name: FieldMapping(
+                canonical_field=str(item["canonical_field"]),
+                source_column=item["source_column"],
+                confidence=float(item["confidence"]),
+                reason=str(item["reason"]),
+            )
+            for name, item in raw.items()
+        }
+    )
 
 
 WorkspaceLifecycleListener = Callable[[str, "WorkspaceRecord", str], None]
@@ -74,6 +139,21 @@ def _resource_id(prefix: str) -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _stored_dataset(dataset: DatasetRecord, requested_sheet: str | int) -> StoredDataset:
+    return StoredDataset(
+        id=dataset.id,
+        workspace_id=dataset.workspace_id,
+        tenant_id=dataset.tenant_id,
+        upload_id=dataset.upload_id,
+        requested_sheet=requested_sheet,
+        schema_mapping=_mapping_to_json(dataset.schema_mapping),
+        recommended_features=dataset.recommended_anomaly_features,
+        mapping_confirmed=dataset.mapping_confirmed,
+        mapping_version=dataset.mapping_version,
+        created_at=dataset.created_at,
+    )
 
 
 def _stored_workspace(workspace: WorkspaceRecord) -> StoredWorkspace:
@@ -236,6 +316,10 @@ class LocalResourceRepository:
         self._store = metadata_store
         self._persisted_expiry: dict[str, datetime] = {}
         self._lazy_uploads: dict[str, StoredUpload] = {}
+        self.rehydrator: ResourceRehydrator | None = None
+        self._pending: dict[str, _PendingWorkspace] = {}
+        self._pending_index: dict[str, str] = {}
+        self._requested_sheets: dict[str, str | int] = {}
         self.lifecycle_listener: WorkspaceLifecycleListener | None = None
         self.storage_root = (storage_root or Path("data/api")).resolve()
         self.retention_hours = retention_hours
@@ -294,6 +378,7 @@ class LocalResourceRepository:
             self._uploads.clear()
             self._lazy_uploads.clear()
             self._persisted_expiry.clear()
+            self._requested_sheets.clear()
             now = _now()
             invalid = 0
             expired: list[WorkspaceRecord] = []
@@ -358,6 +443,9 @@ class LocalResourceRepository:
                     created_at=stored_upload.created_at,
                 )
                 restored_uploads += 1
+            self._pending.clear()
+            self._pending_index.clear()
+            pending_datasets, pending_analyses, pending_reports = self._load_pending_unlocked(store)
             for workspace in expired:
                 self._delete_workspace_unlocked(workspace, "retention_expired")
             return RecoveryReport(
@@ -370,7 +458,150 @@ class LocalResourceRepository:
                 uploads_dropped=dropped_uploads,
                 rows_invalid=invalid,
                 metadata_quarantined=quarantined,
+                datasets_pending=pending_datasets,
+                analyses_pending=pending_analyses,
+                reports_pending=pending_reports,
             )
+
+    def _load_pending_unlocked(self, store: MetadataStore) -> tuple[int, int, int]:
+        """Index persisted dataset, analysis, and report rows; they are rebuilt on first use."""
+        counts = [0, 0, 0]
+        for dataset in store.load_datasets():
+            owner = self._workspaces.get(dataset.workspace_id)
+            if owner is None or owner.tenant_id != dataset.tenant_id:
+                continue
+            self._pending.setdefault(owner.id, _PendingWorkspace()).datasets.append(dataset)
+            self._pending_index[dataset.id] = owner.id
+            counts[0] += 1
+        for analysis in store.load_analyses():
+            owner = self._workspaces.get(analysis.workspace_id)
+            if owner is None or owner.tenant_id != analysis.tenant_id:
+                continue
+            self._pending.setdefault(owner.id, _PendingWorkspace()).analyses.append(analysis)
+            self._pending_index[analysis.id] = owner.id
+            counts[1] += 1
+        for report in store.load_reports():
+            owner = self._workspaces.get(report.workspace_id)
+            if owner is None or owner.tenant_id != report.tenant_id:
+                continue
+            self._pending.setdefault(owner.id, _PendingWorkspace()).reports.append(report)
+            self._pending_index[report.id] = owner.id
+            counts[2] += 1
+        return counts[0], counts[1], counts[2]
+
+    def _hydrate_workspace_unlocked(self, workspace_id: str) -> None:
+        """Rebuild a workspace's datasets, analyses, and reports from persisted inputs.
+
+        Everything is derived deterministically from the stored upload, the confirmed mapping, and
+        the analysis parameters, so nothing heavy is serialised. An item that cannot be rebuilt
+        (missing or corrupt upload, a parser or limit change) is dropped together with what depends
+        on it, and the failure is logged by category only.
+        """
+        rehydrator = self.rehydrator
+        store = self._store
+        if rehydrator is None or store is None:
+            return
+        pending = self._pending.pop(workspace_id, None)
+        if pending is None:
+            return
+        for resource_id in (
+            *(row.id for row in pending.datasets),
+            *(row.id for row in pending.analyses),
+            *(row.id for row in pending.reports),
+        ):
+            self._pending_index.pop(resource_id, None)
+        dropped = 0
+        for dataset_row in pending.datasets:
+            try:
+                upload = self._upload_with_payload_unlocked(dataset_row.upload_id)
+                table, profile = rehydrator.load_table(
+                    upload.payload, upload.filename, dataset_row.requested_sheet
+                )
+                mapping = _mapping_from_json(dataset_row.schema_mapping)
+                stored_table = (
+                    rehydrator.save_table(
+                        self._workspace_path(dataset_row.tenant_id, dataset_row.workspace_id),
+                        table,
+                        mapping,
+                    )
+                    if dataset_row.mapping_confirmed
+                    else None
+                )
+            except Exception as exc:
+                LOGGER.warning("dataset recovery failed: %s", type(exc).__name__)
+                store.delete_dataset(dataset_row.id)
+                dropped += 1
+                continue
+            self._requested_sheets[dataset_row.id] = dataset_row.requested_sheet
+            self._datasets[dataset_row.id] = DatasetRecord(
+                id=dataset_row.id,
+                workspace_id=dataset_row.workspace_id,
+                upload_id=dataset_row.upload_id,
+                tenant_id=dataset_row.tenant_id,
+                table=table,
+                profile=profile,
+                schema_mapping=mapping,
+                recommended_anomaly_features=dataset_row.recommended_features,
+                mapping_confirmed=dataset_row.mapping_confirmed,
+                mapping_version=dataset_row.mapping_version,
+                stored_table=stored_table,
+                created_at=dataset_row.created_at,
+            )
+        for analysis_row in pending.analyses:
+            dataset = self._datasets.get(analysis_row.dataset_id)
+            if dataset is None:
+                store.delete_analysis(analysis_row.id)
+                dropped += 1
+                continue
+            try:
+                bundle, memory = rehydrator.analyze(
+                    dataset.table,
+                    dataset.profile,
+                    _mapping_from_json(analysis_row.schema_mapping),
+                    analysis_row.anomaly_features,
+                    analysis_row.anomaly_contamination,
+                )
+            except Exception as exc:
+                LOGGER.warning("analysis recovery failed: %s", type(exc).__name__)
+                store.delete_analysis(analysis_row.id)
+                dropped += 1
+                continue
+            self._analyses[analysis_row.id] = AnalysisRecord(
+                id=analysis_row.id,
+                workspace_id=analysis_row.workspace_id,
+                dataset_id=analysis_row.dataset_id,
+                tenant_id=analysis_row.tenant_id,
+                dataset_mapping_version=analysis_row.mapping_version,
+                anomaly_contamination=analysis_row.anomaly_contamination,
+                bundle=bundle,
+                memory=memory,
+                created_at=analysis_row.created_at,
+            )
+        for report_row in pending.reports:
+            analysis = self._analyses.get(report_row.analysis_id)
+            if analysis is None:
+                store.delete_report(report_row.id)
+                dropped += 1
+                continue
+            self._reports[report_row.id] = ReportRecord(
+                id=report_row.id,
+                analysis_id=analysis.id,
+                workspace_id=report_row.workspace_id,
+                tenant_id=report_row.tenant_id,
+                report=analysis.bundle.business_report,
+                chart_specs=tuple(analysis.bundle.chart_specs),
+                include_charts=report_row.include_charts,
+                created_at=report_row.created_at,
+            )
+        if dropped:
+            LOGGER.warning("recovery dropped %d resource(s) that could not be rebuilt", dropped)
+
+    def _workspace_path(self, tenant_id: str, workspace_id: str) -> Path:
+        target = (self.storage_root / tenant_id / workspace_id).resolve()
+        if not target.is_relative_to(self.storage_root):
+            raise ValueError("Refusing to use storage outside the API data directory.")
+        target.mkdir(parents=True, exist_ok=True)
+        return target
 
     def _upload_path(self, tenant_id: str, workspace_id: str, upload_id: str) -> Path | None:
         """Where an upload payload lives, or None if the identifiers would escape the root."""
@@ -489,11 +720,7 @@ class LocalResourceRepository:
 
     def workspace_dir(self, workspace_id: str, tenant_id: str) -> Path:
         workspace = self.get_workspace(workspace_id, tenant_id)
-        target = (self.storage_root / workspace.tenant_id / workspace.id).resolve()
-        if not target.is_relative_to(self.storage_root):
-            raise ValueError("Refusing to use storage outside the API data directory.")
-        target.mkdir(parents=True, exist_ok=True)
-        return target
+        return self._workspace_path(workspace.tenant_id, workspace.id)
 
     def create_upload(
         self,
@@ -540,15 +767,22 @@ class LocalResourceRepository:
 
     def get_upload(self, upload_id: str, tenant_id: str) -> TabularUploadRecord:
         with self._lock:
-            upload = self._owned(self._uploads, upload_id, tenant_id, "Tabular upload")
-            stored = self._lazy_uploads.get(upload_id)
-            if stored is None:
-                return upload
-            path = self._upload_path(stored.tenant_id, stored.workspace_id, stored.id)
-            if path is None or not path.is_file() or file_sha256(path) != stored.sha256:
-                self._drop_upload_unlocked(upload_id)
-                raise ResourceNotFoundError("Tabular upload")
-            return replace(upload, payload=path.read_bytes())
+            self._owned(self._uploads, upload_id, tenant_id, "Tabular upload")
+            return self._upload_with_payload_unlocked(upload_id)
+
+    def _upload_with_payload_unlocked(self, upload_id: str) -> TabularUploadRecord:
+        """An upload with its payload; a recovered one is read back and digest-checked."""
+        upload = self._uploads.get(upload_id)
+        if upload is None:
+            raise ResourceNotFoundError("Tabular upload")
+        stored = self._lazy_uploads.get(upload_id)
+        if stored is None:
+            return upload
+        path = self._upload_path(stored.tenant_id, stored.workspace_id, stored.id)
+        if path is None or not path.is_file() or file_sha256(path) != stored.sha256:
+            self._drop_upload_unlocked(upload_id)
+            raise ResourceNotFoundError("Tabular upload")
+        return replace(upload, payload=path.read_bytes())
 
     def _drop_upload_unlocked(self, upload_id: str) -> None:
         """Forget an upload whose payload is missing or fails its checksum (partial state)."""
@@ -568,6 +802,7 @@ class LocalResourceRepository:
         profile: DataProfile,
         schema_mapping: SchemaMapping,
         recommended_anomaly_features: tuple[str, ...],
+        requested_sheet: str | int = 0,
     ) -> DatasetRecord:
         with self._lock:
             self._owned(self._uploads, upload.id, upload.tenant_id, "Tabular upload")
@@ -585,6 +820,9 @@ class LocalResourceRepository:
                 stored_table=None,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.save_dataset(_stored_dataset(dataset, requested_sheet))
+                self._requested_sheets[dataset.id] = requested_sheet
             self._datasets[dataset.id] = dataset
             return dataset
 
@@ -610,6 +848,10 @@ class LocalResourceRepository:
                 mapping_version=dataset.mapping_version + 1,
                 stored_table=stored_table,
             )
+            if self._store is not None:
+                self._store.save_dataset(
+                    _stored_dataset(updated, self._requested_sheets.get(dataset_id, 0))
+                )
             self._datasets[dataset_id] = updated
             return updated
 
@@ -619,6 +861,7 @@ class LocalResourceRepository:
         anomaly_contamination: float,
         bundle: AnalysisBundle,
         memory: SessionMemory,
+        anomaly_features: tuple[str, ...] = (),
     ) -> AnalysisRecord:
         with self._lock:
             current = self._owned(self._datasets, dataset.id, dataset.tenant_id, "Dataset")
@@ -633,6 +876,20 @@ class LocalResourceRepository:
                 memory=memory,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.save_analysis(
+                    StoredAnalysis(
+                        id=analysis.id,
+                        workspace_id=analysis.workspace_id,
+                        tenant_id=analysis.tenant_id,
+                        dataset_id=analysis.dataset_id,
+                        mapping_version=analysis.dataset_mapping_version,
+                        schema_mapping=_mapping_to_json(current.schema_mapping),
+                        anomaly_contamination=anomaly_contamination,
+                        anomaly_features=anomaly_features,
+                        created_at=analysis.created_at,
+                    )
+                )
             self._analyses[analysis.id] = analysis
             return analysis
 
@@ -937,6 +1194,17 @@ class LocalResourceRepository:
                 include_charts=include_charts,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.save_report(
+                    StoredReport(
+                        id=record.id,
+                        workspace_id=record.workspace_id,
+                        tenant_id=record.tenant_id,
+                        analysis_id=record.analysis_id,
+                        include_charts=include_charts,
+                        created_at=record.created_at,
+                    )
+                )
             self._reports[record.id] = record
             return record
 
@@ -1047,6 +1315,16 @@ class LocalResourceRepository:
 
         self._workspaces.pop(workspace.id, None)
         self._persisted_expiry.pop(workspace.id, None)
+        discarded = self._pending.pop(workspace.id, None)
+        if discarded is not None:
+            for row_id in (
+                *(row.id for row in discarded.datasets),
+                *(row.id for row in discarded.analyses),
+                *(row.id for row in discarded.reports),
+            ):
+                self._pending_index.pop(row_id, None)
+        for dataset_id in [key for key in self._requested_sheets if key not in self._datasets]:
+            self._requested_sheets.pop(dataset_id, None)
         for creation_key, value in list(self._workspace_creation_keys.items()):
             if value == workspace.id:
                 self._workspace_creation_keys.pop(creation_key)
@@ -1071,6 +1349,11 @@ class LocalResourceRepository:
         tenant_id: str,
         resource_name: str,
     ) -> RecordT:
+        pending_workspace = self._pending_index.get(resource_id)
+        if pending_workspace is not None:
+            owner = self._workspaces.get(pending_workspace)
+            if owner is not None and owner.expires_at > _now():
+                self._hydrate_workspace_unlocked(pending_workspace)
         record = records.get(resource_id)
         if record is None or getattr(record, "tenant_id", None) != tenant_id:
             raise ResourceNotFoundError(resource_name)

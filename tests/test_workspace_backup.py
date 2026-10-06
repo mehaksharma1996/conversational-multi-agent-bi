@@ -191,6 +191,45 @@ def test_a_file_that_metadata_does_not_own_is_detected(
     assert any("does not own" in problem for problem in problems)
 
 
+def test_datasets_with_a_foreign_tenant_or_a_missing_parent_are_detected(tmp_path: Path) -> None:
+    deployment = Deployment("backup_resources")
+    with TestClient(deployment.app()) as client:
+        workspace = _create_workspace(client)
+        upload_id = _upload(client, workspace["id"])
+        dataset = client.post(f"/api/v1/tabular-uploads/{upload_id}/dataset", json={}).json()
+        assert client.post(f"/api/v1/datasets/{dataset['id']}/analyses", json={}).status_code == 409
+    with closing(sqlite3.connect(deployment.metadata_db, isolation_level=None)) as connection:
+        connection.execute("UPDATE datasets SET tenant_id = ?", ("e" * 32,))
+        connection.execute("UPDATE datasets SET upload_id = 'upl_missing'")
+    archive = tmp_path / "bad-resources.tar.gz"
+    create_backup(deployment.root / "api", archive)
+
+    problems = verify_archive(archive).problems
+
+    assert any("does not own its workspace" in problem for problem in problems)
+    assert any("refers to a upload that does not exist" in problem for problem in problems)
+
+
+def test_a_clean_backup_with_datasets_analyses_and_reports_verifies(tmp_path: Path) -> None:
+    deployment = Deployment("backup_clean_resources")
+    with TestClient(deployment.app()) as client:
+        workspace = _create_workspace(client)
+        upload_id = _upload(client, workspace["id"])
+        dataset = client.post(f"/api/v1/tabular-uploads/{upload_id}/dataset", json={}).json()
+        client.put(
+            f"/api/v1/datasets/{dataset['id']}/schema-mapping",
+            json={"amount": "amount", "date": "transaction_date"},
+        )
+        analysis = client.post(f"/api/v1/datasets/{dataset['id']}/analyses", json={}).json()
+        client.post(f"/api/v1/analyses/{analysis['id']}/reports", json={})
+    archive = tmp_path / "clean-resources.tar.gz"
+    create_backup(deployment.root / "api", archive)
+
+    report = verify_archive(archive)
+
+    assert report.ok, report.problems
+
+
 def test_a_corrupt_vector_index_database_is_detected(
     backup: tuple[Deployment, Path, str, str], tmp_path: Path
 ) -> None:

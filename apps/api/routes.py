@@ -250,6 +250,7 @@ def create_dataset(
         profile=profiled.profile,
         schema_mapping=profiled.suggested_mapping,
         recommended_anomaly_features=profiled.recommended_anomaly_features,
+        requested_sheet=command.sheet_name,
     )
     observability.audit(
         "dataset.created",
@@ -416,6 +417,7 @@ def create_analysis(
         anomaly_contamination=command.anomaly_contamination,
         bundle=bundle,
         memory=memory,
+        anomaly_features=anomaly_features,
     )
     observability.audit(
         "analysis.executed",

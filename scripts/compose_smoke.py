@@ -241,10 +241,15 @@ def run_compose_checks(client: Client, timeout: float, csv_path: Path) -> None:
     # Durable metadata (ADR 0022): the workspace and its uploaded file are recovered.
     restored, _ = client.json("GET", f"/api/v1/workspaces/{survivor['id']}", expect=200)
     check(restored["id"] == survivor["id"], "workspace metadata survived the restart")
+    recovered, _ = client.json("GET", f"/api/v1/datasets/{survivor_dataset['id']}", expect=200)
+    check(
+        recovered["status"] == "ready" and recovered["row_count"] == survivor_dataset["row_count"],
+        "confirmed dataset rebuilt from the recovered upload",
+    )
     client.json(
         "POST", f"/api/v1/tabular-uploads/{survivor_dataset['upload_id']}/dataset", {}, expect=201
     )
-    check(True, "uploaded file recovered; a dataset can be rebuilt from it")
+    check(True, "recovered upload can seed a new dataset")
     leftovers = compose("exec", "-T", "api", "sh", "-c", find_workspaces).stdout.split()
     check(
         len(leftovers) == 1 and leftovers[0].endswith(survivor["id"]),

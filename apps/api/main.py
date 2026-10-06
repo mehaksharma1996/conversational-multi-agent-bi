@@ -20,6 +20,7 @@ from apps.api.models import ErrorResponse, HealthResponse
 from apps.api.observability import ApiObservability
 from apps.api.oidc_login import IdTokenVerifier, OidcLoginService
 from apps.api.rate_limit import InMemoryRateLimiter
+from apps.api.rehydration import ApiRehydrator
 from apps.api.repository import LocalResourceRepository, WorkspaceRecord
 from apps.api.routes import router
 from apps.api.sessions import InMemorySessionStore
@@ -126,6 +127,9 @@ def create_app(
         application.state.embedding_cache,
     )
     application.state.tabular_service = TabularApplicationService()
+    application.state.repository.rehydrator = ApiRehydrator(
+        application.state.tabular_service, active_settings
+    )
     active_embedder_factory = embedder_factory or SentenceTransformerEmbedder
     application.state.document_service = DocumentApplicationService(
         active_embedder_factory,
@@ -268,6 +272,9 @@ def _start(app: FastAPI) -> None:
         workspaces_expired_on_start=recovery.workspaces_expired,
         uploads_restored=recovery.uploads_restored,
         uploads_dropped=recovery.uploads_dropped,
+        datasets_pending=recovery.datasets_pending,
+        analyses_pending=recovery.analyses_pending,
+        reports_pending=recovery.reports_pending,
     )
 
 
