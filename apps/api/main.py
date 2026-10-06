@@ -34,7 +34,7 @@ from packages.observability import (
 from packages.retrieval import DocumentApplicationService
 from src.documents.embedding import SentenceTransformerEmbedder, TextEmbedder
 from src.llm.base import LLMClient
-from src.llm.gemini_client import build_gemini_client
+from src.llm.factory import build_llm_client
 
 
 def create_app(
@@ -97,7 +97,7 @@ def create_app(
     application.state.tabular_service = TabularApplicationService()
     active_embedder_factory = embedder_factory or SentenceTransformerEmbedder
     application.state.document_service = DocumentApplicationService(active_embedder_factory)
-    application.state.llm_client_factory = llm_client_factory or build_gemini_client
+    application.state.llm_client_factory = llm_client_factory or build_llm_client
 
     @application.middleware("http")
     async def correlate_request(request: Request, call_next):
@@ -202,7 +202,7 @@ def _start(app: FastAPI) -> None:
             )
     observability.telemetry.emit(
         "service.started",
-        gemini_configured=settings.gemini_configured,
+        gemini_configured=settings.hosted_model_configured,
         local_only_mode=settings.local_only_mode,
         sqlite_encrypted=settings.sqlite_encryption_key is not None,
         sweep_enabled=settings.sweep_orphaned_workspaces,

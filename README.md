@@ -413,10 +413,20 @@ Two settings reduce what is sent regardless of provider terms:
   `[REDACTED_*]` markers. This is defense-in-depth, not a guarantee: it will
   not catch names, addresses, or other free-text PII.
 
-`LOCAL_ONLY_MODE=true` is the only complete guarantee: it disables every
-Gemini-backed code path (SQL generation, document RAG, hybrid queries, and
-LLM-based question routing) even if `GEMINI_API_KEY` is set, forcing the app
-back to deterministic analytics, the dashboard, and reports only.
+`LOCAL_ONLY_MODE=true` is the only complete guarantee that content stays on this machine: it
+withholds **every hosted provider's credentials** (Gemini, Anthropic, and any non-local Ollama endpoint) at client
+construction, even if keys are set, so no SQL generation, document RAG, hybrid query, or model-based routing
+can reach a hosted service. By default that leaves deterministic analytics, the dashboard, and reports only.
+If you configure a **local model** (`LLM_PROVIDERS=ollama`, `OLLAMA_MODEL`), model-backed questions keep working
+in local-only mode, but only when the endpoint is loopback (`localhost`, `127.0.0.0/8`, `::1`) or a host you
+explicitly declare container-internal in `OLLAMA_TRUSTED_HOSTS`; an Ollama URL pointing anywhere else is
+treated as a hosted recipient and is withheld. The application cannot verify what a declared host really is, so
+`OLLAMA_TRUSTED_HOSTS` is an operator assertion.
+
+Model providers are chosen by server configuration only (`LLM_PROVIDERS`, an ordered fallback chain such as
+`gemini,anthropic`); requests can never select one. Each hosted provider in the chain receives the same
+redacted prompts, and consent names every hosted provider (the API reports them as `data_recipients`).
+Adding a provider invalidates earlier consent until the user accepts again.
 
 By default, server logs record only the route, elapsed time, and
 question/SQL length for each answered question — never the raw question or

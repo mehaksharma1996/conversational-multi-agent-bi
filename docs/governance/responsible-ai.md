@@ -155,10 +155,28 @@ a verified user identity beyond the local-development tenant.
 
 ## Local-only mode
 
-`LOCAL_ONLY_MODE=true` withholds the Gemini key even if configured, so SQL generation,
-document answers, hybrid queries, and model-based routing are disabled. Deterministic analytics,
-profiling, anomaly review, reports, exports, and session-memory answers continue to work. This is
-the only complete guarantee that content is not sent to Gemini.
+`LOCAL_ONLY_MODE=true` withholds every hosted provider's credentials (Gemini, Anthropic, and an Ollama endpoint
+that is not local) at client construction, even if configured, so SQL generation, document answers, hybrid queries,
+and model-based routing cannot reach a hosted service. Deterministic analytics, profiling, anomaly review, reports,
+exports, and session-memory answers continue to work. This is the only complete guarantee that content is not
+sent to a hosted provider.
+
+A **local model** refines this without weakening it: with `LLM_PROVIDERS=ollama` and `OLLAMA_MODEL`, model-backed
+questions also work in local-only mode, but only if the Ollama endpoint is loopback or a host the operator declared
+container-internal in `OLLAMA_TRUSTED_HOSTS`. Any other endpoint counts as a hosted recipient and is withheld in
+local-only mode. The declaration is an operator assertion; the application cannot prove where a hostname routes.
+A local model still processes prompts built from your data, so its output carries the same grounding and
+guardrail checks as any other provider, and its quality can differ.
+
+### Providers, fallback, and consent
+
+Providers are configured on the server only (`LLM_PROVIDERS`, ordered). If a provider fails after its own bounded
+retries, the next configured provider is tried once; credentials withheld for a provider (for example in local-only
+mode) are never used. Redaction and `GEMINI_EXCLUDE_SAMPLE_VALUES` apply to the prompt before any provider sees it,
+so every provider in a chain receives the same minimised content. The consent notice names every hosted provider
+in the chain (`data_recipients`), consent records which providers were disclosed, and a configuration that adds a
+hosted provider requires consent again before model-backed questions run. Audit and telemetry record the provider
+and model that actually answered and whether a fallback occurred, never prompts or answers.
 
 ## PII-redaction limitations
 

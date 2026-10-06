@@ -110,11 +110,14 @@ def accept_gemini_consent(
     identity: IdentityDependency,
     repository: RepositoryDependency,
     observability: ObservabilityDependency,
+    settings: SettingsDependency,
 ) -> ConsentResponse:
+    # The recipients are read from server configuration, never from the request.
     workspace = repository.set_consent(
         workspace_id,
         identity.tenant_id,
         command.notice_version,
+        recipients=settings.hosted_recipients(),
     )
     observability.audit(
         "consent.accepted",
@@ -129,6 +132,7 @@ def accept_gemini_consent(
         accepted=True,
         notice_version=workspace.consent_notice_version,
         accepted_at=workspace.consent_accepted_at,
+        data_recipients=list(workspace.consent_recipients),
     )
 
 
@@ -327,7 +331,11 @@ def create_message(
             "Resolve the pending SQL approval before asking another question.",
         )
     workspace = repository.get_workspace(conversation.workspace_id, identity.tenant_id)
-    if workspace.gemini_configured and workspace.consent_accepted_at is None:
+    recipients = settings.hosted_recipients()
+    consented = workspace.consent_accepted_at is not None and set(recipients) <= set(
+        workspace.consent_recipients
+    )
+    if recipients and not consented:
         raise ResourceConflictError(
             "gemini_consent_required",
             "Accept the Gemini data-sharing notice before asking model-backed questions.",
@@ -448,7 +456,9 @@ def create_message(
         result_row_count=len(result.dataframe) if result.dataframe is not None else 0,
         source_count=len(result.sources or ()),
         grounding_status=result.diagnostics.grounding_status,
-        **llm_attributes,
+        fallback_used=result.diagnostics.llm_fallbacks > 0,
+        llm_provider=result.llm_provider_used or llm_attributes["llm_provider"],
+        llm_model=result.llm_model_used or llm_attributes["llm_model"],
     )
     return message_response(record)
 
@@ -782,6 +792,7 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
         attributes.update(
             llm_calls=diagnostics.llm_calls,
             llm_failures=diagnostics.llm_failures,
+            llm_fallbacks=diagnostics.llm_fallbacks,
             llm_duration_ms=diagnostics.llm_duration_ms,
             llm_prompt_tokens=diagnostics.llm_prompt_tokens,
             llm_output_tokens=diagnostics.llm_output_tokens,

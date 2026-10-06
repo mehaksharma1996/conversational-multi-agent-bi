@@ -11,7 +11,8 @@ from pydantic import BaseModel, ValidationError
 
 from config.settings import Settings
 from src.llm.base import LLMConfigurationError, LLMGenerationError, LLMResponse, SchemaT
-from src.llm.observability import report_usage
+from src.llm.observability import report_served_by, report_usage
+from src.llm.providers import ModelTiers, select_model
 from src.utils.error_reporting import report_error
 
 GEMINI_PROVIDER = "gemini"
@@ -30,6 +31,8 @@ class GeminiClient:
         client_factory: Callable[..., Any] | None = None,
         timeout_seconds: float = 30.0,
         max_retries: int = 2,
+        tiers: ModelTiers | None = None,
+        purpose_tiers: dict[str, str] | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than 0.")
@@ -41,6 +44,8 @@ class GeminiClient:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self._use_generation_config = client_factory is None
+        self._tiers = tiers or ModelTiers(model)
+        self._purpose_tiers = dict(purpose_tiers or {})
         self._client: Any | None = None
 
     @property
@@ -68,12 +73,13 @@ class GeminiClient:
         if not prompt.strip():
             raise ValueError("Prompt cannot be empty.")
 
+        model = select_model(self._tiers, self._purpose_tiers)
         response = None
         retries = 0
         for attempt in range(self.max_retries + 1):
             try:
                 kwargs: dict[str, Any] = {
-                    "model": self.model,
+                    "model": model,
                     "contents": prompt,
                 }
                 if self._use_generation_config:
@@ -110,13 +116,14 @@ class GeminiClient:
         )
         LOGGER.info(
             "gemini_generation model=%s prompt_tokens=%s output_tokens=%s",
-            self.model,
+            model,
             getattr(usage, "prompt_token_count", None),
             getattr(usage, "candidates_token_count", None),
         )
+        report_served_by(self.provider, model)
         return LLMResponse(
             text=text,
-            model=self.model,
+            model=model,
             provider=self.provider,
         )
 
@@ -166,4 +173,6 @@ def build_gemini_client(settings: Settings) -> GeminiClient:
     return GeminiClient(
         api_key=None if settings.local_only_mode else settings.gemini_api_key,
         model=settings.gemini_model,
+        tiers=ModelTiers(settings.gemini_model, settings.gemini_model_fast),
+        purpose_tiers=dict(settings.llm_purpose_tiers),
     )

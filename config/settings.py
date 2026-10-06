@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 import re
@@ -21,6 +22,17 @@ load_dotenv()
 DEFAULT_RETRIEVAL_MAX_DISTANCE = 0.7
 CALLBACK_PATH = "/api/v1/auth/callback"
 _SCOPE_PATTERN = re.compile(r"[A-Za-z0-9._:/-]{1,64}")
+KNOWN_LLM_PROVIDERS = ("gemini", "anthropic", "ollama")
+LLM_TIERS = ("fast", "strong")
+DEFAULT_PURPOSE_TIERS: tuple[tuple[str, str], ...] = (
+    ("route", "fast"),
+    ("criteria_extraction", "fast"),
+    ("sql_generation", "strong"),
+    ("sql_correction", "strong"),
+    ("rag_answer", "strong"),
+)
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_HOSTNAME = re.compile(r"[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
 ALLOWED_OIDC_SIGNING_ALGORITHMS = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"})
 
 
@@ -71,6 +83,16 @@ class Settings:
     oidc_client_secret: str | None = field(default=None, repr=False)
     oidc_redirect_uri: str | None = None
     oidc_scopes: tuple[str, ...] = ("openid",)
+    llm_providers: tuple[str, ...] = ("gemini",)
+    llm_purpose_tiers: tuple[tuple[str, str], ...] = DEFAULT_PURPOSE_TIERS
+    gemini_model_fast: str | None = None
+    anthropic_api_key: str | None = field(default=None, repr=False)
+    anthropic_model: str = "claude-haiku-4-5-20251001"
+    anthropic_model_fast: str | None = None
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str | None = None
+    ollama_model_fast: str | None = None
+    ollama_trusted_hosts: tuple[str, ...] = ()
     llm_input_cost_per_million_usd: float | None = None
     llm_output_cost_per_million_usd: float | None = None
 
@@ -154,6 +176,85 @@ class Settings:
         if self.session_max_age_seconds < self.session_idle_timeout_seconds:
             raise ValueError(
                 "API_SESSION_MAX_AGE_SECONDS must not be shorter than the idle timeout."
+            )
+
+    @property
+    def ollama_is_local(self) -> bool:
+        """Loopback or an operator-declared container-internal host: nothing leaves the machine."""
+        host = (urlparse(self.ollama_base_url).hostname or "").lower()
+        if host in _LOOPBACK_HOSTS:
+            return True
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return True
+        except ValueError:
+            pass  # a name, not an address
+        return host in {trusted.lower() for trusted in self.ollama_trusted_hosts}
+
+    def hosted_recipients(self) -> tuple[str, ...]:
+        """Names of the providers that would receive uploaded-data content, in chain order.
+
+        A provider is a recipient only when it is usable: hosted providers need a key and are
+        withheld in local-only mode; Ollama is a recipient only when its endpoint is not local.
+        """
+        recipients: list[str] = []
+        for provider in self.llm_providers:
+            if provider == "gemini" and self.gemini_api_key and not self.local_only_mode:
+                recipients.append("Gemini")
+            elif provider == "anthropic" and self.anthropic_api_key and not self.local_only_mode:
+                recipients.append("Anthropic")
+            elif (
+                provider == "ollama"
+                and self.ollama_model
+                and not self.ollama_is_local
+                and not self.local_only_mode
+            ):
+                recipients.append("Ollama (remote)")
+        return tuple(recipients)
+
+    @property
+    def hosted_model_configured(self) -> bool:
+        """True when a configured provider would send data off this machine (consent applies)."""
+        return bool(self.hosted_recipients())
+
+    @property
+    def local_model_configured(self) -> bool:
+        return "ollama" in self.llm_providers and bool(self.ollama_model) and self.ollama_is_local
+
+    @property
+    def model_backed_available(self) -> bool:
+        return self.hosted_model_configured or self.local_model_configured
+
+    def validate_llm_configuration(self) -> None:
+        """Fail closed on unknown, duplicate, or unsafe provider settings."""
+        if not self.llm_providers:
+            raise ValueError("LLM_PROVIDERS must name at least one provider.")
+        unknown = [name for name in self.llm_providers if name not in KNOWN_LLM_PROVIDERS]
+        if unknown:
+            raise ValueError(f"LLM_PROVIDERS contains unknown providers: {', '.join(unknown)}.")
+        if len(set(self.llm_providers)) != len(self.llm_providers):
+            raise ValueError("LLM_PROVIDERS must not repeat a provider.")
+        if "ollama" in self.llm_providers:
+            if not self.ollama_model:
+                raise ValueError("OLLAMA_MODEL is required when ollama is in LLM_PROVIDERS.")
+            parsed = urlparse(self.ollama_base_url)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "OLLAMA_BASE_URL must be an http(s) URL without credentials or query."
+                )
+        if any(not _HOSTNAME.fullmatch(host) for host in self.ollama_trusted_hosts):
+            raise ValueError("OLLAMA_TRUSTED_HOSTS must be comma-separated host names.")
+        known_purposes = {purpose for purpose, _ in DEFAULT_PURPOSE_TIERS}
+        tiers = dict(self.llm_purpose_tiers)
+        if set(tiers) != known_purposes or any(tier not in LLM_TIERS for tier in tiers.values()):
+            raise ValueError(
+                "LLM_TIER_<PURPOSE> must be 'fast' or 'strong' for every model purpose."
             )
 
     def validate_llm_pricing(self) -> None:
@@ -308,11 +409,31 @@ def get_settings() -> Settings:
         oidc_client_secret=_optional_text("OIDC_CLIENT_SECRET"),
         oidc_redirect_uri=_optional_text("OIDC_REDIRECT_URI"),
         oidc_scopes=_scopes("OIDC_SCOPES"),
+        llm_providers=tuple(name.lower() for name in _csv_values("LLM_PROVIDERS", ("gemini",))),
+        llm_purpose_tiers=(
+            ("route", os.getenv("LLM_TIER_ROUTE", "fast").strip().lower()),
+            (
+                "criteria_extraction",
+                os.getenv("LLM_TIER_CRITERIA_EXTRACTION", "fast").strip().lower(),
+            ),
+            ("sql_generation", os.getenv("LLM_TIER_SQL_GENERATION", "strong").strip().lower()),
+            ("sql_correction", os.getenv("LLM_TIER_SQL_CORRECTION", "strong").strip().lower()),
+            ("rag_answer", os.getenv("LLM_TIER_RAG_ANSWER", "strong").strip().lower()),
+        ),
+        gemini_model_fast=_optional_text("GEMINI_MODEL_FAST"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
+        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001").strip(),
+        anthropic_model_fast=_optional_text("ANTHROPIC_MODEL_FAST"),
+        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip(),
+        ollama_model=_optional_text("OLLAMA_MODEL"),
+        ollama_model_fast=_optional_text("OLLAMA_MODEL_FAST"),
+        ollama_trusted_hosts=_csv_values("OLLAMA_TRUSTED_HOSTS", ()),
         llm_input_cost_per_million_usd=_optional_float("LLM_INPUT_COST_PER_MILLION_USD", None),
         llm_output_cost_per_million_usd=_optional_float("LLM_OUTPUT_COST_PER_MILLION_USD", None),
     )
     settings.validate_identity_configuration()
     settings.validate_llm_pricing()
+    settings.validate_llm_configuration()
     return settings
 
 

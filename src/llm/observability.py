@@ -54,11 +54,17 @@ class LLMCallRecord:
     output_tokens: int | None = None
     estimated_cost_usd: float | None = None
     error_category: str | None = None
+    fallbacks: int = 0
 
 
 Observer = Callable[[LLMCallRecord], None]
 
 _PURPOSE: ContextVar[str | None] = ContextVar("llm_purpose", default=None)
+
+
+def current_purpose() -> str | None:
+    """The purpose declared by the calling code, used for task-based model routing."""
+    return _PURPOSE.get()
 
 
 @contextmanager
@@ -78,6 +84,9 @@ class _UsageSlot:
         self.prompt_tokens: int | None = None
         self.output_tokens: int | None = None
         self.retries = 0
+        self.served_provider: str | None = None
+        self.served_model: str | None = None
+        self.fallbacks = 0
 
 
 _SLOT: ContextVar[_UsageSlot | None] = ContextVar("llm_usage_slot", default=None)
@@ -98,6 +107,21 @@ def report_usage(
     slot.retries = max(0, int(retries))
 
 
+def report_served_by(provider: str, model: str) -> None:
+    """Called by a provider client on success so telemetry names the model that really answered."""
+    slot = _SLOT.get()
+    if slot is not None:
+        slot.served_provider = provider
+        slot.served_model = model
+
+
+def report_fallbacks(count: int) -> None:
+    """Called by the fallback chain with how many providers failed before the one that answered."""
+    slot = _SLOT.get()
+    if slot is not None:
+        slot.fallbacks = max(0, int(count))
+
+
 class QuestionUsage:
     """Thread-safe totals for the model calls made while answering one question."""
 
@@ -109,12 +133,19 @@ class QuestionUsage:
         self.output_tokens: int | None = None
         self.duration_ms = 0.0
         self.estimated_cost_usd: float | None = None
+        self.fallbacks = 0
+        self.served_provider: str | None = None
+        self.served_model: str | None = None
 
     def add(self, record: LLMCallRecord) -> None:
         with self._lock:
             self.calls += 1
             self.failures += int(record.outcome != "success")
             self.duration_ms += record.duration_ms
+            self.fallbacks += record.fallbacks
+            if record.outcome == "success":
+                self.served_provider = record.provider
+                self.served_model = record.model
             self.prompt_tokens = _sum(self.prompt_tokens, record.prompt_tokens)
             self.output_tokens = _sum(self.output_tokens, record.output_tokens)
             if record.estimated_cost_usd is not None:
@@ -186,8 +217,9 @@ class ObservedLLMClient:
             _SLOT.reset(token)
             record = LLMCallRecord(
                 purpose=_PURPOSE.get() or UNKNOWN_PURPOSE,
-                provider=self.provider,
-                model=self.model,
+                provider=slot.served_provider or self.provider,
+                model=slot.served_model or self.model,
+                fallbacks=slot.fallbacks,
                 duration_ms=(self._clock() - started) * 1000,
                 outcome=outcome,
                 retries=slot.retries,

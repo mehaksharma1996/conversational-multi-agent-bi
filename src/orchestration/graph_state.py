@@ -54,6 +54,7 @@ class AnswerDiagnostics:
     llm_prompt_tokens: int | None = None
     llm_output_tokens: int | None = None
     llm_estimated_cost_usd: float | None = None
+    llm_fallbacks: int = 0
 
 
 class QuestionGraphState(TypedDict, total=False):

@@ -42,6 +42,7 @@ class WorkspaceResponse(StrictModel):
     local_only_mode: bool
     consent_required: bool
     consent_accepted: bool
+    data_recipients: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -56,6 +57,7 @@ class ConsentResponse(StrictModel):
     accepted: bool
     notice_version: str | None
     accepted_at: datetime | None
+    data_recipients: list[str] = Field(default_factory=list)
 
 
 class TabularUploadResponse(StrictModel):

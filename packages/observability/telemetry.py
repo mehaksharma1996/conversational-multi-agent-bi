@@ -66,6 +66,7 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "llm_estimated_cost_microusd": "int",
     "llm_retries": "int",
     "llm_calls": "int",
+    "llm_fallbacks": "int",
     "llm_failures": "int",
     "llm_duration_ms": "float",
     "grounding_status": "token",

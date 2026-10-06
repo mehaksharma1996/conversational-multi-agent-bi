@@ -72,6 +72,10 @@ export function ConversationPanel({
     void onAsk(trimmed, requireSqlApproval);
   };
 
+  // Named from server configuration; older API responses without the field default to Gemini.
+  const recipients = workspace.data_recipients?.length ? workspace.data_recipients : ["Gemini"];
+  const recipientNames = recipients.join(" and ");
+
   return (
     <section className="panel conversation-panel" aria-labelledby="conversation-heading">
       <div className="section-heading">
@@ -85,9 +89,9 @@ export function ConversationPanel({
       {consentBlocked ? (
         <StatusBanner kind="info">
           Questions may send question text, table schema and samples, or retrieved PDF excerpts
-          to Gemini. Accept this notice before model-backed questions are enabled.
+          to {recipientNames}. Accept this notice before model-backed questions are enabled.
           <button className="button button--secondary consent-button" type="button" disabled={busy} onClick={() => void onAcceptConsent()}>
-            I understand, enable Gemini
+            I understand, enable {recipientNames}
           </button>
         </StatusBanner>
       ) : null}

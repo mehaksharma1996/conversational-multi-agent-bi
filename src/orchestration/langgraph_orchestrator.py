@@ -119,6 +119,9 @@ class OrchestratorResult:
     error: str | None = None
     status: str = "complete"
     diagnostics: AnswerDiagnostics = field(default_factory=AnswerDiagnostics)
+    # Configuration tokens (never content) naming the provider/model that actually answered.
+    llm_provider_used: str | None = None
+    llm_model_used: str | None = None
 
 
 class QuestionOrchestrator:
@@ -219,6 +222,8 @@ class QuestionOrchestrator:
                 ),
                 **_usage_fields(usage),
             ),
+            llm_provider_used=usage.served_provider if usage is not None else None,
+            llm_model_used=usage.served_model if usage is not None else None,
         )
         LOGGER.info(
             "question_answered route=%s elapsed_seconds=%.3f question_length=%d has_sql=%s",
@@ -742,6 +747,7 @@ def _usage_fields(usage: QuestionUsage | None) -> dict[str, Any]:
         "llm_prompt_tokens": usage.prompt_tokens,
         "llm_output_tokens": usage.output_tokens,
         "llm_estimated_cost_usd": usage.estimated_cost_usd,
+        "llm_fallbacks": usage.fallbacks,
     }
 
 

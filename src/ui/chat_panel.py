@@ -13,7 +13,7 @@ from config.settings import Settings
 from src.agents.rag_agent import RAGAgentError
 from src.agents.sql_agent import SQLAgentError
 from src.llm.base import LLMConfigurationError, LLMGenerationError
-from src.llm.gemini_client import build_gemini_client
+from src.llm.factory import build_llm_client
 from src.memory.chat_history import trim_chat_history
 from src.memory.session_keys import (
     CHAT_MESSAGES,
@@ -112,7 +112,7 @@ def _handle_question(prompt: str, settings: Settings) -> None:
 
     try:
         with st.spinner("Analyzing your question..."):
-            llm_client = build_gemini_client(settings)
+            llm_client = build_llm_client(settings)
             orchestrator = QuestionOrchestrator(
                 llm_client=llm_client,
                 stored_table=st.session_state.get(STORED_TABLE),

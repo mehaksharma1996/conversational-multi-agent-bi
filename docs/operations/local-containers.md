@@ -161,6 +161,16 @@ $env:HF_HUB_OFFLINE = "1"; docker compose up -d --wait
 `LOCAL_ONLY_MODE=true` already disables every Gemini-backed path. Without Gemini, PDF indexing
 and document retrieval still work offline once the model is cached, but document *answers* need Gemini.
 
+## Model providers
+
+Providers are selected by environment only: `LLM_PROVIDERS` is an ordered fallback chain (`gemini`, `anthropic`,
+`ollama`); the default is `gemini`. Hosted keys (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`) are passed from your shell or `.env`,
+never baked into images. `LOCAL_ONLY_MODE=true` withholds every hosted key. For a local model run Ollama on the host or in a
+sibling container and set `OLLAMA_MODEL`; the endpoint counts as local only when it is loopback or its host name is listed in
+`OLLAMA_TRUSTED_HOSTS` (for example `ollama` for a Compose service name), which is an assertion you make. A non-local Ollama URL is
+treated like a hosted provider. `LLM_TIER_<PURPOSE>` (`fast` or `strong`) with `*_MODEL_FAST` lets cheap models classify while stronger ones write
+SQL and answers. See [ADR 0017](../adr/0017-model-providers-and-fallback.md).
+
 ## Optional Streamlit compatibility UI
 
 ```powershell

@@ -55,6 +55,7 @@ def workspace_response(record: WorkspaceRecord) -> WorkspaceResponse:
         local_only_mode=record.local_only_mode,
         consent_required=record.gemini_configured,
         consent_accepted=record.consent_accepted_at is not None,
+        data_recipients=list(record.data_recipients),
         created_at=record.created_at,
     )
 

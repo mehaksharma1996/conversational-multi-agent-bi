@@ -76,6 +76,7 @@ AUDIT_ATTRIBUTES: dict[str, str] = {
     "outcome": "token",
     "capability": "token",
     "tool": "token",
+    "fallback_used": "bool",
     "error_category": "token",
     "format": "token",
     "size_bytes": "int",
