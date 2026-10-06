@@ -60,12 +60,17 @@ AUDIT_ACTIONS: frozenset[str] = frozenset(
         "auth.csrf_rejected",
         "authz.denied",
         "mcp.tool_executed",
+        "config.recorded",
+        "config.changed",
     }
 )
 
 # Pre-identity events (a login that failed after it was started) have no verified subject, so they
 # are filed under this reserved tenant. Derived tenant IDs are 32 hex characters and cannot collide.
 ANONYMOUS_TENANT_ID = "anonymous"
+
+# Service-level events (configuration) belong to no user; they are filed under this reserved tenant.
+SYSTEM_TENANT_ID = "system"
 
 # name -> declared value shape understood by ``clean_attribute``.
 AUDIT_ATTRIBUTES: dict[str, str] = {
@@ -94,6 +99,10 @@ AUDIT_ATTRIBUTES: dict[str, str] = {
     "provider_used": "bool",
     "llm_provider": "token",
     "llm_model": "token",
+    "config_hash": "token",
+    "previous_config_hash": "token",
+    "durable_metadata": "bool",
+    "metrics_enabled": "bool",
     "has_sql": "bool",
     "sql_edited": "bool",
     "grounding_status": "token",
