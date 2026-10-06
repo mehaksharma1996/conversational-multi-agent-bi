@@ -43,9 +43,9 @@ is a persistence project, not a packaging task.
 ## Waiver: restart persistence
 
 > **Update (2026-10-06):** [ADR 0022](0022-durable-workspace-metadata.md) (issue #12, slice 12a) narrows this
-> waiver. With `DURABLE_METADATA=true`, which Compose sets, workspaces, consent state, and uploaded files
-> survive a restart. The table below describes the original release and still applies to datasets, analyses,
-> conversations, reports, exports, and document indexes until slices 12b and 12c land.
+> waiver. With `DURABLE_METADATA=true`, which Compose sets, workspaces, consent state, uploaded files,
+> datasets, analyses, and reports survive a restart (slices 12a and 12b). The table below describes the
+> original release and still applies to conversations, exports, and document indexes until slice 12c lands.
 
 Definition-of-done item "survives restart" is **partially waived**.
 

@@ -68,18 +68,19 @@ embedding model download; it is covered by the API tests and evaluations.
 
 | Volume | Mounted at | Holds | Persists across restart | Back up? |
 |---|---|---|---|---|
-| `bi-data` | `/data` | Workspace metadata database (`api/.metadata/`), uploaded files, per-workspace SQLite and Chroma files | Workspaces, consent, and uploaded files do; datasets, analyses, chats, and indexes do not yet (see below) | **Yes** ([workspace backup](#backup-and-restore-workspace-state)) |
+| `bi-data` | `/data` | Workspace metadata database (`api/.metadata/`), uploaded files, per-workspace SQLite and Chroma files | Workspaces, consent, uploads, datasets, analyses, and reports do; chats, exports, and indexes do not yet (see below) | **Yes** ([workspace backup](#backup-and-restore-workspace-state)) |
 | `bi-audit` | `/audit` | Append-only audit log (`<tenant>.jsonl`) | Yes | **Yes** |
 | `bi-models` | `/models` | Hugging Face model cache | Yes | Optional |
 
 **What a restart does.** Compose sets `DURABLE_METADATA=true` ([ADR 0022](../adr/0022-durable-workspace-metadata.md)).
 After `docker compose restart api` (or a crash) the API reopens a versioned SQLite metadata database,
 migrates it forward, and restores workspaces, their consent state, hashed idempotency keys, and uploaded
-files (each verified by SHA-256 when read). Expired workspaces are removed through the audited path, rows
-whose files are missing are dropped, and directories no row owns are swept. A user can resume the
-workspace and rebuild a dataset from the recovered upload. **Not yet recovered** (tracked in issue #12,
-slices 12b and 12c): datasets, analyses, reports, conversations, exports, and document indexes; the user
-re-runs those steps. Startup refuses to run on a database written by a newer build, and quarantines an
+files (each verified by SHA-256 when read), then rebuilds datasets, analyses, and reports from those inputs
+the first time a workspace is used (the same deterministic processing, so results match; the first request
+after a restart pays that cost once). Expired workspaces are removed through the audited path, rows whose
+files are missing are dropped (with anything built on them), and directories no row owns are swept.
+**Not yet recovered** (issue #12, slice 12c): conversations, messages, exports, and document indexes; the
+user re-asks and re-indexes. Startup refuses to run on a database written by a newer build, and quarantines an
 unreadable database (`metadata.db.corrupt-<UTC stamp>`) without sweeping the directories it can no longer
 account for. Local development without Compose keeps the old process-local behaviour unless
 `DURABLE_METADATA=true` is set.
@@ -91,7 +92,7 @@ Other knobs (limits, retention, retrieval distance) are environment variables li
 
 ```powershell
 docker compose stop                # stop, keep everything
-docker compose restart api         # restart the API (workspaces and uploads recover; see above)
+docker compose restart api         # restart the API (workspace state recovers; see above)
 docker compose down                # remove containers, keep volumes
 docker compose down -v             # remove containers AND all volumes: a full reset
 ```
@@ -238,8 +239,9 @@ emit the API's audit events. Its disposition is governed by [ADR 0009](../adr/00
 
 ## Known limitations
 
-- Only workspaces, consent, and uploads are durable so far (slice 12a); datasets, analyses, chats, and
-  indexes are still process-local (waiver in ADR 0010, narrowed by ADR 0022). Run exactly one API container.
+- Workspaces, uploads, datasets, analyses, and reports are durable (slices 12a and 12b); conversations,
+  exports, and document indexes are still process-local (waiver in ADR 0010, narrowed by ADR 0022). Run
+  exactly one API container.
 - No user authentication; loopback only.
 - No worker, telemetry profile, image scanning, or SBOM yet (see ADR 0010 follow-ups).
 - Compose and the smoke test were validated in CI on Linux; other Docker hosts (Docker Desktop on

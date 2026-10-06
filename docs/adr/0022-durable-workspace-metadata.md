@@ -1,6 +1,6 @@
 # ADR 0022: Durable workspace metadata with versioned migrations and recovery
 
-- Status: Accepted (slice 12a delivered; 12b and 12c pending)
+- Status: Accepted (slices 12a and 12b delivered; 12c pending)
 - Date: 2026-10-06
 - Issue: [#12](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/12)
 - Narrows: the restart-persistence waiver in [ADR 0010](0010-local-container-release.md)
@@ -20,11 +20,23 @@ corrupted or tampered data volume into code execution.
    (`<storage root>/.metadata/metadata.db`, WAL mode) stores content-free records. Heavy, deterministic
    results (profiles, analyses, reports, indexes) are rebuilt from persisted inputs in later slices. Nothing
    is pickled.
-2. **Slices.** 12a (this record): workspaces, consent and recipients, expiry, hashed idempotency keys, and
-   upload metadata with payload files, plus migrations, startup reconciliation, and backup/restore.
-   12b: datasets, analyses, and reports, rebuilt from stored uploads and confirmed mappings. 12c:
-   conversations, messages, exports, and reopening document indexes. The ADR 0010 waiver is closed when
-   12c lands.
+2. **Slices.** 12a: workspaces, consent and recipients, expiry, hashed idempotency keys, and upload
+   metadata with payload files, plus migrations, startup reconciliation, and backup/restore.
+   12b (schema v2): datasets, analyses, and reports. 12c: conversations, messages, exports, and reopening
+   document indexes. The ADR 0010 waiver is closed when 12c lands.
+
+   **12b mechanics.** Only inputs are stored: the requested sheet (with its type, because the loader
+   records `str(sheet)`, which would turn index `0` into the sheet *name* `"0"`), the confirmed schema
+   mapping in its original field order (the report lists fields in that order), the recommended features,
+   and for each analysis its parameters and the mapping it used. On the first request that touches a
+   recovered workspace's dataset, analysis, or report, the repository rebuilds that workspace's resources
+   through the same deterministic services the routes use (fixed seeds), re-creates the workspace SQLite
+   copy that guarded SQL reads, and rebuilds each analysis with *its own* mapping, not the dataset's
+   current one. A resource that cannot be rebuilt (missing or corrupt upload, a changed parser or row
+   limit) is dropped together with what depends on it and logged by exception category only. The first
+   request to a workspace after a restart therefore pays the analysis cost once; requests hold the
+   repository lock while it runs, which is acceptable for the single-node envelope. Conversation memory is
+   built from the recovered analysis without document status; 12c restores document summaries.
 3. **Opt-in switch.** `DURABLE_METADATA=true` enables the store. Compose enables it; the default stays off
    so development and the Streamlit compatibility surface are unchanged.
 4. **Write-through, row-then-file ordering.** An upload's file is written atomically (temp file, fsync,
@@ -66,10 +78,12 @@ corrupted or tampered data volume into code execution.
 
 ## Consequences
 
-- Workspaces, consent, and uploaded files survive a restart and a crash; a user can rebuild a dataset from
-  a recovered upload.
-- Datasets, analyses, chats, exports, and document indexes remain process-local until 12b and 12c, so the
-  OpenAPI descriptions that say such resources are lost on process restart are still accurate for them.
+- Workspaces, consent, uploaded files, datasets, analyses, and reports survive a restart and a crash.
+- Conversations, messages, exports, and document indexes remain process-local until 12c, so the OpenAPI
+  descriptions that say such resources are lost on process restart are still accurate for them; the
+  descriptions are corrected when 12c lands.
+- Recovery cost is proportional to the work that created the resources (profiling and analysis), paid on
+  first use per workspace.
 - Run exactly one API process per storage root; SQLite serialises writers but nothing coordinates two
   processes' in-memory state.
 - The metadata database is not encrypted (it holds no content); filenames are the most sensitive field.
