@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "policy": "docs/governance/model-and-prompt-change-policy.md",
+  "prompts": [
+    {
+      "id": "route-classification",
+      "target": "src.orchestration.langgraph_orchestrator:QuestionOrchestrator._classify_route",
+      "purpose": "Classifies a question into memory, sql, rag, hybrid, or unsupported.",
+      "sha256": "58878f9e39743ed500b9a945c5360eb2e444b55690b0b9a075cca863dd5ace15",
+      "version": 1,
+      "changed": "2026-10-06",
+      "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
+      "approved_by": "repository maintainers",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    },
+    {
+      "id": "hybrid-criteria-extraction",
+      "target": "src.orchestration.langgraph_orchestrator:QuestionOrchestrator._extract_hybrid_criteria",
+      "purpose": "Extracts allowlisted structured criteria from document excerpts.",
+      "sha256": "0b9fae3c93a91daf81fc419d60777c2bc4a39b17221ea7c84bf957c383b2c55e",
+      "version": 1,
+      "changed": "2026-10-06",
+      "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
+      "approved_by": "repository maintainers",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    },
+    {
+      "id": "sql-generation",
+      "target": "src.agents.sql_agent:build_sql_prompt",
+      "purpose": "Generates one read-only SELECT over the confirmed table schema.",
+      "sha256": "3c8d96d61c21bbd85a75bba71e3ecf1a0b1cd34438796ec781d8733291c00e58",
+      "version": 1,
+      "changed": "2026-10-06",
+      "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
+      "approved_by": "repository maintainers",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    },
+    {
+      "id": "sql-correction",
+      "target": "src.agents.sql_agent:build_sql_retry_prompt",
+      "purpose": "One bounded correction attempt after a SQLite execution error.",
+      "sha256": "c6b5b17508cb7692a3b63d504a61e126641bc9a35846b870978179dc787ac92d",
+      "version": 1,
+      "changed": "2026-10-06",
+      "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
+      "approved_by": "repository maintainers",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    },
+    {
+      "id": "document-answer",
+      "target": "src.agents.rag_agent:build_rag_prompt",
+      "purpose": "Answers only from retrieved, redacted, untrusted excerpts with citations.",
+      "sha256": "435edac981b875f4a2b86fc9cc78386b8cda68ce631278881d52f79c6e71d013",
+      "version": 1,
+      "changed": "2026-10-06",
+      "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
+      "approved_by": "repository maintainers",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    }
+  ],
+  "models": {
+    "default_gemini_model": {
+      "value": "gemini-2.5-flash",
+      "changed": "2026-10-06",
+      "reason": "Initial registry baseline: the model named in README and Settings.",
+      "approved_by": "repository maintainers",
+      "rollback": "Set GEMINI_MODEL to the previous value; no data migration is involved."
+    }
+  }
+}
