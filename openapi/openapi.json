@@ -2029,6 +2029,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -2158,6 +2168,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -2376,6 +2396,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -2481,6 +2511,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -2598,6 +2638,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -2718,6 +2768,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -2847,6 +2907,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -2966,6 +3036,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -3097,6 +3177,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -3227,6 +3317,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -3346,6 +3446,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -3475,6 +3585,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -3607,6 +3727,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -3736,6 +3866,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -3877,6 +4017,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -4007,6 +4157,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -4126,6 +4286,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -4256,6 +4426,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -4368,6 +4548,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -4486,6 +4676,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -4617,6 +4817,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -4746,6 +4956,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {
@@ -4877,6 +5097,16 @@
             },
             "description": "Request validation failed"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -5006,6 +5236,16 @@
               }
             },
             "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           },
           "500": {
             "content": {

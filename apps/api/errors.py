@@ -183,6 +183,7 @@ STANDARD_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     409: {"model": ErrorResponse, "description": "Resource state conflict"},
     413: {"model": ErrorResponse, "description": "Upload limit exceeded"},
     422: {"model": ErrorResponse, "description": "Request validation failed"},
+    429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
     500: {"model": ErrorResponse, "description": "Sanitized internal error"},
     503: {"model": ErrorResponse, "description": "Dependency unavailable"},
 }

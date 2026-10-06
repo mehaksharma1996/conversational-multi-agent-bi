@@ -12,6 +12,7 @@ from apps.api.dependencies import (
     get_api_settings,
     get_identity,
     get_observability,
+    get_rate_limiter,
     get_repository,
     get_tabular_service,
 )
@@ -31,6 +32,7 @@ from apps.api.models import (
     WorkspaceResponse,
 )
 from apps.api.observability import ApiObservability
+from apps.api.rate_limit import InMemoryRateLimiter, enforce_rate_limit
 from apps.api.repository import LocalResourceRepository
 from apps.api.serializers import (
     analysis_response,
@@ -60,6 +62,7 @@ RepositoryDependency = Annotated[LocalResourceRepository, Depends(get_repository
 ServiceDependency = Annotated[TabularApplicationService, Depends(get_tabular_service)]
 SettingsDependency = Annotated[Settings, Depends(get_api_settings)]
 ObservabilityDependency = Annotated[ApiObservability, Depends(get_observability)]
+RateLimiterDependency = Annotated[InMemoryRateLimiter, Depends(get_rate_limiter)]
 
 
 @router.post(
@@ -119,9 +122,18 @@ async def upload_tabular_file(
     repository: RepositoryDependency,
     settings: SettingsDependency,
     observability: ObservabilityDependency,
+    rate_limiter: RateLimiterDependency,
     file: Annotated[UploadFile, File(description="CSV or Excel source file")],
 ) -> TabularUploadResponse:
     repository.get_workspace(workspace_id, identity.tenant_id)
+    enforce_rate_limit(
+        rate_limiter,
+        operation="tabular_upload",
+        tenant_id=identity.tenant_id,
+        workspace_id=workspace_id,
+        limit=settings.rate_limit_tabular_uploads,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
     filename = _safe_filename(file.filename)
     extension = Path(filename).suffix.lower()
     if extension not in SUPPORTED_TABULAR_EXTENSIONS:
@@ -327,9 +339,19 @@ def create_analysis(
     identity: IdentityDependency,
     repository: RepositoryDependency,
     service: ServiceDependency,
+    settings: SettingsDependency,
     observability: ObservabilityDependency,
+    rate_limiter: RateLimiterDependency,
 ) -> AnalysisResponse:
     dataset = repository.get_dataset(dataset_id, identity.tenant_id)
+    enforce_rate_limit(
+        rate_limiter,
+        operation="analysis",
+        tenant_id=identity.tenant_id,
+        workspace_id=dataset.workspace_id,
+        limit=settings.rate_limit_analyses,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
     if not dataset.mapping_confirmed:
         raise ResourceConflictError(
             "schema_mapping_not_confirmed",
