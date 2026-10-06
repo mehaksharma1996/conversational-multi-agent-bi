@@ -68,6 +68,7 @@ class Settings:
     audit_max_segment_bytes: int | None = None
     sweep_orphaned_workspaces: bool = False
     durable_metadata: bool = False
+    metrics_enabled: bool = False
     api_auth_mode: str = "local"
     oidc_issuer_url: str | None = None
     oidc_audience: str | None = None
@@ -418,6 +419,7 @@ def get_settings() -> Settings:
         audit_max_segment_bytes=_optional_positive_int("AUDIT_MAX_SEGMENT_BYTES"),
         sweep_orphaned_workspaces=_flag("SWEEP_ORPHANED_WORKSPACES"),
         durable_metadata=_flag("DURABLE_METADATA"),
+        metrics_enabled=_flag("METRICS_ENABLED"),
         api_auth_mode=os.getenv("API_AUTH_MODE", "local").strip().lower(),
         oidc_issuer_url=_optional_text("OIDC_ISSUER_URL"),
         oidc_audience=_optional_text("OIDC_AUDIENCE"),

@@ -46,3 +46,14 @@ Issue #25 also proposes optional OpenTelemetry export and a local Langfuse/Phoen
 - `LLMCallRecord` and `llm.call` carry no prompt, completion, SQL, row, excerpt, file name, or exception text.
 - Observation failures never change the outcome of a model call.
 - Every new telemetry attribute is added to `ALLOWED_ATTRIBUTES` with a declared shape.
+
+## Addendum (2026-10-06): metrics, not traces
+
+Issue #15 asks for vendor-neutral export. This ADR's deferral of trace export stands (spans need an SDK
+dependency, an image-size and license review, and their own privacy tests). What was added instead needs no
+dependency: `MetricsRegistry`, a `TelemetrySink` that derives counters and histograms from the same allowlisted
+events and serves them in Prometheus text format at `GET /metrics` when `METRICS_ENABLED=true`. Its labels are
+allowlisted tokens only, enumerated labels accept known values only, and each label is capped at 64 distinct
+values, so it cannot become a side channel for content or identity. It is off by default, outside `/api`, and
+not proxied by the bundled web server. SLIs, objectives, and operator queries are in
+[slos.md](../operations/slos.md). Trace export remains open under #15.

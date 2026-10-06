@@ -6,6 +6,7 @@ from packages.observability.context import (
     new_request_id,
 )
 from packages.observability.errors import ERROR_CATEGORIES, error_category
+from packages.observability.metrics import FanOutTelemetrySink, MetricsRegistry
 from packages.observability.telemetry import (
     ALLOWED_ATTRIBUTES,
     TELEMETRY_LOGGER_NAME,
@@ -26,8 +27,10 @@ __all__ = [
     "ALLOWED_ATTRIBUTES",
     "ERROR_CATEGORIES",
     "TELEMETRY_LOGGER_NAME",
+    "FanOutTelemetrySink",
     "InMemoryTelemetrySink",
     "LoggingTelemetrySink",
+    "MetricsRegistry",
     "NullTelemetrySink",
     "OperationTracker",
     "Telemetry",
