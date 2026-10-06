@@ -274,10 +274,12 @@ def message_response(record: MessageRecord) -> MessageResponse:
 def message_list_response(
     conversation_id: str,
     records: list[MessageRecord],
+    next_cursor: str | None,
 ) -> MessageListResponse:
     return MessageListResponse(
         conversation_id=conversation_id,
         messages=[message_response(record) for record in records],
+        next_cursor=next_cursor,
     )
 
 

@@ -42,10 +42,11 @@ and response schemas remain unchanged.
 - [x] Poll disconnect does not imply cancellation.
 - [x] OpenAPI is additive and reproducible.
 
-## Deferred
+## Follow-on slice
 
-Operation migration, public retry commands, streaming-download completion, and pagination of other
-collections remain separate #17 slices.
+The #17b completion slice adds public retry, streaming-download completion, message pagination, and
+the endpoint-by-endpoint synchronous/idempotency decision. No existing v1 operation changes response
+type; any future asynchronous alternative must be additive.
 
 ## Evaluation and docs impact
 

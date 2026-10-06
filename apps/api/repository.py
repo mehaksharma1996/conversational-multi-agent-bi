@@ -683,6 +683,26 @@ class LocalResourceRepository:
         with self._lock:
             return [self._messages[message_id] for message_id in conversation.message_ids]
 
+    def list_messages_page(
+        self,
+        conversation_id: str,
+        tenant_id: str,
+        *,
+        limit: int,
+        after: tuple[datetime, str] | None = None,
+    ) -> tuple[list[MessageRecord], bool]:
+        """Return a stable page of retained messages plus a next-page flag."""
+        if limit < 1:
+            raise ValueError("limit must be positive.")
+        conversation = self.get_conversation(conversation_id, tenant_id)
+        with self._lock:
+            records = [self._messages[message_id] for message_id in conversation.message_ids]
+            records.sort(key=lambda record: (record.created_at, record.id))
+            if after is not None:
+                records = [record for record in records if (record.created_at, record.id) > after]
+            page = records[: limit + 1]
+            return page[:limit], len(page) > limit
+
     def get_message(self, message_id: str, tenant_id: str) -> MessageRecord:
         with self._lock:
             return self._owned(self._messages, message_id, tenant_id, "Message")

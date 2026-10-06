@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import json
-from binascii import Error as Base64Error
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -14,9 +10,16 @@ from apps.api.authorization import Capability, requires
 from apps.api.dependencies import get_identity, get_job_executor
 from apps.api.errors import STANDARD_ERROR_RESPONSES, ApiError, ResourceNotFoundError
 from apps.api.models import JobListResponse, JobResponse
+from apps.api.pagination import decode_cursor, encode_cursor
 from apps.api.serializers import job_response
 from packages.connectors import IdentityContext
-from packages.jobs import InProcessJobExecutor, JobNotFoundError, JobRecord
+from packages.jobs import (
+    InProcessJobExecutor,
+    JobConflictError,
+    JobNotFoundError,
+    JobQueueFullError,
+    JobRecord,
+)
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -38,9 +41,11 @@ def list_jobs(
     cursor: Annotated[str | None, Query(min_length=1, max_length=512)] = None,
 ) -> JobListResponse:
     """List jobs in stable creation order using an opaque exclusive cursor."""
-    after = _decode_cursor(cursor) if cursor is not None else None
+    after = decode_cursor(cursor) if cursor is not None else None
     records, has_more = executor.list_page(identity.tenant_id, limit=limit, after=after)
-    next_cursor = _encode_cursor(records[-1]) if has_more and records else None
+    next_cursor = (
+        encode_cursor(records[-1].created_at, records[-1].id) if has_more and records else None
+    )
     response.headers["Cache-Control"] = "no-store"
     return JobListResponse(
         items=[job_response(record) for record in records],
@@ -95,30 +100,45 @@ def cancel_job(
     return job_response(record)
 
 
+@router.post(
+    "/{job_id}/retry",
+    dependencies=[requires(Capability.DATA_WRITE)],
+    response_model=JobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=STANDARD_ERROR_RESPONSES,
+)
+def retry_job(
+    job_id: str,
+    response: Response,
+    identity: IdentityDependency,
+    executor: JobExecutorDependency,
+) -> JobResponse:
+    """Retry one failed owned job; the command is rejected in every other state."""
+    try:
+        record = executor.retry(job_id, identity.tenant_id)
+    except JobNotFoundError:
+        raise ResourceNotFoundError("Job") from None
+    except JobConflictError:
+        raise ApiError(
+            409,
+            "job_not_retryable",
+            "The job is not failed with retry capacity remaining.",
+        ) from None
+    except JobQueueFullError:
+        raise ApiError(
+            503,
+            "job_queue_full",
+            "The job queue is full; retry this command later.",
+            headers={"Retry-After": "1"},
+        ) from None
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Location"] = f"/api/v1/jobs/{record.id}"
+    response.headers["Retry-After"] = "1"
+    return job_response(record)
+
+
 def _owned_job(executor: InProcessJobExecutor, job_id: str, tenant_id: str) -> JobRecord:
     try:
         return executor.get(job_id, tenant_id)
     except JobNotFoundError:
         raise ResourceNotFoundError("Job") from None
-
-
-def _encode_cursor(record: JobRecord) -> str:
-    payload = json.dumps(
-        [record.created_at.isoformat(), record.id],
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
-
-
-def _decode_cursor(value: str) -> tuple[datetime, str]:
-    try:
-        padded = value + "=" * (-len(value) % 4)
-        created_at_text, job_id = json.loads(
-            base64.b64decode(padded, altchars=b"-_", validate=True).decode("utf-8")
-        )
-        created_at = datetime.fromisoformat(created_at_text)
-        if created_at.tzinfo is None or not isinstance(job_id, str) or not job_id:
-            raise ValueError
-    except (Base64Error, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
-        raise ApiError(422, "invalid_cursor", "The pagination cursor is invalid.") from None
-    return created_at, job_id

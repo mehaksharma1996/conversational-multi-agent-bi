@@ -14,6 +14,7 @@ from reportlab.pdfgen import canvas
 
 from apps.api.dependencies import get_identity
 from apps.api.errors import ResourceNotFoundError
+from apps.api.feature_routes import _iter_download
 from apps.api.main import create_app
 from apps.api.repository import LocalResourceRepository
 from config.settings import Settings
@@ -215,6 +216,12 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     downloaded_export = client.get(f"/api/v1/exports/{export.json()['id']}/content")
     assert downloaded_export.status_code == 200
     assert "'=2+2" in downloaded_export.text
+    assert downloaded_export.headers["Content-Length"] == str(len(downloaded_export.content))
+    assert downloaded_export.headers["Content-Disposition"] == (
+        'attachment; filename="query-result.csv"'
+    )
+    assert downloaded_export.headers["Accept-Ranges"] == "none"
+    assert downloaded_export.headers["Cache-Control"] == "private, no-store"
 
     excel_export = client.post(
         f"/api/v1/messages/{hybrid_message.json()['id']}/exports",
@@ -223,6 +230,7 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     downloaded_excel = client.get(f"/api/v1/exports/{excel_export.json()['id']}/content")
     assert excel_export.status_code == 201
     assert downloaded_excel.status_code == 200
+    assert downloaded_excel.headers["Content-Length"] == str(len(downloaded_excel.content))
     workbook = load_workbook(BytesIO(downloaded_excel.content), read_only=True)
     assert workbook.active["A2"].value == "'=2+2"
 
@@ -231,6 +239,12 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
         json={"include_charts": False},
     )
     assert report.status_code == 201
+    duplicate_report = client.post(
+        f"/api/v1/analyses/{analysis_id}/reports",
+        json={"include_charts": False},
+    )
+    assert duplicate_report.status_code == 201
+    assert duplicate_report.json()["id"] != report.json()["id"]
     markdown = client.get(
         f"/api/v1/reports/{report.json()['id']}/content",
         params={"format": "markdown"},
@@ -241,8 +255,10 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     )
     assert markdown.status_code == 200
     assert "# Business Intelligence Analysis Report" in markdown.text
+    assert markdown.headers["Content-Length"] == str(len(markdown.content))
     assert pdf.status_code == 200
     assert pdf.content.startswith(b"%PDF")
+    assert pdf.headers["Content-Length"] == str(len(pdf.content))
 
     second_hybrid = client.post(
         f"/api/v1/conversations/{conversation_id}/messages",
@@ -251,13 +267,36 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     assert second_hybrid.status_code == 201
     assert second_hybrid.json()["route"] == "hybrid"
 
-    messages = client.get(f"/api/v1/conversations/{conversation_id}/messages")
-    assert messages.status_code == 200
-    assert len(messages.json()["messages"]) == 2
-    assert [message["id"] for message in messages.json()["messages"]] == [
-        hybrid_message.json()["id"],
-        second_hybrid.json()["id"],
+    first_page = client.get(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        params={"limit": 1},
+    )
+    assert first_page.status_code == 200
+    assert [message["id"] for message in first_page.json()["messages"]] == [
+        hybrid_message.json()["id"]
     ]
+    assert first_page.json()["next_cursor"]
+    second_page = client.get(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        params={"limit": 1, "cursor": first_page.json()["next_cursor"]},
+    )
+    assert [message["id"] for message in second_page.json()["messages"]] == [
+        second_hybrid.json()["id"]
+    ]
+    assert second_page.json()["next_cursor"] is None
+    assert (
+        client.get(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            params={"limit": 0},
+        ).status_code
+        == 422
+    )
+    invalid_cursor = client.get(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        params={"cursor": "not-a-cursor"},
+    )
+    assert invalid_cursor.status_code == 422
+    assert invalid_cursor.json()["error"]["code"] == "invalid_cursor"
     expired_frame = client.post(
         f"/api/v1/messages/{hybrid_message.json()['id']}/exports",
         json={"format": "csv"},
@@ -510,6 +549,11 @@ def test_document_upload_rejects_non_pdf_before_indexing() -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "unsupported_document_type"
+
+
+def test_download_iterator_uses_bounded_chunks_and_empty_payload_is_valid() -> None:
+    assert list(_iter_download(b"abcdefgh", chunk_size=3)) == [b"abc", b"def", b"gh"]
+    assert list(_iter_download(b"", chunk_size=3)) == []
 
 
 def test_expired_workspace_removes_child_resources_and_local_storage() -> None:

@@ -5,3 +5,5 @@
 # the findings remain because they sit in commits that are already pushed and cannot be rewritten.
 a598b3632be23504697ba5a3002451f0c794ac0f:docs/adr/0020-in-process-execution-and-job-contract.md:generic-api-key:34
 3e5546df0d6619926e0f043115f93b47fee4e4e8:.gitleaksignore:generic-api-key:3
+# Reviewed non-secret scope prose from issue #17b; exact historical finding only.
+2854b26b77845b1dbd1cc2ad3a1baad89bc17295:docs/agents/briefs/17b-complete-api-semantics.md:generic-api-key:43

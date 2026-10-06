@@ -30,7 +30,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Report */
+        /**
+         * Create Report
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["create_report_api_v1_analyses__analysis_id__reports_post"];
         delete?: never;
         options?: never;
@@ -150,7 +158,15 @@ export interface paths {
         /** List Messages */
         get: operations["list_messages_api_v1_conversations__conversation_id__messages_get"];
         put?: never;
-        /** Create Message */
+        /**
+         * Create Message
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["create_message_api_v1_conversations__conversation_id__messages_post"];
         delete?: never;
         options?: never;
@@ -184,7 +200,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Analysis */
+        /**
+         * Create Analysis
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["create_analysis_api_v1_datasets__dataset_id__analyses_post"];
         delete?: never;
         options?: never;
@@ -233,7 +257,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Export Content */
+        /**
+         * Get Export Content
+         * @description Streams the complete immutable representation in bounded chunks. `Content-Length` and attachment
+         *     `Content-Disposition` are always present. Byte ranges are not supported (`Accept-Ranges: none`), so
+         *     a partial transfer must be restarted with a new `GET`. A timeout or disconnect stops only that
+         *     transfer; it does not delete the resource or cancel report generation. The `GET` is safe to retry.
+         */
         get: operations["get_export_content_api_v1_exports__export_id__content_get"];
         put?: never;
         post?: never;
@@ -287,6 +317,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Job
+         * @description Retry one failed owned job; the command is rejected in every other state.
+         */
+        post: operations["retry_job_api_v1_jobs__job_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages/{message_id}/approval": {
         parameters: {
             query?: never;
@@ -316,7 +366,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Export */
+        /**
+         * Create Export
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["create_export_api_v1_messages__message_id__exports_post"];
         delete?: never;
         options?: never;
@@ -331,7 +389,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Report Content */
+        /**
+         * Get Report Content
+         * @description Streams the complete immutable representation in bounded chunks. `Content-Length` and attachment
+         *     `Content-Disposition` are always present. Byte ranges are not supported (`Accept-Ranges: none`), so
+         *     a partial transfer must be restarted with a new `GET`. A timeout or disconnect stops only that
+         *     transfer; it does not delete the resource or cancel report generation. The `GET` is safe to retry.
+         */
         get: operations["get_report_content_api_v1_reports__report_id__content_get"];
         put?: never;
         post?: never;
@@ -350,7 +414,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Dataset */
+        /**
+         * Create Dataset
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["create_dataset_api_v1_tabular_uploads__upload_id__dataset_post"];
         delete?: never;
         options?: never;
@@ -384,7 +456,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Workspace */
+        /**
+         * Create Workspace
+         * @description Creates a process-local workspace. `Idempotency-Key` is optional and scoped to the authenticated
+         *     tenant. The same key replays the original workspace and returns `201`; because this operation has no
+         *     client representation, a same-key payload conflict cannot occur. The mapping is retained until the
+         *     workspace expires or is deleted, or until process restart. After a client timeout, retry is safe
+         *     only with the same key. Without a key, retry may create another workspace.
+         */
         post: operations["create_workspace_api_v1_workspaces_post"];
         delete?: never;
         options?: never;
@@ -436,7 +515,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Conversation */
+        /**
+         * Create Conversation
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["create_conversation_api_v1_workspaces__workspace_id__conversations_post"];
         delete?: never;
         options?: never;
@@ -453,7 +540,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Document Collection */
+        /**
+         * Create Document Collection
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["create_document_collection_api_v1_workspaces__workspace_id__document_collections_post"];
         delete?: never;
         options?: never;
@@ -470,7 +565,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Upload Tabular File */
+        /**
+         * Upload Tabular File
+         * @description This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create
+         *     another resource or repeat work and is not replayed; idempotency-key conflicts therefore do not
+         *     apply. The created resource follows its owning workspace's retention and is lost on process restart.
+         *     A client timeout or disconnect does not cancel server work, and the request must not be retried
+         *     automatically. Resolve the original outcome through its owning resource or ask the user before
+         *     submitting again. State/precondition conflicts return `409` and are not transient.
+         */
         post: operations["upload_tabular_file_api_v1_workspaces__workspace_id__tabular_uploads_post"];
         delete?: never;
         options?: never;
@@ -1067,6 +1170,8 @@ export interface components {
             conversation_id: string;
             /** Messages */
             messages: components["schemas"]["MessageResponse"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /** MessageResponse */
         MessageResponse: {
@@ -1908,7 +2013,10 @@ export interface operations {
     };
     list_messages_api_v1_conversations__conversation_id__messages_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
             header?: never;
             path: {
                 conversation_id: string;
@@ -2550,6 +2658,14 @@ export interface operations {
             /** @description Sanitized tabular query result */
             200: {
                 headers: {
+                    /** @description Always `none`; partial byte ranges are not supported. */
+                    "Accept-Ranges"?: string;
+                    /** @description Always `private, no-store`. */
+                    "Cache-Control"?: string;
+                    /** @description Attachment filename for the representation. */
+                    "Content-Disposition"?: string;
+                    /** @description Exact representation size in bytes. */
+                    "Content-Length"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2960,6 +3076,109 @@ export interface operations {
             };
         };
     };
+    retry_job_api_v1_jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     decide_sql_approval_api_v1_messages__message_id__approval_post: {
         parameters: {
             query?: never;
@@ -3190,6 +3409,14 @@ export interface operations {
             /** @description Generated report content */
             200: {
                 headers: {
+                    /** @description Always `none`; partial byte ranges are not supported. */
+                    "Accept-Ranges"?: string;
+                    /** @description Always `private, no-store`. */
+                    "Cache-Control"?: string;
+                    /** @description Attachment filename for the representation. */
+                    "Content-Disposition"?: string;
+                    /** @description Exact representation size in bytes. */
+                    "Content-Length"?: number;
                     [name: string]: unknown;
                 };
                 content: {

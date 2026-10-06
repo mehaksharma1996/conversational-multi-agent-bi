@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
@@ -24,6 +25,7 @@ from apps.api.dependencies import (
     get_repository,
 )
 from apps.api.errors import STANDARD_ERROR_RESPONSES, ApiError, ResourceConflictError
+from apps.api.http_semantics import DOWNLOAD_SEMANTICS, NON_IDEMPOTENT_CREATE_SEMANTICS
 from apps.api.models import (
     ConsentResponse,
     ConsentUpdateRequest,
@@ -40,6 +42,7 @@ from apps.api.models import (
     ReportResponse,
 )
 from apps.api.observability import ApiObservability
+from apps.api.pagination import decode_cursor, encode_cursor
 from apps.api.rate_limit import InMemoryRateLimiter, enforce_rate_limit
 from apps.api.repository import LocalResourceRepository
 from apps.api.serializers import (
@@ -78,6 +81,25 @@ ObservabilityDependency = Annotated[ApiObservability, Depends(get_observability)
 ApprovalCheckpointsDependency = Annotated[ApprovalCheckpoints, Depends(get_approval_checkpoints)]
 RateLimiterDependency = Annotated[InMemoryRateLimiter, Depends(get_rate_limiter)]
 
+DOWNLOAD_RESPONSE_HEADERS = {
+    "Accept-Ranges": {
+        "description": "Always `none`; partial byte ranges are not supported.",
+        "schema": {"type": "string"},
+    },
+    "Cache-Control": {
+        "description": "Always `private, no-store`.",
+        "schema": {"type": "string"},
+    },
+    "Content-Disposition": {
+        "description": "Attachment filename for the representation.",
+        "schema": {"type": "string"},
+    },
+    "Content-Length": {
+        "description": "Exact representation size in bytes.",
+        "schema": {"type": "integer", "minimum": 0},
+    },
+}
+
 REPORT_CONTENT_RESPONSES = {
     **STANDARD_ERROR_RESPONSES,
     200: {
@@ -86,6 +108,7 @@ REPORT_CONTENT_RESPONSES = {
             "text/markdown": {"schema": {"type": "string"}},
             "application/pdf": {"schema": {"type": "string", "format": "binary"}},
         },
+        "headers": DOWNLOAD_RESPONSE_HEADERS,
     },
 }
 EXPORT_CONTENT_RESPONSES = {
@@ -98,6 +121,7 @@ EXPORT_CONTENT_RESPONSES = {
                 "schema": {"type": "string", "format": "binary"}
             },
         },
+        "headers": DOWNLOAD_RESPONSE_HEADERS,
     },
 }
 
@@ -164,6 +188,7 @@ def delete_workspace(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["documents"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 async def create_document_collection(
     workspace_id: str,
@@ -294,6 +319,7 @@ def get_document_collection(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 def create_conversation(
     workspace_id: str,
@@ -337,6 +363,7 @@ def get_conversation(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 def create_message(
     conversation_id: str,
@@ -644,9 +671,20 @@ def list_messages(
     conversation_id: str,
     identity: IdentityDependency,
     repository: RepositoryDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query(min_length=1, max_length=512)] = None,
 ) -> MessageListResponse:
-    records = repository.list_messages(conversation_id, identity.tenant_id)
-    return message_list_response(conversation_id, records)
+    after = decode_cursor(cursor) if cursor is not None else None
+    records, has_more = repository.list_messages_page(
+        conversation_id,
+        identity.tenant_id,
+        limit=limit,
+        after=after,
+    )
+    next_cursor = (
+        encode_cursor(records[-1].created_at, records[-1].id) if has_more and records else None
+    )
+    return message_list_response(conversation_id, records, next_cursor)
 
 
 @router.post(
@@ -656,6 +694,7 @@ def list_messages(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["reports"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 def create_report(
     analysis_id: str,
@@ -684,6 +723,7 @@ def create_report(
     dependencies=[requires(Capability.REPORT_EXPORT)],
     responses=REPORT_CONTENT_RESPONSES,
     tags=["reports"],
+    description=DOWNLOAD_SEMANTICS,
 )
 def get_report_content(
     report_id: str,
@@ -723,6 +763,7 @@ def get_report_content(
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["exports"],
+    description=NON_IDEMPOTENT_CREATE_SEMANTICS,
 )
 def create_export(
     message_id: str,
@@ -784,6 +825,7 @@ def create_export(
     dependencies=[requires(Capability.REPORT_EXPORT)],
     responses=EXPORT_CONTENT_RESPONSES,
     tags=["exports"],
+    description=DOWNLOAD_SEMANTICS,
 )
 def get_export_content(
     export_id: str,
@@ -852,7 +894,19 @@ def _safe_pdf_filename(filename: str | None) -> str:
 
 def _download(payload: bytes, filename: str, media_type: str) -> StreamingResponse:
     return StreamingResponse(
-        BytesIO(payload),
+        _iter_download(payload),
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Accept-Ranges": "none",
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(payload)),
+        },
     )
+
+
+def _iter_download(payload: bytes, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
+    """Yield bounded chunks; a disconnect stops transfer without changing resources."""
+    view = memoryview(payload)
+    for offset in range(0, len(view), chunk_size):
+        yield bytes(view[offset : offset + chunk_size])
