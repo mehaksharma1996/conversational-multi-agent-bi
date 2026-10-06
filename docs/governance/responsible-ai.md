@@ -230,7 +230,8 @@ Limitations:
   workspaces, consent, and uploaded files survive a restart; datasets, analyses, chats, exports, and
   document indexes are still process-local and are lost, and without the flag every record is lost and the
   directories are orphaned until swept.
-- Chroma vector storage is not encrypted at rest.
+- Chroma vector storage is not encrypted at rest (time-bounded waiver and compensating controls:
+  [ADR 0021](../adr/0021-vector-store-encryption-waiver.md); use host disk encryption).
 - There is no retention or rotation policy for the audit files.
 - Deletion is not independently verified beyond the directory no longer existing.
 

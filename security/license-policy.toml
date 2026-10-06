@@ -1,0 +1,34 @@
+# Dependency license policy, enforced by `python -m scripts.check_licenses` (CI: security job).
+# Human-readable rationale and the exception process: docs/security/license-policy.md.
+#
+# A package passes when its declared license expression is satisfied by `allowed.spdx`:
+# "A OR B" needs one allowed alternative, "A AND B" needs every part allowed. Anything else
+# (GPL, AGPL, LGPL, SSPL, proprietary, unknown) fails unless it has a reviewed exception below.
+
+[allowed]
+spdx = [
+  # Permissive
+  "MIT", "MIT-0", "MIT-CMU", "BSD-2-Clause", "BSD-3-Clause", "0BSD", "ISC", "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception", "BlueOak-1.0.0", "Zlib", "BSL-1.0", "Unlicense",
+  "CC0-1.0", "PSF-2.0", "Python-2.0", "CNRI-Python", "AFL-2.1",
+  # Data licensed for use: caniuse-lite (browser-support data, build-time only)
+  "CC-BY-4.0",
+  # Weak, file-level copyleft: acceptable because we consume these unmodified as libraries.
+  "MPL-2.0",
+]
+
+# Non-SPDX spellings seen in package metadata, mapped to the identifier they mean.
+[aliases]
+"BSD" = "BSD-3-Clause"
+"3-Clause BSD License" = "BSD-3-Clause"
+"Apache License 2.0" = "Apache-2.0"
+"Apache License, Version 2.0" = "Apache-2.0"
+"Apache 2.0 License" = "Apache-2.0"
+
+# Reviewed exceptions. Each needs `reason` and `reviewed` (a date). `check_licenses` also fails
+# when an exception names a package that is no longer in the lock files, so they cannot rot.
+[[exception]]
+ecosystem = "npm"
+package = "stack-trace"
+reason = "0.0.9 declares no license in package.json; upstream felixge/node-stack-trace ships an MIT LICENSE file. Peer-only transitive dev dependency, never shipped in the web bundle."
+reviewed = "2026-10-06"

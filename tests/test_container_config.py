@@ -160,14 +160,26 @@ def test_every_interpolated_compose_variable_is_documented_in_env_example() -> N
 
 @pytest.mark.parametrize("dockerfile", [DOCKERFILE_API, DOCKERFILE_WEB], ids=["api", "web"])
 def test_dockerfiles_are_multi_stage_with_digest_pinned_bases(dockerfile: str) -> None:
-    assert len(_stages(dockerfile)) >= 2
-    base_arguments = [line for line in _instructions(dockerfile, "ARG") if "_IMAGE=" in line]
-    assert base_arguments, "base images must be declared as pinned ARGs"
-    for line in base_arguments:
-        assert re.search(r"@sha256:[0-9a-f]{64}$", line), f"unpinned base image: {line}"
-        assert ":latest" not in line
-    for line in _stages(dockerfile):
-        assert re.match(r"FROM \$\{[A-Z_]+_IMAGE\}( AS \w+)?$", line), line
+    # Literal digest-pinned FROM lines (not ARG defaults) so Dependabot's docker ecosystem can
+    # propose digest updates; later stages may only derive from an earlier named stage.
+    stages = _stages(dockerfile)
+    assert len(stages) >= 2
+    known_stages: set[str] = set()
+    pinned = 0
+    for line in stages:
+        match = re.match(r"FROM (\S+)(?: AS (\S+))?$", line)
+        assert match, line
+        image, name = match.groups()
+        if image in known_stages:
+            pass
+        else:
+            assert re.search(r"@sha256:[0-9a-f]{64}$", image), f"unpinned base image: {line}"
+            assert ":latest" not in image
+            pinned += 1
+        if name:
+            known_stages.add(name)
+    assert pinned >= 1, "at least one digest-pinned base image is required"
+    assert not [line for line in _instructions(dockerfile, "ARG") if "_IMAGE=" in line]
 
 
 @pytest.mark.parametrize("dockerfile", [DOCKERFILE_API, DOCKERFILE_WEB], ids=["api", "web"])
