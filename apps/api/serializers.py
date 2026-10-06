@@ -22,6 +22,7 @@ from apps.api.models import (
     DocumentCollectionResponse,
     ExportResponse,
     FieldMappingResponse,
+    JobResponse,
     MessageListResponse,
     MessageResponse,
     ProvenanceResponse,
@@ -43,6 +44,7 @@ from apps.api.repository import (
     TabularUploadRecord,
     WorkspaceRecord,
 )
+from packages.jobs import JobRecord
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 
@@ -59,6 +61,28 @@ def workspace_response(record: WorkspaceRecord) -> WorkspaceResponse:
         consent_accepted=record.consent_accepted_at is not None,
         data_recipients=list(record.data_recipients),
         created_at=record.created_at,
+    )
+
+
+def job_response(record: JobRecord) -> JobResponse:
+    """Serialize only content-free job metadata; never expose the in-memory result."""
+    return JobResponse(
+        id=record.id,
+        workspace_id=record.workspace_id,
+        operation=record.operation,
+        status=record.status,
+        progress_stage=record.progress_stage,
+        progress_completed=record.progress_completed,
+        progress_total=record.progress_total,
+        error_category=record.error_category,
+        cancel_requested=record.cancel_requested,
+        retryable=record.retryable,
+        attempt=record.attempt,
+        max_attempts=record.max_attempts,
+        request_id=record.request_id,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        expires_at=record.expires_at,
     )
 
 

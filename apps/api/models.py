@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from packages.jobs import JobStatus
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -31,6 +33,30 @@ class ErrorResponse(StrictModel):
 
 class HealthResponse(StrictModel):
     status: Literal["alive", "ready"]
+
+
+class JobResponse(StrictModel):
+    id: str
+    workspace_id: str
+    operation: str
+    status: JobStatus
+    progress_stage: str | None
+    progress_completed: int
+    progress_total: int | None
+    error_category: str | None
+    cancel_requested: bool
+    retryable: bool
+    attempt: int
+    max_attempts: int
+    request_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime
+
+
+class JobListResponse(StrictModel):
+    items: list[JobResponse]
+    next_cursor: str | None
 
 
 class WorkspaceResponse(StrictModel):

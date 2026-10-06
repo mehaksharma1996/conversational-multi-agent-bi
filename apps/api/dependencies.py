@@ -23,6 +23,7 @@ from apps.api.sessions import (
 from config.settings import Settings
 from packages.analytics import TabularApplicationService
 from packages.connectors import IdentityContext
+from packages.jobs import InProcessJobExecutor
 from packages.retrieval import DocumentApplicationService
 from src.llm.base import LLMClient
 from src.llm.observability import LLMCallRecord, LLMPricing, ObservedLLMClient
@@ -104,6 +105,10 @@ def _enforce_csrf(request: Request, session: BrowserSession) -> None:
 
 def get_repository(request: Request) -> LocalResourceRepository:
     return request.app.state.repository
+
+
+def get_job_executor(request: Request) -> InProcessJobExecutor:
+    return request.app.state.job_executor
 
 
 def get_observability(request: Request) -> ApiObservability:

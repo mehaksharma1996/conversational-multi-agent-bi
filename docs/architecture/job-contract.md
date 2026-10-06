@@ -3,10 +3,10 @@
 Defined by [ADR 0020](../adr/0020-in-process-execution-and-job-contract.md) for issue
 [#10](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/10). Implemented in
 `packages/jobs/` (framework-neutral: no FastAPI, Streamlit, or `apps` imports) with a process-local store and a
-bounded in-process executor. **No API operation is job-backed yet**; the HTTP surface (polling, idempotency
-headers, cancellation endpoints) belongs to
-[#17](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/17), and durable state to
-[#12](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/12).
+bounded in-process executor. The additive [HTTP control plane](job-http-contract.md) exposes tenant-owned
+listing, polling, and cancellation, but **no API operation is job-backed yet**. Operation migration and the
+remaining HTTP semantics belong to [#17](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/17),
+and durable state to [#12](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/12).
 Which operations should move first is in [request budgets](../operations/request-budgets.md).
 
 ## Record

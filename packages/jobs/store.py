@@ -99,6 +99,27 @@ class InMemoryJobStore:
         with self._lock:
             return self._expire_if_due_unlocked(self._owned_unlocked(job_id, tenant_id))
 
+    def list_page(
+        self,
+        tenant_id: str,
+        *,
+        limit: int,
+        after: tuple[datetime, str] | None = None,
+    ) -> tuple[tuple[JobRecord, ...], bool]:
+        """Return one tenant's jobs in stable creation order plus a next-page flag."""
+        if limit < 1:
+            raise ValueError("limit must be positive.")
+        with self._lock:
+            records = [record for record in self._jobs.values() if record.tenant_id == tenant_id]
+            records.sort(key=lambda record: (record.created_at, record.id))
+            if after is not None:
+                records = [record for record in records if (record.created_at, record.id) > after]
+            page = records[: limit + 1]
+            return (
+                tuple(self._expire_if_due_unlocked(record) for record in page[:limit]),
+                len(page) > limit,
+            )
+
     def transition(
         self,
         job_id: str,

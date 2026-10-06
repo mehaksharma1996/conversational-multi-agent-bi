@@ -17,6 +17,7 @@ from apps.api.authorization import (
     capabilities_for,
 )
 from apps.api.feature_routes import router as feature_router
+from apps.api.job_routes import router as job_router
 from apps.api.main import create_app
 from apps.api.routes import router as resource_router
 from packages.connectors import IdentityContext
@@ -64,7 +65,7 @@ def _api_routes(app: FastAPI) -> list[APIRoute]:
     """Every /api/v1 route, cross-checked against the app's OpenAPI operations."""
     routes = [
         route
-        for router in (resource_router, feature_router)
+        for router in (resource_router, feature_router, job_router)
         for route in router.routes
         if isinstance(route, APIRoute)
     ]
