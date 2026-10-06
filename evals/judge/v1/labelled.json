@@ -1,0 +1,127 @@
+{
+  "revision": "2026-10-06.1",
+  "description": "Synthetic question/context/answer triples with human rubric labels (1-5). All text is invented; none derives from user data.",
+  "rubric_version": "1.0.0",
+  "items": [
+    {
+      "id": "judge-01",
+      "question": "Which transactions require escalation?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "Transactions over 500 dollars require escalation to a senior analyst.",
+      "human": {
+        "groundedness": 5,
+        "completeness": 5,
+        "relevance": 5
+      },
+      "note": "faithful and complete"
+    },
+    {
+      "id": "judge-02",
+      "question": "Which transactions require escalation?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "Transactions over 5,000 dollars require escalation to the compliance director.",
+      "human": {
+        "groundedness": 1,
+        "completeness": 3,
+        "relevance": 5
+      },
+      "note": "invents numbers and a role"
+    },
+    {
+      "id": "judge-03",
+      "question": "What happens when a merchant is flagged twice in a month?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "The merchant is suspended pending review.",
+      "human": {
+        "groundedness": 5,
+        "completeness": 5,
+        "relevance": 5
+      },
+      "note": "faithful and complete"
+    },
+    {
+      "id": "judge-04",
+      "question": "What happens when a merchant is flagged twice in a month?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "Merchants are reviewed.",
+      "human": {
+        "groundedness": 3,
+        "completeness": 2,
+        "relevance": 4
+      },
+      "note": "vague and incomplete"
+    },
+    {
+      "id": "judge-05",
+      "question": "How are mid-sized transactions handled?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "Transactions between 100 and 500 dollars are sampled weekly, while anything above 500 dollars goes to a senior analyst, and merchants flagged twice in a month are suspended pending review, so every part of the policy is applied consistently across the organisation at all times.",
+      "human": {
+        "groundedness": 4,
+        "completeness": 3,
+        "relevance": 3
+      },
+      "note": "verbose, drifts to other rules"
+    },
+    {
+      "id": "judge-06",
+      "question": "How are mid-sized transactions handled?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "They are sampled weekly.",
+      "human": {
+        "groundedness": 5,
+        "completeness": 4,
+        "relevance": 5
+      },
+      "note": "short but correct; omits the 100-500 range"
+    },
+    {
+      "id": "judge-07",
+      "question": "What is the refund window?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "The refund window is 30 days from purchase.",
+      "human": {
+        "groundedness": 1,
+        "completeness": 1,
+        "relevance": 4
+      },
+      "note": "context has no refund policy; hallucinated"
+    },
+    {
+      "id": "judge-08",
+      "question": "What is the refund window?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "The provided policy does not describe a refund window.",
+      "human": {
+        "groundedness": 5,
+        "completeness": 5,
+        "relevance": 5
+      },
+      "note": "correct abstention"
+    },
+    {
+      "id": "judge-09",
+      "question": "Which transactions require escalation?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "Our quarterly revenue grew strongly and the weather in Paris was pleasant.",
+      "human": {
+        "groundedness": 1,
+        "completeness": 1,
+        "relevance": 1
+      },
+      "note": "irrelevant"
+    },
+    {
+      "id": "judge-10",
+      "question": "Which transactions are sampled weekly?",
+      "context": "Review policy. Transactions over 500 dollars require escalation to a senior analyst. Transactions between 100 and 500 dollars are sampled weekly. Merchants flagged twice in one month are suspended pending review.",
+      "answer": "Transactions between 100 and 500 dollars are sampled weekly. Larger ones require escalation to a senior analyst.",
+      "human": {
+        "groundedness": 5,
+        "completeness": 5,
+        "relevance": 4
+      },
+      "note": "faithful, one extra but supported sentence"
+    }
+  ]
+}

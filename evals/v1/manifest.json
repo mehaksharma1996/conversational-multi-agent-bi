@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "dataset_version": "v1",
-  "dataset_revision": "2026-10-06.1",
+  "dataset_revision": "2026-10-06.2",
   "description": "Synthetic, offline fixtures for route selection, guarded text-to-SQL, document RAG, hybrid provenance, memory, unsupported requests, and PII redaction. All values are invented; none derive from real user data.",
   "retrieval": {
     "chunk_size": 300,

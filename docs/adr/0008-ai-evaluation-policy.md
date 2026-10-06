@@ -45,3 +45,14 @@ See [the evaluation guide](../governance/evaluation.md).
 - Safety enforcement tests never depend on a live model.
 - A live-provider pass cannot override a deterministic safety failure.
 - Evaluation scores do not claim general semantic correctness or compliance.
+
+## Addendum (2026-10-06): trajectory metrics and an advisory judge
+
+Issue #29 adds two evaluation dimensions without changing the policy above:
+
+- **Trajectory metrics** are deterministic, content-free, and *gated*: per-route model-call budgets, a no-unnecessary-calls check, and failure-recovery cases that
+  inject provider errors and timeouts. They extend the existing "critical checks plus thresholds" model; the evaluator version is 1.1.0 and the baseline records them.
+- **An LLM-as-judge is strictly advisory.** It lives outside the gate (`scripts/run_judge.py`), is opt-in, uses only a synthetic labelled set, records its model, rubric
+  version, and prompt fingerprint, and reports calibration against human labels rather than a score. Its known biases (length and fluency preference, leniency, prompt
+  sensitivity, self-preference, run-to-run variance) are why it cannot block a merge or override a deterministic result. This preserves the invariant that safety
+  enforcement tests never depend on a live model.
