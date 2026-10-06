@@ -35,6 +35,8 @@ jobs:
         run: npm run test
       - name: Frontend production build
         run: npm run build
+      - name: Frontend bundle size budget
+        run: npm run check:bundle
       - name: Install browser test dependency
         run: npx playwright install --with-deps chromium
       - name: Frontend browser test

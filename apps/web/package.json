@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
     "generate:api": "openapi-typescript ../../openapi/openapi.json -o src/api/schema.d.ts",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
@@ -19,7 +20,7 @@
   },
   "dependencies": {
     "openapi-fetch": "0.17.0",
-    "plotly.js-dist-min": "4.1.1",
+    "plotly.js-cartesian-dist-min": "4.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-plotly.js": "4.1.0"
