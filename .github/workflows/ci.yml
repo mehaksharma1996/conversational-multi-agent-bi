@@ -90,6 +90,47 @@ jobs:
           path: evals/results/latest.json
           if-no-files-found: ignore
 
+  pgvector:
+    # Runs the document-index contract against a real PostgreSQL with pgvector. The default job matrix
+    # skips these cases (no database); this job is where the pgvector backend is actually exercised.
+    # The service image is a CI-only fixture; shipped images are digest-pinned separately.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: bi_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d bi_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGVECTOR_TEST_DSN: postgresql://ci:ci-only-password@127.0.0.1:5432/bi_ci
+      POSTGRES_DSN: postgresql://ci:ci-only-password@127.0.0.1:5432/bi_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.lock
+          python -m pip install -r requirements-postgres.txt
+      - name: "Apply and verify the schema (applied twice to prove idempotence)"
+        run: |
+          python -m scripts.migrate_postgres
+          python -m scripts.migrate_postgres
+          python -m scripts.migrate_postgres --verify
+      - name: Document index contract, migrations, and retrieval parity on pgvector
+        run: python -m pytest tests/test_document_index_contract.py tests/test_pgvector_store.py -rs -v
+
   containers:
     # Builds the real images and exercises the Compose topology end to end. Runs in
     # LOCAL_ONLY_MODE, so it needs no credentials and never contacts a model provider.

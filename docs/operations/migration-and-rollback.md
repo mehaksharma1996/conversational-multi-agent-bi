@@ -56,3 +56,58 @@ docker compose --profile streamlit up -d --wait streamlit
 
 This is a surface rollback, not a data migration. Report the regression with the commit SHA,
 request ID, browser console/CSP evidence, and the smallest reproducible input permitted by policy.
+
+## pgvector document index: apply, verify, and roll back
+
+This section applies only when `DOCUMENT_INDEX_BACKEND=pgvector` ([ADR 0018](../adr/0018-pgvector-document-index.md)). The default SQLite + Chroma install has no
+migrations; its data is process-local workspace directories plus the audit log (see [local containers](local-containers.md)).
+
+### Apply
+
+Credentials come from your environment only; never commit a DSN.
+
+```powershell
+pip install -r requirements-postgres.txt
+$env:POSTGRES_DSN = "postgresql://migrator:...@127.0.0.1:5432/bi"   # a role allowed to CREATE EXTENSION vector
+python -m scripts.migrate_postgres            # applies pending migrations; safe to repeat
+python -m scripts.migrate_postgres --verify   # read-only; exit 1 if the schema is not exactly current
+```
+
+Applying takes a transaction-scoped advisory lock, so two processes starting together cannot race, and each run is one transaction: a failing migration rolls back and
+records nothing. The application itself only *verifies* at startup (or applies if you set `POSTGRES_AUTO_MIGRATE=true`, which is not recommended for shared
+environments). Run the application as a role without `CREATE EXTENSION` rights.
+
+### What startup refuses
+
+| Situation | Behavior |
+|---|---|
+| Schema missing or behind | Startup fails with a message pointing at `scripts.migrate_postgres` |
+| Schema **newer** than the code | Startup fails; apply refuses to touch it. Upgrade the application, do not downgrade the schema blind |
+| Backend selected without a `postgresql://` DSN in the environment | Startup fails closed |
+
+### Back up and restore
+
+The index is derived data: every row can be rebuilt by re-uploading the PDFs. Back up when rebuilding is not acceptable, using your PostgreSQL tooling (the Compose
+`ops/` scripts cover the audit log only):
+
+```powershell
+pg_dump --format=custom --table=document_chunks --table=schema_migrations "$env:POSTGRES_DSN" --file bi-index.dump
+pg_restore --clean --if-exists --dbname "$env:POSTGRES_DSN" bi-index.dump
+python -m scripts.migrate_postgres --verify
+```
+
+### Roll back
+
+1. **Stop the new application version** (nothing else writes the index).
+2. If the previous application version expects an older schema, restore the dump taken *before* the upgrade (it restores `schema_migrations` too), then run
+   `python -m scripts.migrate_postgres --verify` with the **old** release: it must report current.
+3. If no dump exists, delete the index and rebuild: drop `document_chunks` and `schema_migrations`, run the old release's `scripts.migrate_postgres`, and have users
+   re-upload documents. Chunks are derived; nothing else is lost.
+4. To go back to the default backend instead, set `DOCUMENT_INDEX_BACKEND=chroma` (or unset it) and restart. Workspaces are process-local, so documents are re-indexed on upload.
+
+There are no down-migrations by design: a schema newer than the code is refused rather than reversed, which makes the restore-or-rebuild path above the supported rollback.
+
+### Verify in CI
+
+The `pgvector` CI job applies the migration twice (idempotence), verifies it, and runs the shared document-index contract and retrieval-metric parity against a service
+container. Locally those cases are skipped with an explicit reason unless `PGVECTOR_TEST_DSN` is set to a disposable database.

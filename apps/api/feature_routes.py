@@ -55,6 +55,7 @@ from src.agents.rag_agent import RAGAgentError
 from src.agents.report_agent import report_to_markdown
 from src.agents.sql_agent import SQLAgentError
 from src.documents.embedding import EmbeddingError
+from src.documents.pgvector_store import psycopg_connection_factory
 from src.ingestion.pdf_loader import PDFLoadError
 from src.llm.base import LLMClient, LLMConfigurationError, LLMGenerationError
 from src.memory.session_memory import remember_question
@@ -213,6 +214,14 @@ async def create_document_collection(
                     retrieval_top_k=settings.retrieval_top_k,
                     retrieval_max_distance=settings.retrieval_max_distance,
                     retrieval_hybrid=settings.retrieval_hybrid,
+                    index_backend=settings.document_index_backend,
+                    index_scope=f"{identity.tenant_id}/{workspace_id}",
+                    pgvector_connect=(
+                        psycopg_connection_factory(str(settings.postgres_dsn))
+                        if settings.document_index_backend == "pgvector"
+                        else None
+                    ),
+                    pgvector_auto_migrate=settings.postgres_auto_migrate,
                 )
             )
             operation.set(

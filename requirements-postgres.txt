@@ -1,0 +1,3 @@
+# Optional: only needed when DOCUMENT_INDEX_BACKEND=pgvector (ADR 0018).
+# The default SQLite + Chroma install and the container images do not use this file.
+psycopg[binary]==3.3.6

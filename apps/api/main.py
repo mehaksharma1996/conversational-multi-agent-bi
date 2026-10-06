@@ -50,6 +50,7 @@ def create_app(
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
+    active_settings.validate_document_index_configuration()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

@@ -24,6 +24,7 @@ React/FastAPI runtime became the primary local product.
 | [0015](0015-llm-telemetry-and-trace-export.md) | Content-free LLM call telemetry; no trace export yet | Accepted |
 | [0016](0016-hybrid-retrieval.md) | Hybrid dense + BM25 retrieval with a relevance gate | Accepted |
 | [0017](0017-model-providers-and-fallback.md) | Model providers, fallback, tier routing, and the local-model trust boundary | Accepted |
+| [0018](0018-pgvector-document-index.md) | pgvector document index behind the existing port; user-data SQL stays on SQLite | Accepted |
 
 ## ADR lifecycle
 
