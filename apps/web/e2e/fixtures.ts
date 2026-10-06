@@ -146,6 +146,18 @@ export const analysisFixture = {
     flagged_rows: [{ amount: 900, merchant: "North" }],
     limitations: ["Flags require human review."],
   },
+  classification: {
+    enabled: false,
+    reason: "At least 100 labelled rows are required; found 0.",
+    method: "disabled",
+    label_column: null,
+    positive_label: null,
+    feature_columns: [],
+    excluded_columns: {},
+    metrics: null,
+    review_candidates: [],
+    limitations: ["At least 100 labelled rows are required; found 0."],
+  },
   charts: [],
   report: { title: "Business analysis summary", sections: [{ title: "Overview", bullets: ["Three transactions were analyzed."], body: null }] },
 };
