@@ -36,7 +36,11 @@ def verify_directory(directory: Path) -> dict[str, dict[str, Any]]:
             valid = sink.verify(tenant_id)
         except (ValueError, KeyError, OSError):
             records, valid = 0, False  # unreadable or malformed content is a broken chain
-        results[tenant_id] = {"records": records, "valid": valid}
+        results[tenant_id] = {
+            "records": records,
+            "valid": valid,
+            "segments": len(sink.segments(tenant_id)),
+        }
     return results
 
 

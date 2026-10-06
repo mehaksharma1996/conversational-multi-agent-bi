@@ -64,6 +64,7 @@ class Settings:
     max_chat_messages: int = 50
     max_chat_dataframes_retained: int = 10
     audit_log_dir: Path | None = None
+    audit_max_segment_bytes: int | None = None
     sweep_orphaned_workspaces: bool = False
     durable_metadata: bool = False
     api_auth_mode: str = "local"
@@ -412,6 +413,7 @@ def get_settings() -> Settings:
         max_chat_messages=_positive_int("MAX_CHAT_MESSAGES", 50),
         max_chat_dataframes_retained=_non_negative_int("MAX_CHAT_DATAFRAMES_RETAINED", 10),
         audit_log_dir=_optional_path("AUDIT_LOG_DIR"),
+        audit_max_segment_bytes=_optional_positive_int("AUDIT_MAX_SEGMENT_BYTES"),
         sweep_orphaned_workspaces=_flag("SWEEP_ORPHANED_WORKSPACES"),
         durable_metadata=_flag("DURABLE_METADATA"),
         api_auth_mode=os.getenv("API_AUTH_MODE", "local").strip().lower(),
@@ -492,6 +494,16 @@ def _validate_web_origin(value: str) -> None:
 
 def _positive_int(name: str, default: int) -> int:
     value = int(os.getenv(name, str(default)))
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1.")
+    return value
+
+
+def _optional_positive_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    value = int(raw)
     if value < 1:
         raise ValueError(f"{name} must be at least 1.")
     return value

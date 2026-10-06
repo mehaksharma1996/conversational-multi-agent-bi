@@ -48,8 +48,8 @@ def test_verify_audit_reports_intact_chains_for_every_tenant(capsys: Any) -> Non
     output = json.loads(capsys.readouterr().out)
     assert status == 0
     assert output["ok"] is True
-    assert output["tenants"][TENANT_A] == {"records": 2, "valid": True}
-    assert output["tenants"][TENANT_B] == {"records": 1, "valid": True}
+    assert output["tenants"][TENANT_A] == {"records": 2, "valid": True, "segments": 0}
+    assert output["tenants"][TENANT_B] == {"records": 1, "valid": True, "segments": 0}
 
 
 def test_verify_audit_fails_when_a_record_was_edited(capsys: Any) -> None:
