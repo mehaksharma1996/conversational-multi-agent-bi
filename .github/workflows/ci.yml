@@ -189,6 +189,35 @@ jobs:
         if: always()
         run: docker compose --profile streamlit down -v
 
+  benchmarks:
+    # Reports indicative timings only. Shared runners are noisy, so this job never gates a merge:
+    # `continue-on-error` keeps the workflow green even if a benchmark cannot run. Compare the
+    # uploaded report with docs/operations/benchmarks.md by eye; do not add thresholds here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.lock
+      - name: Run benchmarks (non-blocking)
+        run: |
+          python -m scripts.run_benchmarks --output benchmark-results.json | tee benchmark-results.md
+          cat benchmark-results.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: |
+            benchmark-results.json
+            benchmark-results.md
+          if-no-files-found: ignore
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -25,6 +25,7 @@ React/FastAPI runtime became the primary local product.
 | [0016](0016-hybrid-retrieval.md) | Hybrid dense + BM25 retrieval with a relevance gate | Accepted |
 | [0017](0017-model-providers-and-fallback.md) | Model providers, fallback, tier routing, and the local-model trust boundary | Accepted |
 | [0018](0018-pgvector-document-index.md) | pgvector document index behind the existing port; user-data SQL stays on SQLite | Accepted |
+| [0019](0019-answer-cache-privacy.md) | No application answer cache yet; privacy requirements if one is added | Accepted |
 
 ## ADR lifecycle
 
