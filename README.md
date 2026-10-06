@@ -39,6 +39,11 @@ analysis, and ask *"What limitations or unavailable analysis apply here?"*. Add 
 (and drop `LOCAL_ONLY_MODE`) to unlock SQL, document, and hybrid questions, or use
 [Docker Compose](docs/operations/local-containers.md) (`docker compose up -d --build --wait`).
 
+For the supervised path, upload
+[`sample_data/labelled_transactions.csv`](sample_data/labelled_transactions.csv) and confirm
+`label` as the canonical label. This synthetic 160-row demo produces held-out decision metrics
+and a ranked human-review queue; it has no relationship to real people or events.
+
 ## Why it is different
 
 - **The model proposes; deterministic code enforces.** Generated SQL must pass a parser, table,

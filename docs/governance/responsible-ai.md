@@ -62,6 +62,30 @@ Limitations:
 - There is no labelled evaluation of anomaly precision or recall. The offline evaluation
   suite does not score anomaly quality.
 
+## Supervised-classification limitations
+
+Implemented: classification runs only after the user confirms a binary label mapping and the
+file has at least 100 labelled rows, at least 20 rows in each class, and a usable feature. The
+pipeline excludes identifiers, dates, constants, and deterministic target proxies; compares a
+class-weighted logistic regression with a class-weighted gradient-boosted tree using stratified
+training folds; chooses its threshold from out-of-fold training predictions; and reserves a
+stratified holdout for precision, recall, F1, ROC-AUC, PR-AUC, and confusion-matrix reporting.
+PR-AUC is the primary selection metric. The ranked output contains source-row references and
+scores only, and is explicitly presented as a human-review queue.
+
+Limitations:
+
+- Historical labels can encode bias, inconsistent decisions, or data-quality errors. The workbench
+  does not infer whether a label is fair or suitable for the proposed use.
+- Leakage detection catches identifiers and simple deterministic proxies, not every indirect,
+  temporal, or operational leak. A domain reviewer must inspect the selected features.
+- A holdout from one uploaded file does not establish future performance, calibration, fairness,
+  causation, or fitness for a consequential decision.
+- The selected threshold maximizes training-fold F1. It is not a policy threshold and must be
+  revalidated against business costs and new data.
+- Scores and predicted classes must not automatically approve, reject, accuse, prioritize services,
+  or otherwise determine an outcome for a person.
+
 ## Text-to-SQL risks and controls
 
 Implemented controls (each exercised by evaluation cases, with negative controls that
@@ -231,11 +255,11 @@ to the user; do not enable `DEBUG_LOG_RAW_CONTENT` on shared machines.
 
 | Area | Implemented | Recommended, not implemented |
 |---|---|---|
-| Review | Confirmation steps, visible SQL/sources, review notices | Organizational reviewer sign-off |
+| Review | Confirmation steps, visible SQL/sources, anomaly/classifier review notices | Organizational reviewer sign-off |
 | SQL safety | Parser + allowlists + authorizer + read-only + caps | Semantic verification against a data dictionary |
 | Grounding | Citation/quote checks, refusal without evidence | Claim-level entailment checking |
 | Privacy | Consent, redaction, local-only mode, allowlist telemetry | Question redaction, vector-store encryption, DLP tooling |
 | Audit | Append-only hash-chained per-tenant events | Off-host WORM storage, rotation, access controls on the audit file |
 | Retention | Sliding expiry, explicit delete | Durable metadata, orphan sweep, verified deletion |
-| Evaluation | Offline gated suite, opt-in live run | Real-model calibration sets, anomaly precision/recall studies |
+| Evaluation | Offline gated suite, classifier holdout metrics, opt-in live run | External validation, fairness studies, anomaly precision/recall studies |
 | Telemetry | Structured events, correlation IDs | Metrics/trace exporter, alerting, SLOs |

@@ -505,6 +505,7 @@ export interface components {
             };
             /** Charts */
             charts: components["schemas"]["ChartResponse"][];
+            classification: components["schemas"]["ClassificationResponse"];
             /**
              * Created At
              * Format: date-time
@@ -627,6 +628,59 @@ export interface components {
             };
             /** Title */
             title: string;
+        };
+        /** ClassificationMetricsResponse */
+        ClassificationMetricsResponse: {
+            /** Cv Pr Auc */
+            cv_pr_auc: number;
+            /** F1 */
+            f1: number;
+            /** False Negative */
+            false_negative: number;
+            /** False Positive */
+            false_positive: number;
+            /** Positive Rate */
+            positive_rate: number;
+            /** Pr Auc */
+            pr_auc: number;
+            /** Precision */
+            precision: number;
+            /** Recall */
+            recall: number;
+            /** Roc Auc */
+            roc_auc: number;
+            /** Threshold */
+            threshold: number;
+            /** True Negative */
+            true_negative: number;
+            /** True Positive */
+            true_positive: number;
+        };
+        /** ClassificationResponse */
+        ClassificationResponse: {
+            /** Enabled */
+            enabled: boolean;
+            /** Excluded Columns */
+            excluded_columns: {
+                [key: string]: string;
+            };
+            /** Feature Columns */
+            feature_columns: string[];
+            /** Label Column */
+            label_column: string | null;
+            /** Limitations */
+            limitations: string[];
+            /** Method */
+            method: string;
+            metrics: components["schemas"]["ClassificationMetricsResponse"] | null;
+            /** Positive Label */
+            positive_label: string | null;
+            /** Reason */
+            reason: string;
+            /** Review Candidates */
+            review_candidates: {
+                [key: string]: unknown;
+            }[];
         };
         /** ColumnProfileResponse */
         ColumnProfileResponse: {

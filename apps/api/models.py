@@ -168,6 +168,34 @@ class AnomalyResponse(StrictModel):
     limitations: list[str]
 
 
+class ClassificationMetricsResponse(StrictModel):
+    precision: float
+    recall: float
+    f1: float
+    roc_auc: float
+    pr_auc: float
+    cv_pr_auc: float
+    threshold: float
+    positive_rate: float
+    true_negative: int
+    false_positive: int
+    false_negative: int
+    true_positive: int
+
+
+class ClassificationResponse(StrictModel):
+    enabled: bool
+    reason: str
+    method: str
+    label_column: str | None
+    positive_label: str | None
+    feature_columns: list[str]
+    excluded_columns: dict[str, str]
+    metrics: ClassificationMetricsResponse | None
+    review_candidates: list[dict[str, Any]]
+    limitations: list[str]
+
+
 class ChartResponse(StrictModel):
     title: str
     chart_type: str
@@ -203,6 +231,7 @@ class AnalysisResponse(StrictModel):
     trend: list[dict[str, Any]] | None
     analytics_limitations: list[str]
     anomaly: AnomalyResponse
+    classification: ClassificationResponse
     charts: list[ChartResponse]
     report: BusinessReportResponse
 

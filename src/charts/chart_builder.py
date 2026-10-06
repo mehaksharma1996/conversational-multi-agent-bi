@@ -10,6 +10,7 @@ from plotly.graph_objects import Figure
 
 from src.analytics.anomaly_detection import AnomalyReport
 from src.analytics.basic_analytics import AnalyticsReport
+from src.analytics.supervised_classification import SupervisedClassificationReport
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 
@@ -29,6 +30,7 @@ def build_charts(
     schema_mapping: SchemaMapping,
     analytics_report: AnalyticsReport,
     anomaly_report: AnomalyReport,
+    classification_report: SupervisedClassificationReport | None = None,
 ) -> list[ChartSpec]:
     """Build all charts supported by the current dataset."""
     charts: list[ChartSpec] = []
@@ -48,7 +50,36 @@ def build_charts(
     if anomaly_chart is not None:
         charts.append(anomaly_chart)
 
+    classification_chart = _classification_chart(classification_report)
+    if classification_chart is not None:
+        charts.append(classification_chart)
+
     return charts
+
+
+def _classification_chart(
+    report: SupervisedClassificationReport | None,
+) -> ChartSpec | None:
+    if report is None or not report.enabled or report.precision_recall_curve.empty:
+        return None
+
+    figure = px.line(
+        report.precision_recall_curve,
+        x="recall",
+        y="precision",
+        title="Classifier Precision-Recall Curve",
+        labels={"recall": "Recall", "precision": "Precision"},
+    )
+    return ChartSpec(
+        title="Classifier Precision-Recall Curve",
+        chart_type="line",
+        description="Held-out precision and recall across classifier thresholds.",
+        figure=figure,
+        metadata={
+            "source": "classification_report.precision_recall_curve",
+            "columns": ["recall", "precision", "threshold"],
+        },
+    )
 
 
 def _trend_chart(analytics_report: AnalyticsReport) -> ChartSpec | None:

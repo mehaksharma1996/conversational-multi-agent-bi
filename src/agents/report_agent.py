@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from src.analytics.anomaly_detection import AnomalyReport
 from src.analytics.basic_analytics import AnalyticsReport
+from src.analytics.supervised_classification import SupervisedClassificationReport
 from src.charts.chart_builder import ChartSpec
 from src.profiling.capability_detector import CapabilityReport
 from src.profiling.data_profiler import DataProfile
@@ -33,6 +34,7 @@ def generate_business_report(
     anomaly_report: AnomalyReport,
     chart_specs: list[ChartSpec],
     document_status: dict | None = None,
+    classification_report: SupervisedClassificationReport | None = None,
 ) -> BusinessReport:
     """Build a deterministic report from existing analysis outputs."""
     sections = [
@@ -42,9 +44,15 @@ def generate_business_report(
         _capabilities_section(capability_report),
         _analytics_section(analytics_report),
         _anomaly_section(anomaly_report),
+        _classification_section(classification_report),
         _charts_section(chart_specs),
         _documents_section(document_status),
-        _limitations_section(schema_mapping, analytics_report, anomaly_report),
+        _limitations_section(
+            schema_mapping,
+            analytics_report,
+            anomaly_report,
+            classification_report,
+        ),
     ]
 
     return BusinessReport(
@@ -174,6 +182,30 @@ def _anomaly_section(anomaly_report: AnomalyReport) -> ReportSection:
     return ReportSection(title="Anomaly Findings", bullets=bullets)
 
 
+def _classification_section(
+    report: SupervisedClassificationReport | None,
+) -> ReportSection:
+    if report is None or not report.enabled or report.metrics is None:
+        reason = report.reason if report is not None else "Classification was not requested."
+        return ReportSection(title="Supervised Classification", bullets=[f"Unavailable: {reason}"])
+
+    metrics = report.metrics
+    bullets = [
+        f"Selected model: {report.method}",
+        f"Confirmed label: {report.label_column}; positive class: {report.positive_label}",
+        f"Holdout PR-AUC: {metrics.pr_auc:.3f}; ROC-AUC: {metrics.roc_auc:.3f}",
+        f"At threshold {metrics.threshold:.3f}: precision {metrics.precision:.3f}, "
+        f"recall {metrics.recall:.3f}, F1 {metrics.f1:.3f}",
+        f"Confusion matrix: TN {metrics.true_negative}, FP {metrics.false_positive}, "
+        f"FN {metrics.false_negative}, TP {metrics.true_positive}",
+        f"Ranked {len(report.review_candidates):,} candidate row(s) for human review.",
+        "Scores support human review only and must not trigger automated decisions.",
+    ]
+    if report.excluded_columns:
+        bullets.append(f"Excluded {len(report.excluded_columns):,} unsafe or unusable column(s).")
+    return ReportSection(title="Supervised Classification", bullets=bullets)
+
+
 def _charts_section(chart_specs: list[ChartSpec]) -> ReportSection:
     if not chart_specs:
         return ReportSection(
@@ -210,6 +242,7 @@ def _limitations_section(
     schema_mapping: SchemaMapping,
     analytics_report: AnalyticsReport,
     anomaly_report: AnomalyReport,
+    classification_report: SupervisedClassificationReport | None,
 ) -> ReportSection:
     bullets = []
     missing_fields = schema_mapping.missing_fields()
@@ -217,6 +250,8 @@ def _limitations_section(
         bullets.append("Missing canonical fields: " + ", ".join(missing_fields))
     bullets.extend(analytics_report.limitations)
     bullets.extend(anomaly_report.limitations)
+    if classification_report is not None:
+        bullets.extend(classification_report.limitations)
     if not bullets:
         bullets.append("No major deterministic limitations were detected.")
     return ReportSection(title="Limitations", bullets=bullets)

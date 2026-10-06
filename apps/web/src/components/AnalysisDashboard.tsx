@@ -79,8 +79,9 @@ export function AnalysisDashboard({
       </div>
 
       <StatusBanner kind="info">
-        Anomaly flags are review candidates, not confirmed fraud or misconduct. This workbench
-        supports human decisions; it does not make autonomous decisions.
+        Anomaly flags and classifier scores are review candidates, not confirmed fraud,
+        misconduct, or eligibility. This workbench supports human decisions; it does not make
+        autonomous decisions.
       </StatusBanner>
 
       <div className="button-row report-actions" aria-label="Report downloads">
@@ -99,6 +100,12 @@ export function AnalysisDashboard({
           <span>Anomalies flagged</span>
           <strong>{analysis.anomaly.flagged_count.toLocaleString()}</strong>
         </div>
+        {analysis.classification.metrics ? (
+          <div className="metric-card metric-card--accent">
+            <span>Classifier PR-AUC</span>
+            <strong>{analysis.classification.metrics.pr_auc.toFixed(3)}</strong>
+          </div>
+        ) : null}
       </div>
 
       <div className="capability-list" aria-label="Analysis capabilities">
@@ -162,6 +169,37 @@ export function AnalysisDashboard({
             <p className="fine-print" key={limitation}>{limitation}</p>
           ))}
           <RecordsTable caption="Rows flagged for review" records={analysis.anomaly.flagged_rows} />
+        </article>
+
+        <article className="result-card">
+          <h3>Supervised classification</h3>
+          {analysis.classification.enabled && analysis.classification.metrics ? (
+            <>
+              <dl className="definition-grid">
+                <div><dt>Model</dt><dd>{analysis.classification.method.replaceAll("_", " ")}</dd></div>
+                <div><dt>Label</dt><dd>{analysis.classification.label_column ?? "Unknown"}</dd></div>
+                <div><dt>Precision</dt><dd>{analysis.classification.metrics.precision.toFixed(3)}</dd></div>
+                <div><dt>Recall</dt><dd>{analysis.classification.metrics.recall.toFixed(3)}</dd></div>
+                <div><dt>F1</dt><dd>{analysis.classification.metrics.f1.toFixed(3)}</dd></div>
+                <div><dt>ROC-AUC</dt><dd>{analysis.classification.metrics.roc_auc.toFixed(3)}</dd></div>
+                <div><dt>PR-AUC</dt><dd>{analysis.classification.metrics.pr_auc.toFixed(3)}</dd></div>
+                <div><dt>Threshold</dt><dd>{analysis.classification.metrics.threshold.toFixed(3)}</dd></div>
+              </dl>
+              <p className="fine-print">
+                These scores rank cases for human review only. They do not prove an outcome and
+                must not trigger automated decisions.
+              </p>
+              {analysis.classification.limitations.map((limitation) => (
+                <p className="fine-print" key={limitation}>{limitation}</p>
+              ))}
+              <RecordsTable
+                caption="Classifier candidates for human review"
+                records={analysis.classification.review_candidates}
+              />
+            </>
+          ) : (
+            <p>{analysis.classification.reason}</p>
+          )}
         </article>
 
         <article className="result-card report-card">
