@@ -13,7 +13,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import Lock
 from time import perf_counter
 
@@ -129,6 +129,19 @@ class InProcessJobExecutor:
         if record.status is JobStatus.EXPIRED:
             self._forget(job_id)
         return record
+
+    def list_page(
+        self,
+        tenant_id: str,
+        *,
+        limit: int,
+        after: tuple[datetime, str] | None = None,
+    ) -> tuple[tuple[JobRecord, ...], bool]:
+        records, has_more = self._store.list_page(tenant_id, limit=limit, after=after)
+        for record in records:
+            if record.status is JobStatus.EXPIRED:
+                self._forget(record.id)
+        return records, has_more
 
     def cancel(self, job_id: str, tenant_id: str) -> JobRecord:
         """Best effort: queued jobs are cancelled now; running jobs stop when they next check."""

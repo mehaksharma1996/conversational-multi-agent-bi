@@ -14,6 +14,8 @@ an API in this iteration.
 - UTC timestamps use RFC 3339 strings.
 - Mutating retryable requests accept an idempotency key.
 - Responses return `X-Request-ID`; failures use the safe error envelope below.
+- Job polling, cursor pagination, cancellation, and future create-operation idempotency are specified
+  in the [job HTTP contract](job-http-contract.md).
 
 ```json
 {
@@ -65,7 +67,8 @@ an API in this iteration.
 | `GET /reports/{report_id}/content` | Stream a report | Correct content disposition and media type. |
 | `POST /messages/{message_id}/exports` | Create safe CSV/XLSX result export | Spreadsheet neutralization is mandatory. |
 | `GET /exports/{export_id}/content` | Stream export | Tenant-owned and expiring. |
-| `GET /jobs/{job_id}` | Read job status/progress/result | Ownership enforced. |
+| `GET /jobs` | List tenant-owned jobs | Stable opaque cursor pagination; content-free metadata only. |
+| `GET /jobs/{job_id}` | Read job status/progress metadata | Ownership enforced; result payload stays behind its owning resource. |
 | `DELETE /jobs/{job_id}` | Request cancellation | Best effort with explicit final state. |
 | `GET /health/live` | Process liveness | No external dependency disclosure. |
 | `GET /health/ready` | Dependency and migration readiness | Safe aggregate status only. |

@@ -28,6 +28,20 @@ def test_openapi_contract_is_versioned_and_never_accepts_tenant_authority() -> N
     assert "/api/v1/conversations/{conversation_id}/messages" in paths
     assert "/api/v1/reports/{report_id}/content" in paths
     assert "/api/v1/workspaces/{workspace_id}" in paths
+    assert "/api/v1/jobs" in paths
+    assert "/api/v1/jobs/{job_id}" in paths
+
+
+def test_job_openapi_contract_declares_pagination_and_cancellation_responses() -> None:
+    contract = create_app().openapi()
+    list_operation = contract["paths"]["/api/v1/jobs"]["get"]
+    cancel_operation = contract["paths"]["/api/v1/jobs/{job_id}"]["delete"]
+
+    parameters = {parameter["name"]: parameter for parameter in list_operation["parameters"]}
+    assert parameters["limit"]["schema"]["minimum"] == 1
+    assert parameters["limit"]["schema"]["maximum"] == 100
+    assert "cursor" in parameters
+    assert set(cancel_operation["responses"]) >= {"200", "202", "404", "422"}
 
 
 def test_openapi_declares_bearer_auth_for_api_resources_but_not_health() -> None:

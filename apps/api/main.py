@@ -14,6 +14,7 @@ from apps.api.auth_routes import router as auth_router
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
+from apps.api.job_routes import router as job_router
 from apps.api.models import ErrorResponse, HealthResponse
 from apps.api.observability import ApiObservability
 from apps.api.oidc_login import IdTokenVerifier, OidcLoginService
@@ -25,6 +26,7 @@ from config.settings import Settings, get_settings
 from packages.analytics import TabularApplicationService
 from packages.connectors import AuditSink
 from packages.governance import JsonlAuditSink
+from packages.jobs import InMemoryJobStore, InProcessJobExecutor
 from packages.observability import (
     LoggingTelemetrySink,
     TelemetrySink,
@@ -51,6 +53,7 @@ def create_app(
     login_service: OidcLoginService | None = None,
     rate_limiter: InMemoryRateLimiter | None = None,
     embedding_cache: EmbeddingVectorCache | None = None,
+    job_executor: InProcessJobExecutor | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
@@ -108,6 +111,7 @@ def create_app(
     application.state.embedding_cache = embedding_cache or EmbeddingVectorCache(
         active_settings.embedding_cache_max_entries
     )
+    application.state.job_executor = job_executor or InProcessJobExecutor(InMemoryJobStore())
     application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(
         observability,
         application.state.approval_checkpoints,
@@ -179,6 +183,7 @@ def create_app(
     application.include_router(auth_router)
     application.include_router(router)
     application.include_router(feature_router)
+    application.include_router(job_router)
     return application
 
 
@@ -242,6 +247,7 @@ def _start(app: FastAPI) -> None:
 
 
 def _stop(app: FastAPI) -> None:
+    app.state.job_executor.shutdown()
     app.state.repository.close()
     app.state.observability.telemetry.emit("service.stopped")
 
