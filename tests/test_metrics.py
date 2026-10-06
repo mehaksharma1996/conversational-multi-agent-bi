@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import replace
 from typing import Any
@@ -209,3 +210,56 @@ def test_the_metrics_endpoint_is_not_part_of_the_public_api_contract() -> None:
     client = _app("metrics_contract", metrics_enabled=True)
 
     assert "/metrics" not in client.get("/openapi.json").json()["paths"]
+
+
+def test_job_transitions_become_content_free_telemetry_and_metrics() -> None:
+    from apps.api.main import create_app
+
+    sink = InMemoryTelemetrySink()
+    settings = replace(_settings(isolated_directory_path("metrics_jobs")), metrics_enabled=True)
+    app = create_app(
+        settings=settings,
+        embedder_factory=lambda _model: FakeEmbedder(),
+        llm_client_factory=lambda _settings: FakeLLM(),
+        telemetry_sink=sink,
+    )
+    tenant = "a" * 32
+
+    def fails(_context: object) -> None:
+        raise ValueError(SECRET_QUESTION)
+
+    with TestClient(app) as client:
+        executor = app.state.job_executor
+        ok, _ = executor.submit(
+            tenant_id=tenant,
+            workspace_id="ws_" + "1" * 32,
+            operation="test.run",
+            work=lambda _context: {"private": SECRET_SQL},
+            request_id="req-job-1",
+        )
+        bad, _ = executor.submit(
+            tenant_id=tenant,
+            workspace_id="ws_" + "1" * 32,
+            operation="test.run",
+            work=fails,
+            max_attempts=1,
+        )
+        executor.wait(ok.id, tenant, timeout=10)
+        executor.wait(bad.id, tenant, timeout=10)
+        text = client.get("/metrics").text
+
+    assert 'bi_jobs_total{operation="test.run",status="queued"} 2' in text
+    assert 'bi_jobs_total{operation="test.run",status="running"} 2' in text
+    assert 'bi_jobs_total{operation="test.run",status="succeeded"} 1' in text
+    assert 'bi_jobs_total{operation="test.run",status="failed"} 1' in text
+    assert 'bi_event_duration_ms_count{event="job.transition"} 2' in text
+    assert 'event="job.transition"' in text and "error_category=" in text
+    events = [e for e in sink.events if e.name == "job.transition"]
+    assert {e.request_id for e in events if e.attributes["job_status"] == "succeeded"} == {
+        "req-job-1"
+    }, "the originating request ID correlates the job's telemetry"
+    for forbidden in (SECRET_QUESTION, SECRET_SQL, "req-job-1", ok.id, bad.id, tenant):
+        assert forbidden not in text, forbidden
+    for event in events:
+        assert SECRET_QUESTION not in json.dumps(event.as_dict(), default=str)
+        assert event.attributes["job_operation"] == "test.run"

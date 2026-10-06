@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from time import perf_counter
 
 from fastapi import FastAPI, Request
@@ -30,7 +30,7 @@ from config.settings import Settings, get_settings
 from packages.analytics import TabularApplicationService
 from packages.connectors import AuditSink
 from packages.governance import JsonlAuditSink, record_configuration
-from packages.jobs import InMemoryJobStore, InProcessJobExecutor
+from packages.jobs import InMemoryJobStore, InProcessJobExecutor, JobEvent
 from packages.observability import (
     FanOutTelemetrySink,
     LoggingTelemetrySink,
@@ -139,7 +139,9 @@ def create_app(
     application.state.embedding_cache = embedding_cache or EmbeddingVectorCache(
         active_settings.embedding_cache_max_entries
     )
-    application.state.job_executor = job_executor or InProcessJobExecutor(InMemoryJobStore())
+    application.state.job_executor = job_executor or InProcessJobExecutor(
+        InMemoryJobStore(), observer=_job_observer(observability)
+    )
     application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(
         observability,
         application.state.approval_checkpoints,
@@ -258,6 +260,26 @@ def _build_login_service(
     if sessions is None or not isinstance(provider, IdTokenVerifier):
         raise ValueError("Browser sign-in requires the OIDC identity provider and session store.")
     return OidcLoginService(settings=settings, verifier=provider, sessions=sessions)
+
+
+def _job_observer(observability: ApiObservability) -> Callable[[JobEvent], None]:
+    """Turn job lifecycle events into content-free telemetry (counts, status, duration only)."""
+
+    def observe(event: JobEvent) -> None:
+        outcome = {"succeeded": "success", "failed": "failure"}.get(event.status.value)
+        with bind_request_id(event.request_id) if event.request_id else nullcontext():
+            observability.telemetry.emit(
+                "job.transition",
+                tenant_id=event.tenant_id,
+                job_operation=event.operation,
+                job_status=event.status.value,
+                job_attempt=event.attempt,
+                outcome=outcome,
+                error_category=event.error_category,
+                duration_ms=event.duration_ms,
+            )
+
+    return observe
 
 
 def _record_configuration(settings: Settings, observability: ApiObservability) -> None:

@@ -110,6 +110,9 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "cache_hits": "int",
     "cache_misses": "int",
     "cache_entries": "int",
+    "job_operation": "token",
+    "job_status": "token",
+    "job_attempt": "int",
 }
 
 AttributeValue = str | int | float | bool
