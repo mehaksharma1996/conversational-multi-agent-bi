@@ -1,5 +1,5 @@
-streamlit==1.64.0
-fastapi==0.141.1
+streamlit==1.65.0
+fastapi==0.142.2
 pydantic==2.13.5
 uvicorn==0.54.0
 python-multipart==0.0.32
@@ -10,11 +10,11 @@ sqlcipher3==0.6.2
 pandas==3.0.6
 openpyxl==3.1.5
 xlrd==2.0.2
-python-dotenv==1.2.3
+python-dotenv==1.2.4
 plotly==7.1.0
 kaleido==1.4.0
 scikit-learn==1.9.1
-google-genai==2.25.0
+google-genai==2.28.0
 langgraph==1.2.12
 mcp==2.3.0
 chromadb==1.5.9
