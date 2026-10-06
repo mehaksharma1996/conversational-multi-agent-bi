@@ -40,5 +40,6 @@ behavior for every create operation so issue #17 can close.
 
 ## Do not touch
 
-- No worker, broker, persistence, new API version, prompt/evaluation change, or frontend UX redesign.
+- Keep HTTP v1; add no worker, broker, persistence, or frontend UX redesign.
+- Prompts and evaluation policy stay unchanged.
 - Do not expose job results, closures, exception text, idempotency keys, or user content.
