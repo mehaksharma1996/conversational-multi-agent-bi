@@ -1,6 +1,7 @@
 # Reviewed false positives. Each entry is one exact finding fingerprint, never a rule or a path.
 #
-# docs/adr/0020 line 34 (commit a598b36): the prose "idempotency key, creation/expiry time" was read as
-# a key=value pair by the generic-api-key rule. It contains no secret; the sentence was reworded in the
-# next commit, but the finding remains in the scanned commit range.
+# Both entries are the generic-api-key rule matching ordinary prose that lists job record fields
+# (a comma-separated sentence in ADR 0020). Neither contains a secret. The ADR sentence was reworded;
+# the findings remain because they sit in commits that are already pushed and cannot be rewritten.
 a598b3632be23504697ba5a3002451f0c794ac0f:docs/adr/0020-in-process-execution-and-job-contract.md:generic-api-key:34
+3e5546df0d6619926e0f043115f93b47fee4e4e8:.gitleaksignore:generic-api-key:3
