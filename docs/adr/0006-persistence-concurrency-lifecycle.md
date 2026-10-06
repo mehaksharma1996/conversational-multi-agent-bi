@@ -43,10 +43,10 @@ verification exists. **Not implemented (as of Phase 7):** durable resource metad
 metadata, migrations, restart recovery of workspaces, and backup/restore of workspace state.
 The resulting waiver of "survives restart" is recorded in [ADR 0010](0010-local-container-release.md).
 
-**Update (2026-10-06):** [ADR 0022](0022-durable-workspace-metadata.md) delivers the first slice: a versioned
-metadata database with forward-only migrations, startup reconciliation, and verified workspace backup/restore
-for workspaces, consent, and uploads. Dataset, analysis, conversation, and index recovery follow in slices
-12b and 12c.
+**Update (2026-10-06):** [ADR 0022](0022-durable-workspace-metadata.md) delivers durable metadata: a
+versioned database with forward-only migrations, startup reconciliation, verified workspace backup/restore, and
+recovery of workspaces, consent, uploads, datasets, analyses, reports, conversations, messages, exports, and
+document indexes (slices 12a, 12b, 12c).
 
 ## Invariants
 

@@ -68,18 +68,21 @@ embedding model download; it is covered by the API tests and evaluations.
 
 | Volume | Mounted at | Holds | Persists across restart | Back up? |
 |---|---|---|---|---|
-| `bi-data` | `/data` | Workspace metadata database (`api/.metadata/`), uploaded files, per-workspace SQLite and Chroma files | Workspaces, consent, and uploaded files do; datasets, analyses, chats, and indexes do not yet (see below) | **Yes** ([workspace backup](#backup-and-restore-workspace-state)) |
+| `bi-data` | `/data` | Workspace metadata database (`api/.metadata/`), uploaded files, per-workspace SQLite and Chroma files | Everything a user creates in a workspace does (see below); only a pending SQL approval and jobs do not | **Yes** ([workspace backup](#backup-and-restore-workspace-state)) |
 | `bi-audit` | `/audit` | Append-only audit log (`<tenant>.jsonl`) | Yes | **Yes** |
 | `bi-models` | `/models` | Hugging Face model cache | Yes | Optional |
 
 **What a restart does.** Compose sets `DURABLE_METADATA=true` ([ADR 0022](../adr/0022-durable-workspace-metadata.md)).
 After `docker compose restart api` (or a crash) the API reopens a versioned SQLite metadata database,
 migrates it forward, and restores workspaces, their consent state, hashed idempotency keys, and uploaded
-files (each verified by SHA-256 when read). Expired workspaces are removed through the audited path, rows
-whose files are missing are dropped, and directories no row owns are swept. A user can resume the
-workspace and rebuild a dataset from the recovered upload. **Not yet recovered** (tracked in issue #12,
-slices 12b and 12c): datasets, analyses, reports, conversations, exports, and document indexes; the user
-re-runs those steps. Startup refuses to run on a database written by a newer build, and quarantines an
+files (each verified by SHA-256 when read), then rebuilds datasets, analyses, and reports from those inputs
+the first time a workspace is used (the same deterministic processing, so results match; the first request
+after a restart pays that cost once). Expired workspaces are removed through the audited path, rows whose
+files are missing are dropped (with anything built on them), and directories no row owns are swept.
+Conversations, messages, and exports come back from the workspace's own `content.db` (encrypted when
+`APP_ENCRYPTION_KEY` is set), and the document index is reopened, not re-embedded, after its chunk count is
+verified. **Not recovered:** a SQL approval that was pending at the time (it is marked rejected and nothing
+runs) and jobs. Startup refuses to run on a database written by a newer build, and quarantines an
 unreadable database (`metadata.db.corrupt-<UTC stamp>`) without sweeping the directories it can no longer
 account for. Local development without Compose keeps the old process-local behaviour unless
 `DURABLE_METADATA=true` is set.
@@ -91,7 +94,7 @@ Other knobs (limits, retention, retrieval distance) are environment variables li
 
 ```powershell
 docker compose stop                # stop, keep everything
-docker compose restart api         # restart the API (workspaces and uploads recover; see above)
+docker compose restart api         # restart the API (workspace state recovers; see above)
 docker compose down                # remove containers, keep volumes
 docker compose down -v             # remove containers AND all volumes: a full reset
 ```
@@ -238,8 +241,10 @@ emit the API's audit events. Its disposition is governed by [ADR 0009](../adr/00
 
 ## Known limitations
 
-- Only workspaces, consent, and uploads are durable so far (slice 12a); datasets, analyses, chats, and
-  indexes are still process-local (waiver in ADR 0010, narrowed by ADR 0022). Run exactly one API container.
+- Workspace state is durable (ADR 0022; the ADR 0010 waiver is closed except for pending approvals and
+  jobs). Run exactly one API container.
+- Conversation content is stored in each workspace's `content.db`; it is plain SQLite unless
+  `APP_ENCRYPTION_KEY` is set, and changing that key makes earlier encrypted content unreadable.
 - No user authentication; loopback only.
 - No worker, telemetry profile, image scanning, or SBOM yet (see ADR 0010 follow-ups).
 - Compose and the smoke test were validated in CI on Linux; other Docker hosts (Docker Desktop on

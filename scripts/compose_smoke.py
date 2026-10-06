@@ -225,6 +225,19 @@ def run_compose_checks(client: Client, timeout: float, csv_path: Path) -> None:
         "POST", "/api/v1/workspaces", headers={"Idempotency-Key": uuid.uuid4().hex}, expect=201
     )
     survivor_dataset = confirmed_dataset(client, survivor["id"], csv_path)
+    client.json("POST", f"/api/v1/datasets/{survivor_dataset['id']}/analyses", {}, expect=201)
+    survivor_conversation, _ = client.json(
+        "POST",
+        f"/api/v1/workspaces/{survivor['id']}/conversations",
+        {"dataset_id": survivor_dataset["id"]},
+        expect=201,
+    )
+    survivor_message, _ = client.json(
+        "POST",
+        f"/api/v1/conversations/{survivor_conversation['id']}/messages",
+        {"question": MEMORY_QUESTION},
+        expect=201,
+    )
     find_workspaces = "find /data/api -mindepth 2 -maxdepth 2 -name 'ws_*'"
     on_disk = compose("exec", "-T", "api", "sh", "-c", find_workspaces).stdout.split()
     check(len(on_disk) == 1, "the live workspace has files on the data volume")
@@ -241,10 +254,22 @@ def run_compose_checks(client: Client, timeout: float, csv_path: Path) -> None:
     # Durable metadata (ADR 0022): the workspace and its uploaded file are recovered.
     restored, _ = client.json("GET", f"/api/v1/workspaces/{survivor['id']}", expect=200)
     check(restored["id"] == survivor["id"], "workspace metadata survived the restart")
+    recovered, _ = client.json("GET", f"/api/v1/datasets/{survivor_dataset['id']}", expect=200)
+    check(
+        recovered["status"] == "ready" and recovered["row_count"] == survivor_dataset["row_count"],
+        "confirmed dataset rebuilt from the recovered upload",
+    )
+    history, _ = client.json(
+        "GET", f"/api/v1/conversations/{survivor_conversation['id']}/messages", expect=200
+    )
+    check(
+        [m["id"] for m in history["messages"]] == [survivor_message["id"]],
+        "conversation history survived the restart",
+    )
     client.json(
         "POST", f"/api/v1/tabular-uploads/{survivor_dataset['upload_id']}/dataset", {}, expect=201
     )
-    check(True, "uploaded file recovered; a dataset can be rebuilt from it")
+    check(True, "recovered upload can seed a new dataset")
     leftovers = compose("exec", "-T", "api", "sh", "-c", find_workspaces).stdout.split()
     check(
         len(leftovers) == 1 and leftovers[0].endswith(survivor["id"]),

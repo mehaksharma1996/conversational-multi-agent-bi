@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from apps.api.approvals import ApprovalCheckpoints
 from apps.api.auth import RequestIdentityProvider, build_identity_provider
 from apps.api.auth_routes import router as auth_router
+from apps.api.content_store import WorkspaceContentStore
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
@@ -20,6 +21,7 @@ from apps.api.models import ErrorResponse, HealthResponse
 from apps.api.observability import ApiObservability
 from apps.api.oidc_login import IdTokenVerifier, OidcLoginService
 from apps.api.rate_limit import InMemoryRateLimiter
+from apps.api.rehydration import ApiRehydrator
 from apps.api.repository import LocalResourceRepository, WorkspaceRecord
 from apps.api.routes import router
 from apps.api.sessions import InMemorySessionStore
@@ -97,6 +99,11 @@ def create_app(
             if active_settings.durable_metadata
             else None
         ),
+        content_store=(
+            WorkspaceContentStore(storage_root.resolve(), active_settings.sqlite_encryption_key)
+            if active_settings.durable_metadata
+            else None
+        ),
     )
     if telemetry_sink is None:
         configure_telemetry_logging()
@@ -137,6 +144,11 @@ def create_app(
             cache_misses=misses,
             cache_entries=entries,
         ),
+    )
+    application.state.repository.rehydrator = ApiRehydrator(
+        application.state.tabular_service,
+        active_settings,
+        application.state.document_service,
     )
     application.state.llm_client_factory = llm_client_factory or build_llm_client
 
@@ -268,6 +280,11 @@ def _start(app: FastAPI) -> None:
         workspaces_expired_on_start=recovery.workspaces_expired,
         uploads_restored=recovery.uploads_restored,
         uploads_dropped=recovery.uploads_dropped,
+        datasets_pending=recovery.datasets_pending,
+        analyses_pending=recovery.analyses_pending,
+        reports_pending=recovery.reports_pending,
+        document_collections_pending=recovery.collections_pending,
+        conversations_pending=recovery.conversations_pending,
     )
 
 

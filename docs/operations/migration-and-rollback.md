@@ -51,8 +51,9 @@ migrations, each in its own transaction (a failed one rolls back and startup sto
 
 ## Roll back an upgrade
 
-Record the current and previous known-good SHAs before changing versions. Workspaces, consent, and uploads
-persist across the restart; datasets, analyses, chats, and indexes (not yet durable) will be lost.
+Record the current and previous known-good SHAs before changing versions. Workspace state (uploads,
+datasets, analyses, reports, conversations, exports, document indexes) persists across the restart; a pending
+SQL approval is failed safely and jobs are lost.
 
 ```powershell
 docker compose down

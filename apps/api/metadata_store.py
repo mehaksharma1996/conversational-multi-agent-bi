@@ -13,6 +13,7 @@ the upgrade (docs/operations/migration-and-rollback.md).
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sqlite3
 from collections.abc import Iterator, Sequence
@@ -21,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
+from typing import Any
 
 _CHUNK = 1024 * 1024
 
@@ -92,6 +94,72 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX uploads_workspace ON uploads (workspace_id)",
         ),
     ),
+    Migration(
+        2,
+        "datasets, analyses, and reports (inputs only; results are re-derived on recovery)",
+        (
+            """
+            CREATE TABLE datasets (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                upload_id TEXT NOT NULL,
+                requested_sheet TEXT NOT NULL,
+                schema_mapping TEXT NOT NULL,
+                recommended_features TEXT NOT NULL,
+                mapping_confirmed INTEGER NOT NULL,
+                mapping_version INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX datasets_workspace ON datasets (workspace_id)",
+            """
+            CREATE TABLE analyses (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                dataset_id TEXT NOT NULL,
+                mapping_version INTEGER NOT NULL,
+                schema_mapping TEXT NOT NULL,
+                anomaly_contamination REAL NOT NULL,
+                anomaly_features TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX analyses_workspace ON analyses (workspace_id)",
+            """
+            CREATE TABLE reports (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                analysis_id TEXT NOT NULL,
+                include_charts INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX reports_workspace ON reports (workspace_id)",
+        ),
+    ),
+    Migration(
+        3,
+        "document collections (the index itself lives in Chroma or pgvector)",
+        (
+            """
+            CREATE TABLE document_collections (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                filenames TEXT NOT NULL,
+                document_hashes TEXT NOT NULL,
+                page_count INTEGER NOT NULL,
+                chunk_count INTEGER NOT NULL,
+                index_backend TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX document_collections_workspace ON document_collections (workspace_id)",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -120,6 +188,58 @@ class StoredUpload:
     content_type: str | None
     size_bytes: int
     sha256: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredDataset:
+    """Inputs needed to rebuild a dataset; the table, profile, and SQLite copy are re-derived."""
+
+    id: str
+    workspace_id: str
+    tenant_id: str
+    upload_id: str
+    requested_sheet: str | int
+    schema_mapping: dict[str, dict[str, Any]]
+    recommended_features: tuple[str, ...]
+    mapping_confirmed: bool
+    mapping_version: int
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredAnalysis:
+    id: str
+    workspace_id: str
+    tenant_id: str
+    dataset_id: str
+    mapping_version: int
+    schema_mapping: dict[str, dict[str, Any]]
+    anomaly_contamination: float
+    anomaly_features: tuple[str, ...]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredReport:
+    id: str
+    workspace_id: str
+    tenant_id: str
+    analysis_id: str
+    include_charts: bool
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredDocumentCollection:
+    id: str
+    workspace_id: str
+    tenant_id: str
+    filenames: tuple[str, ...]
+    document_hashes: tuple[str, ...]
+    page_count: int
+    chunk_count: int
+    index_backend: str
     created_at: datetime
 
 
@@ -433,6 +553,193 @@ class MetadataStore:
                 size_bytes=int(row[5]),
                 sha256=row[6],
                 created_at=_parse(row[7]),
+            )
+            for row in rows
+        ]
+
+    # --- datasets, analyses, reports -------------------------------------------------------
+
+    def save_dataset(self, dataset: StoredDataset) -> None:
+        with self._transaction() as connection:
+            connection.execute(
+                "INSERT INTO datasets (id, workspace_id, tenant_id, upload_id, requested_sheet, "
+                "schema_mapping, recommended_features, mapping_confirmed, mapping_version, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET schema_mapping=excluded.schema_mapping, "
+                "recommended_features=excluded.recommended_features, "
+                "mapping_confirmed=excluded.mapping_confirmed, "
+                "mapping_version=excluded.mapping_version",
+                (
+                    dataset.id,
+                    dataset.workspace_id,
+                    dataset.tenant_id,
+                    dataset.upload_id,
+                    json.dumps(dataset.requested_sheet),
+                    json.dumps(dataset.schema_mapping),
+                    json.dumps(list(dataset.recommended_features)),
+                    int(dataset.mapping_confirmed),
+                    dataset.mapping_version,
+                    _iso(dataset.created_at),
+                ),
+            )
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+
+    def load_datasets(self) -> list[StoredDataset]:
+        with self._use() as connection:
+            rows = connection.execute(
+                "SELECT id, workspace_id, tenant_id, upload_id, requested_sheet, schema_mapping, "
+                "recommended_features, mapping_confirmed, mapping_version, created_at "
+                "FROM datasets ORDER BY created_at, id"
+            ).fetchall()
+        return [
+            StoredDataset(
+                id=row[0],
+                workspace_id=row[1],
+                tenant_id=row[2],
+                upload_id=row[3],
+                requested_sheet=json.loads(row[4]),
+                schema_mapping=json.loads(row[5]),
+                recommended_features=tuple(json.loads(row[6])),
+                mapping_confirmed=bool(row[7]),
+                mapping_version=int(row[8]),
+                created_at=_parse(row[9]),
+            )
+            for row in rows
+        ]
+
+    def save_analysis(self, analysis: StoredAnalysis) -> None:
+        with self._transaction() as connection:
+            connection.execute(
+                "INSERT INTO analyses (id, workspace_id, tenant_id, dataset_id, mapping_version, "
+                "schema_mapping, anomaly_contamination, anomaly_features, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    analysis.id,
+                    analysis.workspace_id,
+                    analysis.tenant_id,
+                    analysis.dataset_id,
+                    analysis.mapping_version,
+                    json.dumps(analysis.schema_mapping),
+                    analysis.anomaly_contamination,
+                    json.dumps(list(analysis.anomaly_features)),
+                    _iso(analysis.created_at),
+                ),
+            )
+
+    def delete_analysis(self, analysis_id: str) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,))
+
+    def load_analyses(self) -> list[StoredAnalysis]:
+        with self._use() as connection:
+            rows = connection.execute(
+                "SELECT id, workspace_id, tenant_id, dataset_id, mapping_version, schema_mapping, "
+                "anomaly_contamination, anomaly_features, created_at "
+                "FROM analyses ORDER BY created_at, id"
+            ).fetchall()
+        return [
+            StoredAnalysis(
+                id=row[0],
+                workspace_id=row[1],
+                tenant_id=row[2],
+                dataset_id=row[3],
+                mapping_version=int(row[4]),
+                schema_mapping=json.loads(row[5]),
+                anomaly_contamination=float(row[6]),
+                anomaly_features=tuple(json.loads(row[7])),
+                created_at=_parse(row[8]),
+            )
+            for row in rows
+        ]
+
+    def save_report(self, report: StoredReport) -> None:
+        with self._transaction() as connection:
+            connection.execute(
+                "INSERT INTO reports (id, workspace_id, tenant_id, analysis_id, include_charts, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    report.id,
+                    report.workspace_id,
+                    report.tenant_id,
+                    report.analysis_id,
+                    int(report.include_charts),
+                    _iso(report.created_at),
+                ),
+            )
+
+    def delete_report(self, report_id: str) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+
+    def load_reports(self) -> list[StoredReport]:
+        with self._use() as connection:
+            rows = connection.execute(
+                "SELECT id, workspace_id, tenant_id, analysis_id, include_charts, created_at "
+                "FROM reports ORDER BY created_at, id"
+            ).fetchall()
+        return [
+            StoredReport(
+                id=row[0],
+                workspace_id=row[1],
+                tenant_id=row[2],
+                analysis_id=row[3],
+                include_charts=bool(row[4]),
+                created_at=_parse(row[5]),
+            )
+            for row in rows
+        ]
+
+    # --- document collections ----------------------------------------------------------------
+
+    def replace_document_collection(self, collection: StoredDocumentCollection) -> None:
+        """A workspace has one current collection: store this one and remove earlier rows."""
+        with self._transaction() as connection:
+            connection.execute(
+                "DELETE FROM document_collections WHERE workspace_id = ?",
+                (collection.workspace_id,),
+            )
+            connection.execute(
+                "INSERT INTO document_collections (id, workspace_id, tenant_id, filenames, "
+                "document_hashes, page_count, chunk_count, index_backend, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    collection.id,
+                    collection.workspace_id,
+                    collection.tenant_id,
+                    json.dumps(list(collection.filenames)),
+                    json.dumps(list(collection.document_hashes)),
+                    collection.page_count,
+                    collection.chunk_count,
+                    collection.index_backend,
+                    _iso(collection.created_at),
+                ),
+            )
+
+    def delete_document_collection(self, collection_id: str) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM document_collections WHERE id = ?", (collection_id,))
+
+    def load_document_collections(self) -> list[StoredDocumentCollection]:
+        with self._use() as connection:
+            rows = connection.execute(
+                "SELECT id, workspace_id, tenant_id, filenames, document_hashes, page_count, "
+                "chunk_count, index_backend, created_at FROM document_collections "
+                "ORDER BY created_at, id"
+            ).fetchall()
+        return [
+            StoredDocumentCollection(
+                id=row[0],
+                workspace_id=row[1],
+                tenant_id=row[2],
+                filenames=tuple(json.loads(row[3])),
+                document_hashes=tuple(json.loads(row[4])),
+                page_count=int(row[5]),
+                chunk_count=int(row[6]),
+                index_backend=row[7],
+                created_at=_parse(row[8]),
             )
             for row in rows
         ]

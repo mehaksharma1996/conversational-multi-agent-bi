@@ -2248,7 +2248,7 @@
     },
     "/api/v1/analyses/{analysis_id}/reports": {
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "create_report_api_v1_analyses__analysis_id__reports_post",
         "parameters": [
           {
@@ -3017,7 +3017,7 @@
         ]
       },
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "create_message_api_v1_conversations__conversation_id__messages_post",
         "parameters": [
           {
@@ -3288,7 +3288,7 @@
     },
     "/api/v1/datasets/{dataset_id}/analyses": {
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "create_analysis_api_v1_datasets__dataset_id__analyses_post",
         "parameters": [
           {
@@ -4560,7 +4560,7 @@
     },
     "/api/v1/messages/{message_id}/exports": {
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "create_export_api_v1_messages__message_id__exports_post",
         "parameters": [
           {
@@ -4879,7 +4879,7 @@
     },
     "/api/v1/tabular-uploads/{upload_id}/dataset": {
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "create_dataset_api_v1_tabular_uploads__upload_id__dataset_post",
         "parameters": [
           {
@@ -5150,7 +5150,7 @@
     },
     "/api/v1/workspaces": {
       "post": {
-        "description": "Creates a process-local workspace. `Idempotency-Key` is optional and scoped to the authenticated\ntenant. The same key replays the original workspace and returns `201`; because this operation has no\nclient representation, a same-key payload conflict cannot occur. The mapping is retained until the\nworkspace expires or is deleted, or until process restart. After a client timeout, retry is safe\nonly with the same key. Without a key, retry may create another workspace.",
+        "description": "Creates a workspace. `Idempotency-Key` is optional and scoped to the authenticated tenant.\nThe same key replays the original workspace and returns `201`; because this operation has no client\nrepresentation, a same-key payload conflict cannot occur. The mapping is retained until the\nworkspace expires or is deleted. It survives a process restart when the deployment enables durable\nmetadata (the Compose topology does) and is otherwise lost on process restart. After a client\ntimeout, retry is safe only with the same key. Without a key, retry may create another workspace.",
         "operationId": "create_workspace_api_v1_workspaces_post",
         "parameters": [
           {
@@ -5681,7 +5681,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/conversations": {
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "create_conversation_api_v1_workspaces__workspace_id__conversations_post",
         "parameters": [
           {
@@ -5822,7 +5822,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/document-collections": {
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "create_document_collection_api_v1_workspaces__workspace_id__document_collections_post",
         "parameters": [
           {
@@ -5963,7 +5963,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/tabular-uploads": {
       "post": {
-        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention and is lost on process restart.\nA client timeout or disconnect does not cancel server work, and the request must not be retried\nautomatically. Resolve the original outcome through its owning resource or ask the user before\nsubmitting again. State/precondition conflicts return `409` and are not transient.",
+        "description": "This synchronous create operation does not support `Idempotency-Key`. A duplicate request may create\nanother resource or repeat work and is not replayed; idempotency-key conflicts therefore do not\napply. The created resource follows its owning workspace's retention. It survives a process restart\nwhen the deployment enables durable metadata (the Compose topology does) and is otherwise lost on\nprocess restart. A client timeout or disconnect does not cancel server work, and the request must\nnot be retried automatically. Resolve the original outcome through its owning resource or ask the\nuser before submitting again. State/precondition conflicts return `409` and are not transient.",
         "operationId": "upload_tabular_file_api_v1_workspaces__workspace_id__tabular_uploads_post",
         "parameters": [
           {

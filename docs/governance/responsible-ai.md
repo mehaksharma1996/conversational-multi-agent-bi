@@ -227,9 +227,12 @@ Implemented:
 Limitations:
 
 - With `DURABLE_METADATA=true` (set by Compose; [ADR 0022](../adr/0022-durable-workspace-metadata.md)),
-  workspaces, consent, and uploaded files survive a restart; datasets, analyses, chats, exports, and
-  document indexes are still process-local and are lost, and without the flag every record is lost and the
-  directories are orphaned until swept.
+  workspace state survives a restart: uploads, datasets, analyses, and reports are rebuilt from stored inputs,
+  and conversations, messages, and exports are restored from the workspace's `content.db`. Questions, answers,
+  SQL, and exported files therefore **exist on disk** in that case; they are SQLCipher-encrypted only when
+  `APP_ENCRYPTION_KEY` is set, are deleted with the workspace and on retention expiry, and are included in
+  workspace backups. A SQL approval pending at restart is failed safely. Without the flag every record is lost
+  and the directories are orphaned until swept.
 - Chroma vector storage is not encrypted at rest (time-bounded waiver and compensating controls:
   [ADR 0021](../adr/0021-vector-store-encryption-waiver.md); use host disk encryption).
 - There is no retention or rotation policy for the audit files.

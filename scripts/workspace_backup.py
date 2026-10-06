@@ -43,6 +43,13 @@ WORKSPACE_PREFIX = "workspaces"
 METADATA_RELATIVE = Path(".metadata") / "metadata.db"
 _TENANT = re.compile(r"[a-f0-9]{32}")
 _WORKSPACE = re.compile(r"ws_[a-f0-9]{32}")
+_PARENT_OF = {
+    "dataset": "upload",
+    "analysis": "dataset",
+    "report": "analysis",
+    "document collection": "workspace",
+}
+_SQLITE_HEADER = b"SQLite format 3\x00"
 _MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 _CHUNK = 1024 * 1024
 
@@ -96,6 +103,41 @@ def _read_rows(
     finally:
         connection.close()
     return workspaces, uploads, int(version or 0)
+
+
+def _read_resources(database: Path) -> list[tuple[str, str, str, str, str | None]]:
+    """(kind, id, workspace, tenant, parent id) for datasets, analyses, and reports (schema v2+)."""
+    queries = {
+        "dataset": "SELECT id, workspace_id, tenant_id, upload_id FROM datasets",
+        "analysis": "SELECT id, workspace_id, tenant_id, dataset_id FROM analyses",
+        "report": "SELECT id, workspace_id, tenant_id, analysis_id FROM reports",
+        "document collection": "SELECT id, workspace_id, tenant_id, NULL FROM document_collections",
+    }
+    resources: list[tuple[str, str, str, str, str | None]] = []
+    connection = sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
+    try:
+        for kind, query in queries.items():
+            try:
+                rows = connection.execute(query).fetchall()
+            except sqlite3.OperationalError:
+                continue  # an older schema without these tables
+            resources += [
+                (kind, str(r[0]), str(r[1]), str(r[2]), None if r[3] is None else str(r[3]))
+                for r in rows
+            ]
+    finally:
+        connection.close()
+    return resources
+
+
+def _is_plain_sqlite(path: Path) -> bool:
+    """False for an SQLCipher-encrypted file, which cannot be opened without its key.
+
+    Encrypted databases are still covered by the manifest digest; only their internals cannot
+    be checked here.
+    """
+    with path.open("rb") as handle:
+        return handle.read(len(_SQLITE_HEADER)) == _SQLITE_HEADER
 
 
 def _integrity_problems(database: Path) -> list[str]:
@@ -256,7 +298,7 @@ def verify_archive(archive_path: Path) -> VerificationReport:
             if handle is None:
                 report.problems.append("A manifest file could not be read.")
                 continue
-            keep = name == METADATA_MEMBER or name.endswith("chroma.sqlite3")
+            keep = name == METADATA_MEMBER or name.endswith(("chroma.sqlite3", "/content.db"))
             digest = hashlib.sha256()
             size = 0
             destination = Path(scratch) / f"{len(extracted)}.bin"
@@ -348,9 +390,18 @@ def _check_state(
             report.problems.append(
                 "An upload file is missing or does not match its metadata digest."
             )
+    resources = _read_resources(database)
+    known_ids = {upload_id for upload_id, *_ in uploads} | {item[1] for item in resources}
+    for kind, _, workspace_id, tenant_id, parent_id in resources:
+        if owner.get(workspace_id) != tenant_id:
+            report.problems.append(f"A {kind} belongs to a tenant that does not own its workspace.")
+        if parent_id is not None and parent_id not in known_ids:
+            report.problems.append(f"A {kind} refers to a {_PARENT_OF[kind]} that does not exist.")
     for name, path in extracted.items():
         if name.endswith("chroma.sqlite3") and _integrity_problems(path):
             report.problems.append("A vector index database failed its integrity check.")
+        if name.endswith("/content.db") and _is_plain_sqlite(path) and _integrity_problems(path):
+            report.problems.append("A workspace content database failed its integrity check.")
 
 
 # --- restore -------------------------------------------------------------------------------------

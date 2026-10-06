@@ -3,22 +3,34 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import RLock
-from typing import cast
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import pandas as pd
 
+from apps.api.content_store import (
+    ContentStoreError,
+    StoredConversation,
+    StoredExport,
+    StoredMessage,
+    WorkspaceContentStore,
+)
 from apps.api.errors import ResourceNotFoundError
 from apps.api.metadata_store import (
     MetadataCorruptError,
     MetadataStore,
+    StoredAnalysis,
+    StoredDataset,
+    StoredDocumentCollection,
+    StoredReport,
     StoredUpload,
     StoredWorkspace,
     file_sha256,
@@ -33,12 +45,18 @@ from src.ingestion.tabular_loader import LoadedTable
 from src.memory.session_memory import SessionMemory
 from src.orchestration.graph_state import AnswerDiagnostics
 from src.profiling.data_profiler import DataProfile
-from src.profiling.schema_mapper import SchemaMapping
+from src.profiling.schema_mapper import FieldMapping, SchemaMapping
 from src.storage.sqlite_store import StoredTable
+
+LOGGER = logging.getLogger(__name__)
 
 _TENANT_DIR = re.compile(r"[a-f0-9]{32}")
 _WORKSPACE_DIR = re.compile(r"ws_[a-f0-9]{32}")
 _UPLOAD_ID = re.compile(r"upl_[a-f0-9]{32}")
+_APPROVAL_LOST_ANSWER = (
+    "This SQL approval request was cancelled because the service restarted. "
+    "No query was run. Ask the question again."
+)
 _EXPIRY_PERSIST_INTERVAL = timedelta(minutes=5)
 """A sliding-expiry touch is persisted at most this often; a crash can lose at most this much."""
 
@@ -62,6 +80,78 @@ class RecoveryReport:
     uploads_dropped: int = 0
     rows_invalid: int = 0
     metadata_quarantined: bool = False
+    datasets_pending: int = 0
+    analyses_pending: int = 0
+    reports_pending: int = 0
+    collections_pending: int = 0
+    conversations_pending: int = 0
+
+
+class ResourceRehydrator(Protocol):
+    """Rebuilds derived resources from persisted inputs (see ``apps/api/rehydration.py``)."""
+
+    def load_table(
+        self, payload: bytes, filename: str, sheet: str | int
+    ) -> tuple[LoadedTable, DataProfile]: ...
+
+    def save_table(
+        self, workspace_dir: Path, table: LoadedTable, mapping: SchemaMapping
+    ) -> StoredTable: ...
+
+    def analyze(
+        self,
+        table: LoadedTable,
+        profile: DataProfile,
+        mapping: SchemaMapping,
+        anomaly_features: tuple[str, ...],
+        anomaly_contamination: float,
+    ) -> tuple[AnalysisBundle, SessionMemory]: ...
+
+    def open_documents(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        workspace_dir: Path,
+        index_backend: str,
+        chunk_count: int,
+    ) -> DocumentRetriever: ...
+
+
+@dataclass
+class _PendingWorkspace:
+    """Persisted resource rows for one workspace, rebuilt on its first use after a restart."""
+
+    datasets: list[StoredDataset] = field(default_factory=list)
+    analyses: list[StoredAnalysis] = field(default_factory=list)
+    reports: list[StoredReport] = field(default_factory=list)
+    collections: list[StoredDocumentCollection] = field(default_factory=list)
+    content_ids: list[str] = field(default_factory=list)
+
+
+def _mapping_to_json(mapping: SchemaMapping) -> dict[str, dict[str, Any]]:
+    return {
+        name: {
+            "canonical_field": item.canonical_field,
+            "source_column": item.source_column,
+            "confidence": item.confidence,
+            "reason": item.reason,
+        }
+        for name, item in mapping.mappings.items()
+    }
+
+
+def _mapping_from_json(raw: dict[str, dict[str, Any]]) -> SchemaMapping:
+    return SchemaMapping(
+        {
+            name: FieldMapping(
+                canonical_field=str(item["canonical_field"]),
+                source_column=item["source_column"],
+                confidence=float(item["confidence"]),
+                reason=str(item["reason"]),
+            )
+            for name, item in raw.items()
+        }
+    )
 
 
 WorkspaceLifecycleListener = Callable[[str, "WorkspaceRecord", str], None]
@@ -74,6 +164,65 @@ def _resource_id(prefix: str) -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _stored_conversation(record: ConversationRecord) -> StoredConversation:
+    return StoredConversation(
+        id=record.id,
+        tenant_id=record.tenant_id,
+        dataset_id=record.dataset_id,
+        document_collection_id=record.document_collection_id,
+        memory=record.memory,
+        message_ids=record.message_ids,
+        created_at=record.created_at,
+    )
+
+
+def _stored_message(record: MessageRecord) -> StoredMessage:
+    return StoredMessage(
+        id=record.id,
+        conversation_id=record.conversation_id,
+        tenant_id=record.tenant_id,
+        question=record.question,
+        answer=record.answer,
+        route=record.route,
+        sql=record.sql,
+        dataframe=record.dataframe,
+        sources=record.sources,
+        request_id=record.request_id,
+        diagnostics=record.diagnostics,
+        status=record.status,
+        checkpoint_thread_id=record.checkpoint_thread_id,
+        created_at=record.created_at,
+    )
+
+
+def _stored_export(record: ExportRecord) -> StoredExport:
+    return StoredExport(
+        id=record.id,
+        message_id=record.message_id,
+        tenant_id=record.tenant_id,
+        format=record.format,
+        filename=record.filename,
+        media_type=record.media_type,
+        payload=record.payload,
+        created_at=record.created_at,
+    )
+
+
+def _stored_dataset(dataset: DatasetRecord, requested_sheet: str | int) -> StoredDataset:
+    return StoredDataset(
+        id=dataset.id,
+        workspace_id=dataset.workspace_id,
+        tenant_id=dataset.tenant_id,
+        upload_id=dataset.upload_id,
+        requested_sheet=requested_sheet,
+        schema_mapping=_mapping_to_json(dataset.schema_mapping),
+        recommended_features=dataset.recommended_anomaly_features,
+        mapping_confirmed=dataset.mapping_confirmed,
+        mapping_version=dataset.mapping_version,
+        created_at=dataset.created_at,
+    )
 
 
 def _stored_workspace(workspace: WorkspaceRecord) -> StoredWorkspace:
@@ -229,13 +378,19 @@ class LocalResourceRepository:
         storage_root: Path | None = None,
         retention_hours: int = 24,
         metadata_store: MetadataStore | None = None,
+        content_store: WorkspaceContentStore | None = None,
     ) -> None:
         if retention_hours < 1:
             raise ValueError("retention_hours must be at least 1.")
         self._lock = RLock()
         self._store = metadata_store
+        self._content = content_store
         self._persisted_expiry: dict[str, datetime] = {}
         self._lazy_uploads: dict[str, StoredUpload] = {}
+        self.rehydrator: ResourceRehydrator | None = None
+        self._pending: dict[str, _PendingWorkspace] = {}
+        self._pending_index: dict[str, str] = {}
+        self._requested_sheets: dict[str, str | int] = {}
         self.lifecycle_listener: WorkspaceLifecycleListener | None = None
         self.storage_root = (storage_root or Path("data/api")).resolve()
         self.retention_hours = retention_hours
@@ -294,6 +449,7 @@ class LocalResourceRepository:
             self._uploads.clear()
             self._lazy_uploads.clear()
             self._persisted_expiry.clear()
+            self._requested_sheets.clear()
             now = _now()
             invalid = 0
             expired: list[WorkspaceRecord] = []
@@ -358,6 +514,9 @@ class LocalResourceRepository:
                     created_at=stored_upload.created_at,
                 )
                 restored_uploads += 1
+            self._pending.clear()
+            self._pending_index.clear()
+            pending = self._load_pending_unlocked(store)
             for workspace in expired:
                 self._delete_workspace_unlocked(workspace, "retention_expired")
             return RecoveryReport(
@@ -370,7 +529,310 @@ class LocalResourceRepository:
                 uploads_dropped=dropped_uploads,
                 rows_invalid=invalid,
                 metadata_quarantined=quarantined,
+                datasets_pending=pending[0],
+                analyses_pending=pending[1],
+                reports_pending=pending[2],
+                collections_pending=pending[3],
+                conversations_pending=pending[4],
             )
+
+    def _load_pending_unlocked(self, store: MetadataStore) -> tuple[int, int, int, int, int]:
+        """Index persisted resources; each workspace's are rebuilt when it is first used."""
+        counts = [0, 0, 0, 0, 0]
+        for dataset in store.load_datasets():
+            owner = self._workspaces.get(dataset.workspace_id)
+            if owner is None or owner.tenant_id != dataset.tenant_id:
+                continue
+            self._pending.setdefault(owner.id, _PendingWorkspace()).datasets.append(dataset)
+            self._pending_index[dataset.id] = owner.id
+            counts[0] += 1
+        for analysis in store.load_analyses():
+            owner = self._workspaces.get(analysis.workspace_id)
+            if owner is None or owner.tenant_id != analysis.tenant_id:
+                continue
+            self._pending.setdefault(owner.id, _PendingWorkspace()).analyses.append(analysis)
+            self._pending_index[analysis.id] = owner.id
+            counts[1] += 1
+        for report in store.load_reports():
+            owner = self._workspaces.get(report.workspace_id)
+            if owner is None or owner.tenant_id != report.tenant_id:
+                continue
+            self._pending.setdefault(owner.id, _PendingWorkspace()).reports.append(report)
+            self._pending_index[report.id] = owner.id
+            counts[2] += 1
+        for collection in store.load_document_collections():
+            owner = self._workspaces.get(collection.workspace_id)
+            if owner is None or owner.tenant_id != collection.tenant_id:
+                continue
+            self._pending.setdefault(owner.id, _PendingWorkspace()).collections.append(collection)
+            self._pending_index[collection.id] = owner.id
+            counts[3] += 1
+        if self._content is not None:
+            for owner in self._workspaces.values():
+                try:
+                    if not self._content.exists(owner.tenant_id, owner.id):
+                        continue
+                    content_ids = self._content.resource_ids(owner.tenant_id, owner.id)
+                except ContentStoreError as exc:
+                    LOGGER.warning(
+                        "workspace content unreadable at startup: %s", type(exc).__name__
+                    )
+                    continue
+                entry = self._pending.setdefault(owner.id, _PendingWorkspace())
+                entry.content_ids = content_ids
+                for content_id in content_ids:
+                    self._pending_index[content_id] = owner.id
+                counts[4] += sum(1 for item in content_ids if item.startswith("conv_"))
+        return counts[0], counts[1], counts[2], counts[3], counts[4]
+
+    def _hydrate_workspace_unlocked(self, workspace_id: str) -> None:
+        """Rebuild a workspace's datasets, analyses, and reports from persisted inputs.
+
+        Everything is derived deterministically from the stored upload, the confirmed mapping, and
+        the analysis parameters, so nothing heavy is serialised. An item that cannot be rebuilt
+        (missing or corrupt upload, a parser or limit change) is dropped together with what depends
+        on it, and the failure is logged by category only.
+        """
+        rehydrator = self.rehydrator
+        store = self._store
+        if rehydrator is None or store is None:
+            return
+        pending = self._pending.pop(workspace_id, None)
+        if pending is None:
+            return
+        for resource_id in (
+            *(row.id for row in pending.datasets),
+            *(row.id for row in pending.analyses),
+            *(row.id for row in pending.reports),
+            *(row.id for row in pending.collections),
+            *pending.content_ids,
+        ):
+            self._pending_index.pop(resource_id, None)
+        dropped = 0
+        for dataset_row in pending.datasets:
+            try:
+                upload = self._upload_with_payload_unlocked(dataset_row.upload_id)
+                table, profile = rehydrator.load_table(
+                    upload.payload, upload.filename, dataset_row.requested_sheet
+                )
+                mapping = _mapping_from_json(dataset_row.schema_mapping)
+                stored_table = (
+                    rehydrator.save_table(
+                        self._workspace_path(dataset_row.tenant_id, dataset_row.workspace_id),
+                        table,
+                        mapping,
+                    )
+                    if dataset_row.mapping_confirmed
+                    else None
+                )
+            except Exception as exc:
+                LOGGER.warning("dataset recovery failed: %s", type(exc).__name__)
+                store.delete_dataset(dataset_row.id)
+                dropped += 1
+                continue
+            self._requested_sheets[dataset_row.id] = dataset_row.requested_sheet
+            self._datasets[dataset_row.id] = DatasetRecord(
+                id=dataset_row.id,
+                workspace_id=dataset_row.workspace_id,
+                upload_id=dataset_row.upload_id,
+                tenant_id=dataset_row.tenant_id,
+                table=table,
+                profile=profile,
+                schema_mapping=mapping,
+                recommended_anomaly_features=dataset_row.recommended_features,
+                mapping_confirmed=dataset_row.mapping_confirmed,
+                mapping_version=dataset_row.mapping_version,
+                stored_table=stored_table,
+                created_at=dataset_row.created_at,
+            )
+        for analysis_row in pending.analyses:
+            dataset = self._datasets.get(analysis_row.dataset_id)
+            if dataset is None:
+                store.delete_analysis(analysis_row.id)
+                dropped += 1
+                continue
+            try:
+                bundle, memory = rehydrator.analyze(
+                    dataset.table,
+                    dataset.profile,
+                    _mapping_from_json(analysis_row.schema_mapping),
+                    analysis_row.anomaly_features,
+                    analysis_row.anomaly_contamination,
+                )
+            except Exception as exc:
+                LOGGER.warning("analysis recovery failed: %s", type(exc).__name__)
+                store.delete_analysis(analysis_row.id)
+                dropped += 1
+                continue
+            self._analyses[analysis_row.id] = AnalysisRecord(
+                id=analysis_row.id,
+                workspace_id=analysis_row.workspace_id,
+                dataset_id=analysis_row.dataset_id,
+                tenant_id=analysis_row.tenant_id,
+                dataset_mapping_version=analysis_row.mapping_version,
+                anomaly_contamination=analysis_row.anomaly_contamination,
+                bundle=bundle,
+                memory=memory,
+                created_at=analysis_row.created_at,
+            )
+        for report_row in pending.reports:
+            analysis = self._analyses.get(report_row.analysis_id)
+            if analysis is None:
+                store.delete_report(report_row.id)
+                dropped += 1
+                continue
+            self._reports[report_row.id] = ReportRecord(
+                id=report_row.id,
+                analysis_id=analysis.id,
+                workspace_id=report_row.workspace_id,
+                tenant_id=report_row.tenant_id,
+                report=analysis.bundle.business_report,
+                chart_specs=tuple(analysis.bundle.chart_specs),
+                include_charts=report_row.include_charts,
+                created_at=report_row.created_at,
+            )
+        dropped += self._hydrate_documents_unlocked(pending, rehydrator, store)
+        dropped += self._hydrate_content_unlocked(workspace_id, pending)
+        if dropped:
+            LOGGER.warning("recovery dropped %d resource(s) that could not be rebuilt", dropped)
+
+    def _hydrate_documents_unlocked(
+        self,
+        pending: _PendingWorkspace,
+        rehydrator: ResourceRehydrator,
+        store: MetadataStore,
+    ) -> int:
+        """Reopen each persisted document index and verify it still holds what was recorded."""
+        dropped = 0
+        for row in pending.collections:
+            try:
+                retriever = rehydrator.open_documents(
+                    row.tenant_id,
+                    row.workspace_id,
+                    self._workspace_path(row.tenant_id, row.workspace_id),
+                    row.index_backend,
+                    row.chunk_count,
+                )
+            except Exception as exc:
+                LOGGER.warning("document index recovery failed: %s", type(exc).__name__)
+                store.delete_document_collection(row.id)
+                dropped += 1
+                continue
+            self._document_collections[row.id] = DocumentCollectionRecord(
+                id=row.id,
+                workspace_id=row.workspace_id,
+                tenant_id=row.tenant_id,
+                filenames=row.filenames,
+                document_hashes=row.document_hashes,
+                page_count=row.page_count,
+                chunk_count=row.chunk_count,
+                retriever=retriever,
+                created_at=row.created_at,
+            )
+        return dropped
+
+    def _hydrate_content_unlocked(self, workspace_id: str, pending: _PendingWorkspace) -> int:
+        """Restore conversations, messages, and exports from the workspace content database."""
+        content = self._content
+        if content is None or not pending.content_ids:
+            return 0
+        owner = self._workspaces.get(workspace_id)
+        if owner is None:
+            return 0
+        try:
+            snapshot = content.load(owner.tenant_id, owner.id)
+        except Exception as exc:
+            LOGGER.warning("workspace content recovery failed: %s", type(exc).__name__)
+            return 1
+        dropped = 0
+        kept_conversations: set[str] = set()
+        for stored in snapshot.conversations:
+            usable = (
+                stored.tenant_id == owner.tenant_id
+                and (stored.dataset_id is None or stored.dataset_id in self._datasets)
+                and (
+                    stored.document_collection_id is None
+                    or stored.document_collection_id in self._document_collections
+                )
+            )
+            if not usable:
+                dropped += 1
+                continue
+            kept_conversations.add(stored.id)
+            self._conversations[stored.id] = ConversationRecord(
+                id=stored.id,
+                workspace_id=owner.id,
+                tenant_id=stored.tenant_id,
+                dataset_id=stored.dataset_id,
+                document_collection_id=stored.document_collection_id,
+                memory=stored.memory,
+                message_ids=stored.message_ids,
+                created_at=stored.created_at,
+            )
+        referenced = {
+            message_id
+            for conversation_id in kept_conversations
+            for message_id in self._conversations[conversation_id].message_ids
+        }
+        kept_messages: set[str] = set()
+        for message in snapshot.messages:
+            if (
+                message.conversation_id not in kept_conversations
+                or message.id not in referenced
+                or message.tenant_id != owner.tenant_id
+            ):
+                continue
+            record = MessageRecord(
+                id=message.id,
+                conversation_id=message.conversation_id,
+                workspace_id=owner.id,
+                tenant_id=message.tenant_id,
+                question=message.question,
+                answer=message.answer,
+                route=message.route,
+                sql=message.sql,
+                dataframe=message.dataframe,
+                sources=message.sources,
+                created_at=message.created_at,
+                request_id=message.request_id,
+                diagnostics=message.diagnostics,
+                status=message.status,
+                checkpoint_thread_id=message.checkpoint_thread_id,
+            )
+            if record.status == "pending_approval":
+                # The approval checkpoint lived in process memory and is gone: fail safe.
+                record = replace(
+                    record,
+                    answer=_APPROVAL_LOST_ANSWER,
+                    dataframe=None,
+                    status="rejected",
+                    checkpoint_thread_id=None,
+                )
+                content.save_message(owner.id, _stored_message(record))
+            kept_messages.add(record.id)
+            self._messages[record.id] = record
+        for stored_export in snapshot.exports:
+            if stored_export.message_id not in kept_messages:
+                continue
+            self._exports[stored_export.id] = ExportRecord(
+                id=stored_export.id,
+                message_id=stored_export.message_id,
+                workspace_id=owner.id,
+                tenant_id=stored_export.tenant_id,
+                format=stored_export.format,
+                filename=stored_export.filename,
+                media_type=stored_export.media_type,
+                payload=stored_export.payload,
+                created_at=stored_export.created_at,
+            )
+        return dropped
+
+    def _workspace_path(self, tenant_id: str, workspace_id: str) -> Path:
+        target = (self.storage_root / tenant_id / workspace_id).resolve()
+        if not target.is_relative_to(self.storage_root):
+            raise ValueError("Refusing to use storage outside the API data directory.")
+        target.mkdir(parents=True, exist_ok=True)
+        return target
 
     def _upload_path(self, tenant_id: str, workspace_id: str, upload_id: str) -> Path | None:
         """Where an upload payload lives, or None if the identifiers would escape the root."""
@@ -489,11 +951,7 @@ class LocalResourceRepository:
 
     def workspace_dir(self, workspace_id: str, tenant_id: str) -> Path:
         workspace = self.get_workspace(workspace_id, tenant_id)
-        target = (self.storage_root / workspace.tenant_id / workspace.id).resolve()
-        if not target.is_relative_to(self.storage_root):
-            raise ValueError("Refusing to use storage outside the API data directory.")
-        target.mkdir(parents=True, exist_ok=True)
-        return target
+        return self._workspace_path(workspace.tenant_id, workspace.id)
 
     def create_upload(
         self,
@@ -540,15 +998,22 @@ class LocalResourceRepository:
 
     def get_upload(self, upload_id: str, tenant_id: str) -> TabularUploadRecord:
         with self._lock:
-            upload = self._owned(self._uploads, upload_id, tenant_id, "Tabular upload")
-            stored = self._lazy_uploads.get(upload_id)
-            if stored is None:
-                return upload
-            path = self._upload_path(stored.tenant_id, stored.workspace_id, stored.id)
-            if path is None or not path.is_file() or file_sha256(path) != stored.sha256:
-                self._drop_upload_unlocked(upload_id)
-                raise ResourceNotFoundError("Tabular upload")
-            return replace(upload, payload=path.read_bytes())
+            self._owned(self._uploads, upload_id, tenant_id, "Tabular upload")
+            return self._upload_with_payload_unlocked(upload_id)
+
+    def _upload_with_payload_unlocked(self, upload_id: str) -> TabularUploadRecord:
+        """An upload with its payload; a recovered one is read back and digest-checked."""
+        upload = self._uploads.get(upload_id)
+        if upload is None:
+            raise ResourceNotFoundError("Tabular upload")
+        stored = self._lazy_uploads.get(upload_id)
+        if stored is None:
+            return upload
+        path = self._upload_path(stored.tenant_id, stored.workspace_id, stored.id)
+        if path is None or not path.is_file() or file_sha256(path) != stored.sha256:
+            self._drop_upload_unlocked(upload_id)
+            raise ResourceNotFoundError("Tabular upload")
+        return replace(upload, payload=path.read_bytes())
 
     def _drop_upload_unlocked(self, upload_id: str) -> None:
         """Forget an upload whose payload is missing or fails its checksum (partial state)."""
@@ -568,6 +1033,7 @@ class LocalResourceRepository:
         profile: DataProfile,
         schema_mapping: SchemaMapping,
         recommended_anomaly_features: tuple[str, ...],
+        requested_sheet: str | int = 0,
     ) -> DatasetRecord:
         with self._lock:
             self._owned(self._uploads, upload.id, upload.tenant_id, "Tabular upload")
@@ -585,6 +1051,9 @@ class LocalResourceRepository:
                 stored_table=None,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.save_dataset(_stored_dataset(dataset, requested_sheet))
+                self._requested_sheets[dataset.id] = requested_sheet
             self._datasets[dataset.id] = dataset
             return dataset
 
@@ -610,6 +1079,10 @@ class LocalResourceRepository:
                 mapping_version=dataset.mapping_version + 1,
                 stored_table=stored_table,
             )
+            if self._store is not None:
+                self._store.save_dataset(
+                    _stored_dataset(updated, self._requested_sheets.get(dataset_id, 0))
+                )
             self._datasets[dataset_id] = updated
             return updated
 
@@ -619,6 +1092,7 @@ class LocalResourceRepository:
         anomaly_contamination: float,
         bundle: AnalysisBundle,
         memory: SessionMemory,
+        anomaly_features: tuple[str, ...] = (),
     ) -> AnalysisRecord:
         with self._lock:
             current = self._owned(self._datasets, dataset.id, dataset.tenant_id, "Dataset")
@@ -633,6 +1107,20 @@ class LocalResourceRepository:
                 memory=memory,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.save_analysis(
+                    StoredAnalysis(
+                        id=analysis.id,
+                        workspace_id=analysis.workspace_id,
+                        tenant_id=analysis.tenant_id,
+                        dataset_id=analysis.dataset_id,
+                        mapping_version=analysis.dataset_mapping_version,
+                        schema_mapping=_mapping_to_json(current.schema_mapping),
+                        anomaly_contamination=anomaly_contamination,
+                        anomaly_features=anomaly_features,
+                        created_at=analysis.created_at,
+                    )
+                )
             self._analyses[analysis.id] = analysis
             return analysis
 
@@ -664,9 +1152,11 @@ class LocalResourceRepository:
         page_count: int,
         chunk_count: int,
         retriever: DocumentRetriever,
+        index_backend: str = "chroma",
     ) -> DocumentCollectionRecord:
         with self._lock:
             self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
+            self._hydrate_workspace_unlocked(workspace_id)
             previous_ids = [
                 key
                 for key, existing in self._document_collections.items()
@@ -685,6 +1175,20 @@ class LocalResourceRepository:
                 retriever=retriever,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.replace_document_collection(
+                    StoredDocumentCollection(
+                        id=record.id,
+                        workspace_id=workspace_id,
+                        tenant_id=tenant_id,
+                        filenames=filenames,
+                        document_hashes=document_hashes,
+                        page_count=page_count,
+                        chunk_count=chunk_count,
+                        index_backend=index_backend,
+                        created_at=record.created_at,
+                    )
+                )
             self._document_collections[record.id] = record
             return record
 
@@ -708,6 +1212,7 @@ class LocalResourceRepository:
     ) -> DocumentCollectionRecord | None:
         with self._lock:
             self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
+            self._hydrate_workspace_unlocked(workspace_id)
             matches = [
                 record
                 for record in self._document_collections.values()
@@ -759,6 +1264,8 @@ class LocalResourceRepository:
                 message_ids=(),
                 created_at=_now(),
             )
+            if self._content is not None:
+                self._content.save_conversation(workspace_id, _stored_conversation(record))
             self._conversations[record.id] = record
             return record
 
@@ -815,10 +1322,16 @@ class LocalResourceRepository:
                 status=status,
                 checkpoint_thread_id=checkpoint_thread_id,
             )
+            if self._content is not None:
+                self._content.save_message(conversation.workspace_id, _stored_message(message))
             self._messages[message.id] = message
             all_message_ids = (*conversation.message_ids, message.id)
             message_ids = all_message_ids[-max_messages:]
             dropped_message_ids = set(all_message_ids) - set(message_ids)
+            if self._content is not None:
+                self._content.delete_messages(
+                    tenant_id, conversation.workspace_id, sorted(dropped_message_ids)
+                )
             for dropped_id in dropped_message_ids:
                 self._messages.pop(dropped_id, None)
                 for export_id in [
@@ -838,12 +1351,25 @@ class LocalResourceRepository:
             for message_id in message_ids:
                 existing = self._messages[message_id]
                 if existing.dataframe is not None and message_id not in retained_with_frames:
-                    self._messages[message_id] = replace(existing, dataframe=None)
+                    cleared = replace(existing, dataframe=None)
+                    self._messages[message_id] = cleared
+                    if self._content is not None:
+                        self._content.save_message(
+                            conversation.workspace_id, _stored_message(cleared)
+                        )
             updated = replace(
                 conversation,
                 memory=memory,
                 message_ids=tuple(message_ids),
             )
+            if self._content is not None:
+                self._content.update_conversation(
+                    tenant_id,
+                    conversation.workspace_id,
+                    conversation.id,
+                    memory,
+                    updated.message_ids,
+                )
             self._conversations[conversation.id] = updated
             return message
 
@@ -879,13 +1405,22 @@ class LocalResourceRepository:
                     message.checkpoint_thread_id if status == "pending_approval" else None
                 ),
             )
-            self._messages[message.id] = updated
             conversation = self._owned(
                 self._conversations,
                 message.conversation_id,
                 tenant_id,
                 "Conversation",
             )
+            if self._content is not None:
+                self._content.save_message(message.workspace_id, _stored_message(updated))
+                self._content.update_conversation(
+                    tenant_id,
+                    conversation.workspace_id,
+                    conversation.id,
+                    memory,
+                    conversation.message_ids,
+                )
+            self._messages[message.id] = updated
             self._conversations[conversation.id] = replace(conversation, memory=memory)
             return updated
 
@@ -937,6 +1472,17 @@ class LocalResourceRepository:
                 include_charts=include_charts,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.save_report(
+                    StoredReport(
+                        id=record.id,
+                        workspace_id=record.workspace_id,
+                        tenant_id=record.tenant_id,
+                        analysis_id=record.analysis_id,
+                        include_charts=include_charts,
+                        created_at=record.created_at,
+                    )
+                )
             self._reports[record.id] = record
             return record
 
@@ -967,6 +1513,8 @@ class LocalResourceRepository:
                 payload=payload,
                 created_at=_now(),
             )
+            if self._content is not None:
+                self._content.save_export(message.workspace_id, _stored_export(record))
             self._exports[record.id] = record
             return record
 
@@ -1047,6 +1595,18 @@ class LocalResourceRepository:
 
         self._workspaces.pop(workspace.id, None)
         self._persisted_expiry.pop(workspace.id, None)
+        discarded = self._pending.pop(workspace.id, None)
+        if discarded is not None:
+            for row_id in (
+                *(row.id for row in discarded.datasets),
+                *(row.id for row in discarded.analyses),
+                *(row.id for row in discarded.reports),
+                *(row.id for row in discarded.collections),
+                *discarded.content_ids,
+            ):
+                self._pending_index.pop(row_id, None)
+        for dataset_id in [key for key in self._requested_sheets if key not in self._datasets]:
+            self._requested_sheets.pop(dataset_id, None)
         for creation_key, value in list(self._workspace_creation_keys.items()):
             if value == workspace.id:
                 self._workspace_creation_keys.pop(creation_key)
@@ -1071,6 +1631,11 @@ class LocalResourceRepository:
         tenant_id: str,
         resource_name: str,
     ) -> RecordT:
+        pending_workspace = self._pending_index.get(resource_id)
+        if pending_workspace is not None:
+            owner = self._workspaces.get(pending_workspace)
+            if owner is not None and owner.expires_at > _now():
+                self._hydrate_workspace_unlocked(pending_workspace)
         record = records.get(resource_id)
         if record is None or getattr(record, "tenant_id", None) != tenant_id:
             raise ResourceNotFoundError(resource_name)

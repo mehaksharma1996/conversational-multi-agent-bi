@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,6 +18,9 @@ from apps.api.metadata_store import (
     MetadataStore,
     MetadataVersionError,
     Migration,
+    StoredAnalysis,
+    StoredDataset,
+    StoredReport,
     StoredUpload,
     StoredWorkspace,
     file_sha256,
@@ -28,8 +32,9 @@ TENANT = "a" * 32
 WORKSPACE = "ws_" + "1" * 32
 NOW = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
 
-SECOND_MIGRATION = Migration(
-    2,
+NEXT_VERSION = SCHEMA_VERSION + 1
+FUTURE_MIGRATION = Migration(
+    NEXT_VERSION,
     "add a label column",
     ("ALTER TABLE workspaces ADD COLUMN label TEXT",),
 )
@@ -87,18 +92,117 @@ def test_a_future_migration_is_applied_forward_and_keeps_existing_data(tmp_path:
     old.save_upload(_upload())
     old.close()
 
-    upgraded = MetadataStore(path, migrations=(*MIGRATIONS, SECOND_MIGRATION))
+    upgraded = MetadataStore(path, migrations=(*MIGRATIONS, FUTURE_MIGRATION))
     result = upgraded.open()
 
-    assert result.schema_version == 2 and result.migrations_applied == (2,)
+    assert result.schema_version == NEXT_VERSION
+    assert result.migrations_applied == (NEXT_VERSION,)
     assert [w.id for w in upgraded.load_workspaces()] == [WORKSPACE]
     assert [u.id for u in upgraded.load_uploads()] == [_upload().id]
     upgraded.close()
 
 
+def test_a_schema_v1_database_upgrades_to_the_current_schema_keeping_its_data(
+    tmp_path: Path,
+) -> None:
+    """The real v1 -> v2 migration: existing workspaces survive and the new tables work."""
+    path = tmp_path / "metadata.db"
+    first = MetadataStore(path, migrations=MIGRATIONS[:1])
+    first.open()
+    first.save_workspace(_workspace())
+    first.save_upload(_upload())
+    first.close()
+
+    current = MetadataStore(path)
+    result = current.open()
+
+    assert result.migrations_applied == tuple(m.version for m in MIGRATIONS[1:])
+    assert [w.id for w in current.load_workspaces()] == [WORKSPACE]
+    assert [u.id for u in current.load_uploads()] == [_upload().id]
+    current.save_dataset(_dataset())
+    assert [d.id for d in current.load_datasets()] == [_dataset().id]
+    current.close()
+
+
+def _dataset(dataset_id: str = "ds_" + "5" * 32) -> StoredDataset:
+    return StoredDataset(
+        id=dataset_id,
+        workspace_id=WORKSPACE,
+        tenant_id=TENANT,
+        upload_id="upl_" + "2" * 32,
+        requested_sheet=0,
+        schema_mapping={
+            "amount": {
+                "canonical_field": "amount",
+                "source_column": "amount",
+                "confidence": 0.9,
+                "reason": "name match",
+            }
+        },
+        recommended_features=("amount",),
+        mapping_confirmed=True,
+        mapping_version=2,
+        created_at=NOW,
+    )
+
+
+def test_datasets_analyses_and_reports_round_trip_and_cascade(tmp_path: Path) -> None:
+    store = MetadataStore(tmp_path / "metadata.db")
+    store.open()
+    store.save_workspace(_workspace())
+    dataset = _dataset()
+    analysis = StoredAnalysis(
+        id="an_" + "6" * 32,
+        workspace_id=WORKSPACE,
+        tenant_id=TENANT,
+        dataset_id=dataset.id,
+        mapping_version=2,
+        schema_mapping=dataset.schema_mapping,
+        anomaly_contamination=0.05,
+        anomaly_features=("amount", "count"),
+        created_at=NOW,
+    )
+    report = StoredReport(
+        id="report_" + "7" * 32,
+        workspace_id=WORKSPACE,
+        tenant_id=TENANT,
+        analysis_id=analysis.id,
+        include_charts=True,
+        created_at=NOW,
+    )
+
+    store.save_dataset(dataset)
+    store.save_dataset(replace(dataset, mapping_version=3, mapping_confirmed=False))
+    store.save_analysis(analysis)
+    store.save_report(report)
+
+    (loaded_dataset,) = store.load_datasets()
+    assert loaded_dataset.mapping_version == 3 and loaded_dataset.requested_sheet == 0
+    assert loaded_dataset.schema_mapping == dataset.schema_mapping
+    assert store.load_analyses() == [analysis] and store.load_reports() == [report]
+
+    store.delete_workspace(WORKSPACE)
+    assert store.load_datasets() == [] and store.load_analyses() == []
+    assert store.load_reports() == []
+    store.close()
+
+
+def test_a_sheet_requested_by_name_or_index_is_stored_with_its_type(tmp_path: Path) -> None:
+    store = MetadataStore(tmp_path / "metadata.db")
+    store.open()
+    store.save_workspace(_workspace())
+    store.save_dataset(replace(_dataset("ds_" + "8" * 32), requested_sheet="Q3 Summary"))
+    store.save_dataset(replace(_dataset("ds_" + "9" * 32), requested_sheet=1))
+
+    sheets = {d.id[-1]: d.requested_sheet for d in store.load_datasets()}
+
+    assert sheets == {"8": "Q3 Summary", "9": 1}
+    store.close()
+
+
 def test_a_database_from_a_newer_build_is_refused_not_guessed_at(tmp_path: Path) -> None:
     path = tmp_path / "metadata.db"
-    newer = MetadataStore(path, migrations=(*MIGRATIONS, SECOND_MIGRATION))
+    newer = MetadataStore(path, migrations=(*MIGRATIONS, FUTURE_MIGRATION))
     newer.open()
     newer.close()
 
@@ -108,7 +212,7 @@ def test_a_database_from_a_newer_build_is_refused_not_guessed_at(tmp_path: Path)
 
 def test_an_altered_recorded_migration_is_detected(tmp_path: Path) -> None:
     path = tmp_path / "metadata.db"
-    MetadataStore(path).open()
+    MetadataStore(path, migrations=MIGRATIONS[:1]).open()
     altered = Migration(1, MIGRATIONS[0].description, (*MIGRATIONS[0].statements, "SELECT 1"))
 
     with pytest.raises(MetadataVersionError, match="different contents"):
@@ -117,14 +221,14 @@ def test_an_altered_recorded_migration_is_detected(tmp_path: Path) -> None:
 
 def test_migrations_must_be_numbered_consecutively() -> None:
     with pytest.raises(ValueError, match="consecutively"):
-        MetadataStore(Path("unused.db"), migrations=(SECOND_MIGRATION,))
+        MetadataStore(Path("unused.db"), migrations=(FUTURE_MIGRATION,))
 
 
 def test_a_failed_migration_rolls_back_completely(tmp_path: Path) -> None:
     path = tmp_path / "metadata.db"
     MetadataStore(path).open()
     broken = Migration(
-        2,
+        NEXT_VERSION,
         "half applied",
         ("ALTER TABLE workspaces ADD COLUMN ok_column TEXT", "THIS IS NOT SQL"),
     )
@@ -133,7 +237,7 @@ def test_a_failed_migration_rolls_back_completely(tmp_path: Path) -> None:
         MetadataStore(path, migrations=(*MIGRATIONS, broken)).open()
 
     store = MetadataStore(path)
-    assert store.open().schema_version == SCHEMA_VERSION  # version 2 was never recorded
+    assert store.open().schema_version == SCHEMA_VERSION  # the broken migration was never recorded
     with closing(sqlite3.connect(path, isolation_level=None)) as connection:
         columns = [row[1] for row in connection.execute("PRAGMA table_info(workspaces)")]
     assert "ok_column" not in columns
