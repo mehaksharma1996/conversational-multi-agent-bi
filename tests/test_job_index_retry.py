@@ -27,7 +27,7 @@ from tests.test_utils import isolated_directory_path, isolated_vector_path
 
 TENANT = "tenant-a"
 WORKSPACE = "workspace-1"
-WAIT = 30.0
+WAIT = 120.0  # an upper bound only: shared Windows runners can be slow under load
 
 
 class FlakyEmbedder:

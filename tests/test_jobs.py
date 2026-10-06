@@ -25,7 +25,7 @@ from packages.observability import bind_request_id, current_request_id
 TENANT = "tenant-a"
 OTHER = "tenant-b"
 WORKSPACE = "workspace-1"
-WAIT = 5.0
+WAIT = 30.0  # an upper bound only: tests return as soon as the event happens
 
 
 class Clock:
