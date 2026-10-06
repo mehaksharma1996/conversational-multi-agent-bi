@@ -30,6 +30,7 @@ class IndexDocumentsCommand:
     max_chunks: int
     retrieval_top_k: int
     retrieval_max_distance: float | None
+    retrieval_hybrid: bool = True
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ class DocumentApplicationService:
             store,
             max_distance=command.retrieval_max_distance,
             default_top_k=command.retrieval_top_k,
+            hybrid=command.retrieval_hybrid,
         )
         return DocumentIndexResult(
             filenames=tuple(document.filename for document, _ in unique_documents),

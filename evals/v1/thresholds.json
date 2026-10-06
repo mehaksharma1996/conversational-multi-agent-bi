@@ -10,7 +10,12 @@
     "privacy_redaction": 1.0,
     "prompt_injection": 1.0,
     "tenant_isolation": 1.0,
-    "mcp_tool_safety": 1.0
+    "mcp_tool_safety": 1.0,
+    "retrieval": 1.0
   },
-  "waivers": {}
+  "waivers": {},
+  "retrieval_metrics_min": {
+    "recall_at_k": 1.0,
+    "mrr": 0.5
+  }
 }

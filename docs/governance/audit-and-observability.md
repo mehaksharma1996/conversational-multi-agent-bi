@@ -33,7 +33,7 @@ Tenants appear only as `tenant_ref`, a salted truncated digest that cannot be jo
 
 Recorded (examples): `http.request` (method, route template, status, duration, error code), `agent.answer` (route, question *length*,
 provider/model, duration, outcome, safe error category, retrieval candidates/accepted/rejected/duplicates, SQL duration and row count, grounding status,
-citation and quote warning counts, criteria provenance), `documents.index` (documents, pages, chunks, bytes), `dataset.create`,
+citation and quote warning counts, criteria provenance, lexical candidate and lexical-only accepted counts), `documents.index` (documents, pages, chunks, bytes), `dataset.create`,
 `dataset.confirm_schema`, `analysis.run`, `upload.tabular`, `report.render` (format, size), `export.create` (format, size, rows),
 `workspace.lifecycle` (created/expired/deleted), `api.unhandled_error`.
 

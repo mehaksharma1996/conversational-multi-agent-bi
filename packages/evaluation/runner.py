@@ -22,6 +22,7 @@ from packages.evaluation.fakes import (
 )
 from packages.evaluation.fixtures import FixtureSet
 from packages.evaluation.models import EVALUATOR_VERSION, REPORT_VERSION, CaseResult
+from packages.evaluation.retrieval import hybrid_settings, run_retrieval_cases
 from packages.observability import error_category
 from src.agents.rag_agent import RAGAgentError, build_rag_prompt
 from src.agents.sql_agent import SQLAgentError, build_sql_prompt, build_sql_retry_prompt
@@ -167,13 +168,27 @@ def run_suite(
     results: list[CaseResult] = []
     with TemporaryDirectory(prefix="conversational-bi-eval-", ignore_cleanup_errors=True) as tmp:
         environment = EvaluationEnvironment(fixtures, Path(tmp))
+        retrieval_metrics: dict[str, Any] | None = None
         try:
             for case in cases:
                 results.append(run_case(case, environment, llm_factory))
+            retrieval_cases = [
+                case
+                for case in fixtures.retrieval_cases
+                if case_filter is None or case_filter({"capability": "retrieval", **case})
+            ]
+            if mode == "deterministic" and retrieval_cases:
+                retrieval_results, retrieval_metrics = run_retrieval_cases(
+                    fixtures, environment, retrieval_cases
+                )
+                results.extend(retrieval_results)
         finally:
             environment.close()
     results.extend(extra_results or [])
-    return build_report(fixtures, results, mode=mode, provider=provider, model=model)
+    report = build_report(fixtures, results, mode=mode, provider=provider, model=model)
+    if retrieval_metrics is not None:
+        report["aggregate"]["retrieval_metrics"] = retrieval_metrics
+    return report
 
 
 def build_report(
@@ -198,7 +213,7 @@ def build_report(
                 "product_model": DEFAULT_EMBEDDING_MODEL,
                 "product_model_revision": DEFAULT_EMBEDDING_MODEL_REVISION,
             },
-            "retrieval_settings": fixtures.retrieval,
+            "retrieval_settings": {**fixtures.retrieval, "hybrid": hybrid_settings()},
             "prompt_fingerprints": prompt_fingerprints(),
             "token_usage": token_usage(results),
         },

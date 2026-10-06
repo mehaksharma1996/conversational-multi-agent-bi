@@ -71,6 +71,19 @@ def evaluate_gates(
         if capability not in minimums:
             failures.append({"gate": "capability_unthresholded", "detail": capability})
 
+    metric_minimums: dict[str, float] = thresholds.get("retrieval_metrics_min", {})
+    if metric_minimums:
+        measured = aggregate.get("retrieval_metrics")
+        for metric, minimum in metric_minimums.items():
+            value = None if measured is None else measured.get(metric)
+            if value is None or value < float(minimum):
+                failures.append(
+                    {
+                        "gate": "retrieval_metric",
+                        "detail": f"{metric}: {value} < {minimum}",
+                    }
+                )
+
     if baseline is None:
         failures.append({"gate": "baseline_missing", "detail": "No committed baseline was found."})
     else:

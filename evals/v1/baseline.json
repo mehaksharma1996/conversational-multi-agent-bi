@@ -26,6 +26,10 @@
         "cases": 3,
         "pass_rate": 1.0
       },
+      "retrieval": {
+        "cases": 6,
+        "pass_rate": 1.0
+      },
       "routing": {
         "cases": 9,
         "pass_rate": 1.0
@@ -43,7 +47,7 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 61
+    "cases": 67
   },
   "baseline_version": 1,
   "cases": {
@@ -551,6 +555,60 @@
       },
       "passed": true
     },
+    "retrieval-common-topic-unchanged": {
+      "capability": "retrieval",
+      "checks": {
+        "crash.none": true,
+        "retrieval.dense_control": true,
+        "retrieval.evidence_retrieved": true
+      },
+      "passed": true
+    },
+    "retrieval-exact-code-missed-by-dense": {
+      "capability": "retrieval",
+      "checks": {
+        "crash.none": true,
+        "retrieval.dense_control": true,
+        "retrieval.evidence_retrieved": true
+      },
+      "passed": true
+    },
+    "retrieval-existing-policy-exact-term": {
+      "capability": "retrieval",
+      "checks": {
+        "crash.none": true,
+        "retrieval.dense_control": true,
+        "retrieval.evidence_retrieved": true
+      },
+      "passed": true
+    },
+    "retrieval-off-topic-still-refused": {
+      "capability": "retrieval",
+      "checks": {
+        "crash.none": true,
+        "retrieval.dense_control": true,
+        "retrieval.off_topic_refused": true
+      },
+      "passed": true
+    },
+    "retrieval-rare-word-missed-by-dense": {
+      "capability": "retrieval",
+      "checks": {
+        "crash.none": true,
+        "retrieval.dense_control": true,
+        "retrieval.evidence_retrieved": true
+      },
+      "passed": true
+    },
+    "retrieval-simple-exact-term-still-found": {
+      "capability": "retrieval",
+      "checks": {
+        "crash.none": true,
+        "retrieval.dense_control": true,
+        "retrieval.evidence_retrieved": true
+      },
+      "passed": true
+    },
     "routing-extra-key-classification-repaired": {
       "capability": "routing",
       "checks": {
@@ -838,7 +896,7 @@
     }
   },
   "metadata": {
-    "dataset_revision": "2026-09-29.1",
+    "dataset_revision": "2026-10-06.1",
     "dataset_version": "v1",
     "embedding": {
       "evaluation_embedder": "hashing-bow-1024-v1"
@@ -854,6 +912,15 @@
     "retrieval_settings": {
       "chunk_size": 300,
       "embedder": "hashing-bow-1024-v1",
+      "hybrid": {
+        "bm25_b": 0.75,
+        "bm25_k1": 1.5,
+        "fusion": "reciprocal_rank",
+        "lexical": "bm25",
+        "max_rare_document_fraction": 0.5,
+        "min_term_coverage": 0.5,
+        "rrf_k": 60
+      },
       "max_distance": 0.9,
       "overlap": 40,
       "top_k": 4

@@ -45,6 +45,8 @@ class RAGAnswer:
     candidates_considered: int = 0
     candidates_rejected_by_distance: int = 0
     duplicates_skipped: int = 0
+    lexical_candidates: int = 0
+    lexical_only_accepted: int = 0
 
 
 def answer_with_documents(
@@ -104,6 +106,8 @@ def answer_with_documents(
         candidates_considered=retrieval.candidates_considered,
         candidates_rejected_by_distance=retrieval.candidates_rejected_by_distance,
         duplicates_skipped=retrieval.duplicates_skipped,
+        lexical_candidates=retrieval.lexical_candidates,
+        lexical_only_accepted=retrieval.lexical_only_accepted,
     )
 
 

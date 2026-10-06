@@ -13,6 +13,7 @@ import chromadb
 
 from src.documents.chunker import DocumentChunk
 from src.documents.embedding import TextEmbedder
+from src.documents.lexical import BM25Index
 
 DEFAULT_COLLECTION_NAME = "uploaded_documents"
 DEFAULT_EMBEDDING_BATCH_SIZE = 64
@@ -49,6 +50,7 @@ class ChromaDocumentStore:
         self.embedder = embedder
         self.collection_name = collection_name
         self._lock = _store_lock(self.persist_dir, self.collection_name)
+        self._lexical_cache: tuple[tuple[str, int], BM25Index, list[tuple[str, dict]]] | None = None
         self.persist_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:
             self._client: Any = chromadb.PersistentClient(path=str(self.persist_dir))
@@ -154,6 +156,7 @@ class ChromaDocumentStore:
         question: str,
         top_k: int = 4,
         max_distance: float | None = None,
+        where: dict | None = None,
     ) -> list[RetrievedChunk]:
         if not question.strip():
             return []
@@ -164,10 +167,13 @@ class ChromaDocumentStore:
             if count == 0:
                 return []
             embeddings = self.embedder.embed_texts([question])
-            result = self._collection.query(
-                query_embeddings=embeddings,
-                n_results=min(top_k, count),
-            )
+            query_arguments: dict[str, Any] = {
+                "query_embeddings": embeddings,
+                "n_results": min(top_k, count),
+            }
+            if where:
+                query_arguments["where"] = where
+            result = self._collection.query(**query_arguments)
 
         documents = result.get("documents", [[]])[0]
         metadatas = result.get("metadatas", [[]])[0]
@@ -200,6 +206,58 @@ class ChromaDocumentStore:
             )
         return chunks
 
+    def lexical_search(
+        self,
+        question: str,
+        limit: int,
+        *,
+        filename: str | None = None,
+        page_min: int | None = None,
+        page_max: int | None = None,
+    ) -> list[tuple[RetrievedChunk, float]]:
+        """BM25 hits (best first, relevance-gated) over the *current* canonical collection.
+
+        The index is rebuilt whenever the collection's identity or size changes, so a re-index that
+        promotes a new collection can never be searched through a stale lexical index.
+        """
+        if not question.strip():
+            return []
+        with self._lock:
+            self._refresh_collection()
+            count = int(self._collection.count())
+            if count == 0:
+                return []
+            key = (str(self._collection.id), count)
+            if self._lexical_cache is None or self._lexical_cache[0] != key:
+                stored = self._collection.get(include=["documents", "metadatas"])
+                documents = [str(text) for text in stored.get("documents") or []]
+                metadatas = [dict(meta or {}) for meta in stored.get("metadatas") or []]
+                self._lexical_cache = (
+                    key,
+                    BM25Index(documents),
+                    list(zip(documents, metadatas, strict=False)),
+                )
+            _, index, entries = self._lexical_cache
+
+        allowed = {
+            position
+            for position, (_, metadata) in enumerate(entries)
+            if metadata_matches(metadata, filename, page_min, page_max)
+        }
+        hits = index.search(question, limit, allowed if len(allowed) != len(entries) else None)
+        return [
+            (
+                RetrievedChunk(
+                    text=entries[hit.index][0],
+                    metadata=entries[hit.index][1],
+                    distance=None,
+                    relevance_score=hit.score / (hit.score + 4.0),
+                ),
+                hit.score,
+            )
+            for hit in hits
+        ]
+
     def count(self) -> int:
         with self._lock:
             self._refresh_collection()
@@ -225,3 +283,33 @@ class ChromaDocumentStore:
                 close()
             self._client = None
         gc.collect()
+
+
+def page_span(metadata: dict) -> tuple[int, int] | None:
+    """Inclusive page span; ``page_number`` is an int or a span string such as ``"8-10"``."""
+    value = metadata.get("page_number")
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value, value
+    if isinstance(value, str):
+        first, _, last = value.partition("-")
+        if first.strip().isdigit() and (not last or last.strip().isdigit()):
+            return int(first), int(last or first)
+    return None
+
+
+def metadata_matches(
+    metadata: dict,
+    filename: str | None,
+    page_min: int | None,
+    page_max: int | None,
+) -> bool:
+    """Whether a chunk is in ``filename`` and its page span overlaps ``[page_min, page_max]``."""
+    if filename is not None and metadata.get("filename") != filename:
+        return False
+    if page_min is None and page_max is None:
+        return True
+    span = page_span(metadata)
+    if span is None:
+        return False
+    first, last = span
+    return (page_min is None or last >= page_min) and (page_max is None or first <= page_max)

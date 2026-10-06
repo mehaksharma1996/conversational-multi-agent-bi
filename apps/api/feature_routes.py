@@ -208,6 +208,7 @@ async def create_document_collection(
                     max_chunks=settings.max_document_chunks,
                     retrieval_top_k=settings.retrieval_top_k,
                     retrieval_max_distance=settings.retrieval_max_distance,
+                    retrieval_hybrid=settings.retrieval_hybrid,
                 )
             )
             operation.set(
@@ -768,6 +769,8 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
         "retrieval_accepted": diagnostics.retrieval_accepted,
         "retrieval_rejected_distance": diagnostics.retrieval_rejected_distance,
         "retrieval_duplicates_skipped": diagnostics.retrieval_duplicates_skipped,
+        "retrieval_lexical_candidates": diagnostics.retrieval_lexical_candidates,
+        "retrieval_lexical_only_accepted": diagnostics.retrieval_lexical_only_accepted,
         "sql_row_count": diagnostics.sql_row_count,
         "sql_correction_attempted": diagnostics.sql_correction_attempted,
         "structured_output_repairs": diagnostics.structured_output_repairs,
