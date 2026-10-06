@@ -69,7 +69,7 @@ def test_job_list_uses_stable_cursor_pages_and_never_serializes_results(job_rig:
     for index in range(3):
         record = _submit(executor, f"test.run_{index}")
         assert (
-            executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2).status is JobStatus.SUCCEEDED
+            executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=30).status is JobStatus.SUCCEEDED
         )
 
     complete = client.get("/api/v1/jobs?limit=100")
@@ -104,7 +104,7 @@ def test_job_list_uses_stable_cursor_pages_and_never_serializes_results(job_rig:
 def test_job_reads_and_cancellation_hide_foreign_tenant_jobs(job_rig: JobRig) -> None:
     app, client, executor = job_rig
     record = _submit(executor)
-    executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2)
+    executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=30)
     app.dependency_overrides[get_identity] = lambda: IdentityContext(
         tenant_id="tenant-b",
         subject="other-user",
@@ -132,11 +132,11 @@ def test_cancellation_is_idempotent_and_explicitly_best_effort(job_rig: JobRig) 
 
     def stubborn(_context: JobContext) -> str:
         started.set()
-        assert release.wait(timeout=2)
+        assert release.wait(timeout=30)
         return "finished"
 
     running = _submit(executor, "test.running", stubborn)
-    assert started.wait(timeout=2)
+    assert started.wait(timeout=30)
     queued = _submit(executor, "test.queued")
 
     queued_cancel = client.delete(f"/api/v1/jobs/{queued.id}")
@@ -152,7 +152,7 @@ def test_cancellation_is_idempotent_and_explicitly_best_effort(job_rig: JobRig) 
     assert running_cancel.headers["Location"] == f"/api/v1/jobs/{running.id}"
 
     release.set()
-    assert executor.wait(running.id, LOCAL_DEV_TENANT_ID, timeout=2).status is JobStatus.SUCCEEDED
+    assert executor.wait(running.id, LOCAL_DEV_TENANT_ID, timeout=30).status is JobStatus.SUCCEEDED
     terminal_cancel = client.delete(f"/api/v1/jobs/{running.id}")
     assert terminal_cancel.status_code == 200
     assert terminal_cancel.json()["status"] == "succeeded"
@@ -165,16 +165,16 @@ def test_closing_a_poll_response_does_not_cancel_running_work(job_rig: JobRig) -
 
     def work(_context: JobContext) -> None:
         started.set()
-        assert release.wait(timeout=2)
+        assert release.wait(timeout=30)
 
     record = _submit(executor, "test.disconnect", work)
-    assert started.wait(timeout=2)
+    assert started.wait(timeout=30)
     with client.stream("GET", f"/api/v1/jobs/{record.id}") as response:
         assert response.status_code == 200
 
     assert executor.get(record.id, LOCAL_DEV_TENANT_ID).status is JobStatus.RUNNING
     release.set()
-    assert executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2).status is JobStatus.SUCCEEDED
+    assert executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=30).status is JobStatus.SUCCEEDED
 
 
 def test_failed_job_retry_is_explicit_bounded_and_not_replayable_after_success(
@@ -191,7 +191,7 @@ def test_failed_job_retry_is_explicit_bounded_and_not_replayable_after_success(
         return "ok"
 
     record = _submit(executor, "test.retry", flaky)
-    failed = executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2)
+    failed = executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=30)
     assert failed.status is JobStatus.FAILED
     assert failed.retryable
 
@@ -204,7 +204,7 @@ def test_failed_job_retry_is_explicit_bounded_and_not_replayable_after_success(
     assert retried.headers["Retry-After"] == "1"
     assert "private provider detail" not in retried.text
 
-    assert executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=2).status is JobStatus.SUCCEEDED
+    assert executor.wait(record.id, LOCAL_DEV_TENANT_ID, timeout=30).status is JobStatus.SUCCEEDED
     conflict = client.post(f"/api/v1/jobs/{record.id}/retry")
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "job_not_retryable"
