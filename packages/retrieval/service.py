@@ -118,6 +118,30 @@ class DocumentApplicationService:
             retriever=retriever,
         )
 
+    def open_existing(
+        self, command: IndexDocumentsCommand, expected_chunk_count: int
+    ) -> DocumentRetriever:
+        """Reopen a previously built index (after a restart) and verify it is intact.
+
+        ``command.documents`` is ignored. The index must hold exactly ``expected_chunk_count``
+        chunks; anything else means it is missing, partial, or from a different build, and the
+        caller must discard it rather than answer from it.
+        """
+        store = self._open_store(command)
+        try:
+            actual = store.count()
+            if actual != expected_chunk_count:
+                raise ValueError("The document index does not match its recorded contents.")
+        except Exception:
+            store.close()
+            raise
+        return DocumentRetriever(
+            store,
+            max_distance=command.retrieval_max_distance,
+            default_top_k=command.retrieval_top_k,
+            hybrid=command.retrieval_hybrid,
+        )
+
     def _open_store(
         self, command: IndexDocumentsCommand
     ) -> ChromaDocumentStore | PgvectorDocumentStore:

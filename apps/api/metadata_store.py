@@ -140,6 +140,26 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX reports_workspace ON reports (workspace_id)",
         ),
     ),
+    Migration(
+        3,
+        "document collections (the index itself lives in Chroma or pgvector)",
+        (
+            """
+            CREATE TABLE document_collections (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                filenames TEXT NOT NULL,
+                document_hashes TEXT NOT NULL,
+                page_count INTEGER NOT NULL,
+                chunk_count INTEGER NOT NULL,
+                index_backend TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX document_collections_workspace ON document_collections (workspace_id)",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -207,6 +227,19 @@ class StoredReport:
     tenant_id: str
     analysis_id: str
     include_charts: bool
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredDocumentCollection:
+    id: str
+    workspace_id: str
+    tenant_id: str
+    filenames: tuple[str, ...]
+    document_hashes: tuple[str, ...]
+    page_count: int
+    chunk_count: int
+    index_backend: str
     created_at: datetime
 
 
@@ -655,6 +688,58 @@ class MetadataStore:
                 analysis_id=row[3],
                 include_charts=bool(row[4]),
                 created_at=_parse(row[5]),
+            )
+            for row in rows
+        ]
+
+    # --- document collections ----------------------------------------------------------------
+
+    def replace_document_collection(self, collection: StoredDocumentCollection) -> None:
+        """A workspace has one current collection: store this one and remove earlier rows."""
+        with self._transaction() as connection:
+            connection.execute(
+                "DELETE FROM document_collections WHERE workspace_id = ?",
+                (collection.workspace_id,),
+            )
+            connection.execute(
+                "INSERT INTO document_collections (id, workspace_id, tenant_id, filenames, "
+                "document_hashes, page_count, chunk_count, index_backend, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    collection.id,
+                    collection.workspace_id,
+                    collection.tenant_id,
+                    json.dumps(list(collection.filenames)),
+                    json.dumps(list(collection.document_hashes)),
+                    collection.page_count,
+                    collection.chunk_count,
+                    collection.index_backend,
+                    _iso(collection.created_at),
+                ),
+            )
+
+    def delete_document_collection(self, collection_id: str) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM document_collections WHERE id = ?", (collection_id,))
+
+    def load_document_collections(self) -> list[StoredDocumentCollection]:
+        with self._use() as connection:
+            rows = connection.execute(
+                "SELECT id, workspace_id, tenant_id, filenames, document_hashes, page_count, "
+                "chunk_count, index_backend, created_at FROM document_collections "
+                "ORDER BY created_at, id"
+            ).fetchall()
+        return [
+            StoredDocumentCollection(
+                id=row[0],
+                workspace_id=row[1],
+                tenant_id=row[2],
+                filenames=tuple(json.loads(row[3])),
+                document_hashes=tuple(json.loads(row[4])),
+                page_count=int(row[5]),
+                chunk_count=int(row[6]),
+                index_backend=row[7],
+                created_at=_parse(row[8]),
             )
             for row in rows
         ]

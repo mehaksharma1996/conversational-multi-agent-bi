@@ -359,3 +359,59 @@ def test_the_command_line_reports_success_and_failure(
     broken = _mutated(archive, tmp_path, lambda m: m.update({"metadata.db": b"broken"}))
     assert main(["verify", str(broken)]) == 1
     assert main(["restore", str(broken), "--storage-root", str(tmp_path / "x")]) == 1
+
+
+def test_a_backup_with_conversations_and_a_document_index_restores_everything(
+    tmp_path: Path,
+) -> None:
+    from tests.test_api_recovered_conversations import HYBRID, RAG, Context, _ask, _messages
+
+    source = Deployment("backup_conversations", sqlite_encryption_key=None)
+    with TestClient(source.app()) as client:
+        ctx = Context(client)
+        _ask(client, ctx.conversation_id, RAG)
+        hybrid = _ask(client, ctx.conversation_id, HYBRID)
+        export = client.post(f"/api/v1/messages/{hybrid['id']}/exports", json={"format": "csv"})
+        before = _messages(client, ctx.conversation_id)
+        exported = client.get(f"/api/v1/exports/{export.json()['id']}/content").content
+    archive = tmp_path / "conversations.tar.gz"
+    create_backup(source.root / "api", archive)
+
+    report = verify_archive(archive)
+    assert report.ok, report.problems
+
+    target = Deployment("backup_conversations_target", sqlite_encryption_key=None)
+    restore_backup(archive, target.root / "api")
+    with TestClient(target.app()) as client:
+        assert _messages(client, ctx.conversation_id) == before
+        assert client.get(f"/api/v1/exports/{export.json()['id']}/content").content == exported
+        assert _ask(client, ctx.conversation_id, RAG)["sources"], "the restored index answers"
+
+
+def test_a_corrupt_workspace_content_database_is_detected(tmp_path: Path) -> None:
+    from tests.test_api_recovered_conversations import HYBRID, Context, _ask
+
+    source = Deployment("backup_corrupt_content", sqlite_encryption_key=None)
+    with TestClient(source.app()) as client:
+        ctx = Context(client)
+        for _ in range(3):
+            _ask(client, ctx.conversation_id, HYBRID)
+    archive = tmp_path / "content.tar.gz"
+    create_backup(source.root / "api", archive)
+
+    def change(members: Members) -> None:
+        name = next(n for n in members if n.endswith("/content.db"))
+        damaged = bytearray(members[name])
+        for offset in range(4096, min(len(damaged), 4096 + 2048)):
+            damaged[offset] ^= 0xFF  # keep the SQLite header, corrupt the pages
+        members[name] = bytes(damaged)
+        manifest = _manifest(members)
+        manifest["files"][name] = {
+            "sha256": hashlib.sha256(members[name]).hexdigest(),
+            "size": len(members[name]),
+        }
+        _save_manifest(members, manifest)
+
+    problems = verify_archive(_mutated(archive, tmp_path, change)).problems
+
+    assert any("content database failed" in problem for problem in problems)

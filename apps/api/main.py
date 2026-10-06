@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from apps.api.approvals import ApprovalCheckpoints
 from apps.api.auth import RequestIdentityProvider, build_identity_provider
 from apps.api.auth_routes import router as auth_router
+from apps.api.content_store import WorkspaceContentStore
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
@@ -98,6 +99,11 @@ def create_app(
             if active_settings.durable_metadata
             else None
         ),
+        content_store=(
+            WorkspaceContentStore(storage_root.resolve(), active_settings.sqlite_encryption_key)
+            if active_settings.durable_metadata
+            else None
+        ),
     )
     if telemetry_sink is None:
         configure_telemetry_logging()
@@ -127,9 +133,6 @@ def create_app(
         application.state.embedding_cache,
     )
     application.state.tabular_service = TabularApplicationService()
-    application.state.repository.rehydrator = ApiRehydrator(
-        application.state.tabular_service, active_settings
-    )
     active_embedder_factory = embedder_factory or SentenceTransformerEmbedder
     application.state.document_service = DocumentApplicationService(
         active_embedder_factory,
@@ -141,6 +144,11 @@ def create_app(
             cache_misses=misses,
             cache_entries=entries,
         ),
+    )
+    application.state.repository.rehydrator = ApiRehydrator(
+        application.state.tabular_service,
+        active_settings,
+        application.state.document_service,
     )
     application.state.llm_client_factory = llm_client_factory or build_llm_client
 
@@ -275,6 +283,8 @@ def _start(app: FastAPI) -> None:
         datasets_pending=recovery.datasets_pending,
         analyses_pending=recovery.analyses_pending,
         reports_pending=recovery.reports_pending,
+        document_collections_pending=recovery.collections_pending,
+        conversations_pending=recovery.conversations_pending,
     )
 
 

@@ -102,6 +102,8 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "datasets_pending": "int",
     "analyses_pending": "int",
     "reports_pending": "int",
+    "document_collections_pending": "int",
+    "conversations_pending": "int",
     "rate_limit_operation": "token",
     "rate_limited": "bool",
     "rate_limit_remaining": "int",

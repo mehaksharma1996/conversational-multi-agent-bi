@@ -283,6 +283,7 @@ async def create_document_collection(
         page_count=indexed.page_count,
         chunk_count=indexed.chunk_count,
         retriever=indexed.retriever,
+        index_backend=settings.document_index_backend,
     )
     observability.audit(
         "documents.indexed",
