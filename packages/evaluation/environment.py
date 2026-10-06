@@ -6,6 +6,7 @@ code. Only the model and the embedding function are substituted.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,13 @@ class _Page:
 
 
 class EvaluationEnvironment:
-    def __init__(self, fixtures: FixtureSet, workdir: Path) -> None:
+    def __init__(
+        self,
+        fixtures: FixtureSet,
+        workdir: Path,
+        store_factory: Callable[[str, Any], Any] | None = None,
+    ) -> None:
+        self._store_factory = store_factory
         self._fixtures = fixtures
         self._workdir = workdir
         self._tables: dict[str, StoredTable] = {}
@@ -74,9 +81,14 @@ class EvaluationEnvironment:
                 overlap=int(settings["overlap"]),
                 document_id=name,
             )
-            store = ChromaDocumentStore(
-                persist_dir=self._workdir / "vectors" / name,
-                embedder=HashingEmbedder(),
+            embedder = HashingEmbedder()
+            store = (
+                self._store_factory(name, embedder)
+                if self._store_factory is not None
+                else ChromaDocumentStore(
+                    persist_dir=self._workdir / "vectors" / name,
+                    embedder=embedder,
+                )
             )
             store.replace_chunks(chunks)
             self._retrievers[name] = DocumentRetriever(

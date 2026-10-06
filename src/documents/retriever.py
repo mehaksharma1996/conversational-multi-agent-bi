@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from src.documents.vector_store import ChromaDocumentStore, RetrievedChunk, metadata_matches
+
+if TYPE_CHECKING:
+    from src.documents.pgvector_store import PgvectorDocumentStore
 
 LOGGER = logging.getLogger(__name__)
 _DUPLICATE_OVERLAP_THRESHOLD = 0.7
@@ -60,7 +63,7 @@ class DocumentRetriever:
 
     def __init__(
         self,
-        store: ChromaDocumentStore,
+        store: ChromaDocumentStore | PgvectorDocumentStore,
         max_distance: float | None = None,
         default_top_k: int = 4,
         hybrid: bool = True,
@@ -168,6 +171,12 @@ class DocumentRetriever:
                 "page_max": filters.page_max,
             }
         return [chunk for chunk, _score in search(question, pool, **arguments)]
+
+    def purge(self) -> None:
+        """Delete persisted rows when the store keeps them outside the workspace directory."""
+        purge = getattr(self.store, "purge", None)
+        if callable(purge):
+            purge()
 
     def close(self) -> None:
         self.store.close()

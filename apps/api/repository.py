@@ -789,7 +789,9 @@ class LocalResourceRepository:
             if record.workspace_id == workspace.id
         ]
         for collection_id in collection_ids:
-            self._document_collections.pop(collection_id).retriever.close()
+            retriever = self._document_collections.pop(collection_id).retriever
+            retriever.purge()  # a database-backed index is not removed with the workspace directory
+            retriever.close()
 
         for records in (
             self._uploads,

@@ -83,6 +83,9 @@ class Settings:
     oidc_client_secret: str | None = field(default=None, repr=False)
     oidc_redirect_uri: str | None = None
     oidc_scopes: tuple[str, ...] = ("openid",)
+    document_index_backend: str = "chroma"
+    postgres_dsn: str | None = field(default=None, repr=False)
+    postgres_auto_migrate: bool = False
     llm_providers: tuple[str, ...] = ("gemini",)
     llm_purpose_tiers: tuple[tuple[str, str], ...] = DEFAULT_PURPOSE_TIERS
     gemini_model_fast: str | None = None
@@ -224,6 +227,18 @@ class Settings:
     @property
     def model_backed_available(self) -> bool:
         return self.hosted_model_configured or self.local_model_configured
+
+    def validate_document_index_configuration(self) -> None:
+        """The pgvector backend is opt-in; it fails closed without a DSN from the environment."""
+        if self.document_index_backend not in {"chroma", "pgvector"}:
+            raise ValueError("DOCUMENT_INDEX_BACKEND must be 'chroma' or 'pgvector'.")
+        if self.document_index_backend == "pgvector":
+            dsn = (self.postgres_dsn or "").strip()
+            if not dsn.startswith(("postgresql://", "postgres://")):
+                raise ValueError(
+                    "DOCUMENT_INDEX_BACKEND=pgvector requires POSTGRES_DSN (a postgresql:// URL) "
+                    "supplied by the environment."
+                )
 
     def validate_llm_configuration(self) -> None:
         """Fail closed on unknown, duplicate, or unsafe provider settings."""
@@ -409,6 +424,9 @@ def get_settings() -> Settings:
         oidc_client_secret=_optional_text("OIDC_CLIENT_SECRET"),
         oidc_redirect_uri=_optional_text("OIDC_REDIRECT_URI"),
         oidc_scopes=_scopes("OIDC_SCOPES"),
+        document_index_backend=os.getenv("DOCUMENT_INDEX_BACKEND", "chroma").strip().lower(),
+        postgres_dsn=os.getenv("POSTGRES_DSN") or None,
+        postgres_auto_migrate=_flag("POSTGRES_AUTO_MIGRATE"),
         llm_providers=tuple(name.lower() for name in _csv_values("LLM_PROVIDERS", ("gemini",))),
         llm_purpose_tiers=(
             ("route", os.getenv("LLM_TIER_ROUTE", "fast").strip().lower()),
@@ -434,6 +452,7 @@ def get_settings() -> Settings:
     settings.validate_identity_configuration()
     settings.validate_llm_pricing()
     settings.validate_llm_configuration()
+    settings.validate_document_index_configuration()
     return settings
 
 

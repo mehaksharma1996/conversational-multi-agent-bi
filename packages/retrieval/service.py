@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 
 from src.documents.chunker import chunk_document_pages
 from src.documents.embedding import TextEmbedder
+from src.documents.pgvector_store import PgvectorDocumentStore
 from src.documents.retriever import DocumentRetriever
 from src.documents.vector_store import ChromaDocumentStore
 from src.ingestion.pdf_loader import count_pdf_pages, load_pdf_file
@@ -31,6 +32,11 @@ class IndexDocumentsCommand:
     retrieval_top_k: int
     retrieval_max_distance: float | None
     retrieval_hybrid: bool = True
+    # Backend selection (server configuration only). The connection factory holds the DSN privately.
+    index_backend: str = "chroma"
+    index_scope: str | None = None
+    pgvector_connect: Callable[[], object] | None = field(default=None, repr=False)
+    pgvector_auto_migrate: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,10 +87,7 @@ class DocumentApplicationService:
         if len(chunks) > command.max_chunks:
             raise ValueError(f"Document indexing is limited to {command.max_chunks:,} chunks.")
 
-        store = ChromaDocumentStore(
-            persist_dir=command.persist_dir,
-            embedder=self._embedder_factory(command.embedding_model),
-        )
+        store = self._open_store(command)
         try:
             store.replace_chunks(chunks)
         except Exception:
@@ -104,3 +107,22 @@ class DocumentApplicationService:
             chunk_count=len(chunks),
             retriever=retriever,
         )
+
+    def _open_store(
+        self, command: IndexDocumentsCommand
+    ) -> ChromaDocumentStore | PgvectorDocumentStore:
+        embedder = self._embedder_factory(command.embedding_model)
+        if command.index_backend == "pgvector":
+            if command.pgvector_connect is None or not command.index_scope:
+                raise ValueError(
+                    "The pgvector backend needs a connection factory and an index scope."
+                )
+            return PgvectorDocumentStore(
+                command.pgvector_connect,
+                command.index_scope,
+                embedder,
+                auto_migrate=command.pgvector_auto_migrate,
+            )
+        if command.index_backend != "chroma":
+            raise ValueError("Unknown document index backend.")
+        return ChromaDocumentStore(persist_dir=command.persist_dir, embedder=embedder)
