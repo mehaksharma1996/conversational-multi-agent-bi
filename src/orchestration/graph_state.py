@@ -34,6 +34,8 @@ class AnswerDiagnostics:
     retrieval_accepted: int | None = None
     retrieval_rejected_distance: int | None = None
     retrieval_duplicates_skipped: int | None = None
+    retrieval_lexical_candidates: int | None = None
+    retrieval_lexical_only_accepted: int | None = None
     source_count: int = 0
     citation_count: int = 0
     invalid_citation_count: int = 0

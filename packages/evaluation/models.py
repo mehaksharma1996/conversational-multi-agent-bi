@@ -31,6 +31,7 @@ CRITICAL_CHECKS: frozenset[str] = frozenset(
         "mcp.destructive_sql_rejected",
         "mcp.scope_not_client_selectable",
         "mcp.output_bounded",
+        "retrieval.off_topic_refused",
     }
 )
 

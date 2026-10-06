@@ -760,6 +760,8 @@ def _document_diagnostics(result: RAGAnswer) -> AnswerDiagnostics:
         retrieval_accepted=len(result.retrieved_chunks),
         retrieval_rejected_distance=result.candidates_rejected_by_distance,
         retrieval_duplicates_skipped=result.duplicates_skipped,
+        retrieval_lexical_candidates=result.lexical_candidates,
+        retrieval_lexical_only_accepted=result.lexical_only_accepted,
         source_count=len(result.retrieved_chunks),
         citation_count=citation_count,
         invalid_citation_count=len(result.invalid_citations),

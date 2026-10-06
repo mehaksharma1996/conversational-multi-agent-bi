@@ -1,0 +1,98 @@
+[
+  {
+    "id": "retrieval-exact-code-missed-by-dense",
+    "corpus": "exact_term_handbook",
+    "question": "What does exception code ZX-9141 mean for the review threshold?",
+    "rationale": "The only chunk with the identifier shares few words with the question, while many chunks share its common words, so the dense stage fills its candidate pool with look-alikes and misses the evidence. The lexical stage must recover it.",
+    "evidence": [
+      {
+        "terms": [
+          "ZX-9141"
+        ]
+      }
+    ],
+    "expect": {
+      "hybrid": "hit",
+      "dense_control": "miss"
+    }
+  },
+  {
+    "id": "retrieval-rare-word-missed-by-dense",
+    "corpus": "exact_term_handbook",
+    "question": "Which merchants are exempt from the picnic review?",
+    "rationale": "A rare word ('picnic') identifies the evidence chunk, but the dense stage prefers chunks that repeat 'review'. The lexical stage must recover the chunk.",
+    "evidence": [
+      {
+        "terms": [
+          "picnic"
+        ]
+      }
+    ],
+    "expect": {
+      "hybrid": "hit",
+      "dense_control": "miss"
+    }
+  },
+  {
+    "id": "retrieval-simple-exact-term-still-found",
+    "corpus": "exact_term_handbook",
+    "question": "What does ZX-9141 mean?",
+    "rationale": "A short question where the dense stage already succeeds; fusion must not lose it (no regression against the dense-only control).",
+    "evidence": [
+      {
+        "terms": [
+          "ZX-9141"
+        ]
+      }
+    ],
+    "expect": {
+      "hybrid": "hit",
+      "dense_control": "hit"
+    }
+  },
+  {
+    "id": "retrieval-common-topic-unchanged",
+    "corpus": "exact_term_handbook",
+    "question": "What is the exception review threshold?",
+    "rationale": "A topical question answered by many chunks; fusion must keep the dense behavior when no rare term is involved.",
+    "evidence": [
+      {
+        "terms": [
+          "review threshold"
+        ]
+      }
+    ],
+    "expect": {
+      "hybrid": "hit",
+      "dense_control": "hit"
+    }
+  },
+  {
+    "id": "retrieval-off-topic-still-refused",
+    "corpus": "exact_term_handbook",
+    "question": "What is the weather in Paris today?",
+    "rationale": "An off-topic question shares only filler words with the corpus. The lexical relevance gate must not admit chunks, so the system keeps refusing instead of answering from the nearest text.",
+    "evidence": [],
+    "expect": {
+      "hybrid": "refused",
+      "dense_control": "refused"
+    }
+  },
+  {
+    "id": "retrieval-existing-policy-exact-term",
+    "corpus": "review_policy",
+    "question": "According to the review policy, which transactions require escalation?",
+    "rationale": "The existing policy corpus still retrieves its escalation passage under hybrid retrieval.",
+    "evidence": [
+      {
+        "terms": [
+          "escalation"
+        ]
+      }
+    ],
+    "expect": {
+      "hybrid": "hit",
+      "dense_control": "hit"
+    }
+  }
+]

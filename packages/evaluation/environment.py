@@ -82,6 +82,16 @@ class EvaluationEnvironment:
             )
         return self._retrievers[name]
 
+    def dense_retriever(self, name: str) -> DocumentRetriever:
+        """Dense-only view of the same index: the negative control for lexical cases."""
+        hybrid = self.retriever(name)
+        return DocumentRetriever(
+            hybrid.store,
+            max_distance=hybrid.max_distance,
+            default_top_k=hybrid.default_top_k,
+            hybrid=False,
+        )
+
     def close(self) -> None:
         for retriever in self._retrievers.values():
             retriever.close()

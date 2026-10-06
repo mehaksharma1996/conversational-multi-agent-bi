@@ -7,7 +7,7 @@ otherwise be silently ignored, turning a typo into a check that never runs.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,8 @@ EXPECT_KEYS = {
     "status",
     "approval_interrupt",
 }
+RETRIEVAL_CASE_KEYS = {"id", "corpus", "question", "rationale", "k", "evidence", "expect"}
+RETRIEVAL_REQUIRED_KEYS = {"id", "corpus", "question", "rationale", "evidence", "expect"}
 APPROVAL_KEYS = {"decision", "sql"}
 SQL_EXPECT_KEYS = {
     "required_columns",
@@ -90,6 +92,7 @@ class FixtureSet:
     corpora: dict[str, Any]
     cases: list[dict[str, Any]]
     thresholds: dict[str, Any]
+    retrieval_cases: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def retrieval(self) -> dict[str, Any]:
@@ -114,7 +117,12 @@ def load_fixtures(root: Path) -> FixtureSet:
             raise FixtureError(f"{path.name} must contain a JSON list of cases.")
         cases.extend(payload)
 
-    fixtures = FixtureSet(root, manifest, datasets, corpora, cases, thresholds)
+    retrieval_path = root / "retrieval_cases.json"
+    retrieval_cases = _read_json(retrieval_path) if retrieval_path.exists() else []
+    if not isinstance(retrieval_cases, list):
+        raise FixtureError("retrieval_cases.json must contain a JSON list of cases.")
+
+    fixtures = FixtureSet(root, manifest, datasets, corpora, cases, thresholds, retrieval_cases)
     validate_fixtures(fixtures)
     return fixtures
 
@@ -127,7 +135,42 @@ def validate_fixtures(fixtures: FixtureSet) -> None:
             raise FixtureError(f"Duplicate case id: {case_id}")
         seen.add(case_id)
         _validate_case(case, case_id, fixtures)
+    for case in fixtures.retrieval_cases:
+        case_id = str(case.get("id", "<missing id>"))
+        if case_id in seen:
+            raise FixtureError(f"Duplicate case id: {case_id}")
+        seen.add(case_id)
+        _validate_retrieval_case(case, case_id, fixtures)
     _validate_thresholds(fixtures.thresholds)
+
+
+def _validate_retrieval_case(case: dict[str, Any], case_id: str, fixtures: FixtureSet) -> None:
+    _only_keys(case, RETRIEVAL_CASE_KEYS, f"retrieval case {case_id}")
+    missing = RETRIEVAL_REQUIRED_KEYS - set(case)
+    if missing:
+        raise FixtureError(f"retrieval case {case_id} is missing {sorted(missing)}.")
+    if case["corpus"] not in fixtures.corpora:
+        raise FixtureError(
+            f"retrieval case {case_id} references unknown corpus {case['corpus']!r}."
+        )
+    if not str(case["question"]).strip() or not str(case["rationale"]).strip():
+        raise FixtureError(f"retrieval case {case_id} needs a non-empty question and rationale.")
+    expect = case["expect"]
+    _only_keys(expect, {"hybrid", "dense_control"}, f"retrieval case {case_id} expect")
+    if expect.get("hybrid") not in {"hit", "refused"}:
+        raise FixtureError(f"retrieval case {case_id} expect.hybrid must be 'hit' or 'refused'.")
+    if expect.get("dense_control") not in {"hit", "miss", "refused"}:
+        raise FixtureError(f"retrieval case {case_id} expect.dense_control is invalid.")
+    evidence = case["evidence"]
+    if not isinstance(evidence, list):
+        raise FixtureError(f"retrieval case {case_id} evidence must be a list.")
+    if (expect["hybrid"] == "hit") != bool(evidence):
+        raise FixtureError(f"retrieval case {case_id}: evidence is required exactly for 'hit'.")
+    for group in evidence:
+        _only_keys(group, {"terms"}, f"retrieval case {case_id} evidence")
+        terms = group.get("terms")
+        if not isinstance(terms, list) or not terms or not all(str(t).strip() for t in terms):
+            raise FixtureError(f"retrieval case {case_id} evidence needs non-empty terms.")
 
 
 def _validate_case(case: dict[str, Any], case_id: str, fixtures: FixtureSet) -> None:
@@ -173,6 +216,9 @@ def _validate_thresholds(thresholds: dict[str, Any]) -> None:
             raise FixtureError(f"thresholds.json is missing {key!r}.")
     if thresholds["critical_failures_allowed"] != 0:
         raise FixtureError("critical_failures_allowed must remain 0.")
+    for metric, minimum in thresholds.get("retrieval_metrics_min", {}).items():
+        if metric not in {"recall_at_k", "precision_at_k", "mrr"} or not 0 < float(minimum) <= 1:
+            raise FixtureError(f"retrieval_metrics_min has an invalid entry: {metric}.")
     waivers = thresholds.get("waivers", {})
     for capability, minimum in thresholds["capability_min_pass_rate"].items():
         if not 0 < float(minimum) <= 1:

@@ -53,6 +53,8 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "retrieval_accepted": "int",
     "retrieval_rejected_distance": "int",
     "retrieval_duplicates_skipped": "int",
+    "retrieval_lexical_candidates": "int",
+    "retrieval_lexical_only_accepted": "int",
     "sql_duration_ms": "float",
     "sql_row_count": "int",
     "sql_correction_attempted": "bool",

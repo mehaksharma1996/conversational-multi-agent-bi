@@ -42,6 +42,7 @@ class Settings:
     max_document_chunks: int = 5_000
     retrieval_top_k: int = 4
     retrieval_max_distance: float | None = DEFAULT_RETRIEVAL_MAX_DISTANCE
+    retrieval_hybrid: bool = True
     session_retention_hours: int = 24
     session_cleanup_interval_minutes: int = 15
     sqlite_encryption_key: bytes | None = None
@@ -274,6 +275,8 @@ def get_settings() -> Settings:
         max_pdf_pages=_positive_int("MAX_PDF_PAGES", 500),
         max_document_chunks=_positive_int("MAX_DOCUMENT_CHUNKS", 5_000),
         retrieval_top_k=_positive_int("RETRIEVAL_TOP_K", 4),
+        retrieval_hybrid=os.getenv("RETRIEVAL_HYBRID", "true").strip().lower()
+        not in {"0", "false", "no", "off"},
         retrieval_max_distance=_optional_float(
             "RETRIEVAL_MAX_DISTANCE", DEFAULT_RETRIEVAL_MAX_DISTANCE
         ),

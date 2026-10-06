@@ -28,6 +28,7 @@ precision/recall, or PII recall on real data. The opt-in live mode gives a limit
 |---|---|
 | `routing` | Expected route; unavailable-route and low-confidence or malformed classifications ignored; schema-invalid outputs get one bounded repair |
 | `text_to_sql` | Read-only validity; required columns/fragments; expected rows and columns; row cap; one bounded correction; refusal of DROP/PRAGMA/ATTACH/catalog reads/disallowed functions; statement tail discarded; dataset intact afterwards |
+| `retrieval` | Labelled evidence is retrieved (recall@k, precision@k, MRR over `evals/v1/retrieval_cases.json`); exact-term and rare-word questions the dense stage misses are recovered; a **dense-only negative control** must keep missing them so each case keeps proving the lexical stage; off-topic questions are still refused (critical) |
 | `document_rag` | Evidence retrieved from the expected source; irrelevant chunks rejected; citation present and valid; quotes verbatim; uncited and warning statuses reported; **no model call without evidence** |
 | `hybrid` | Criteria outputs are schema validated and repaired at most once; criteria keys allowlisted; untraceable values dropped and absent from the SQL prompt; `traced` / `unreferenced` / `excerpt_fallback` provenance; safe fallback to the document answer; approval interrupt, rejection, and unsafe edited approval |
 | `memory` | Deterministic answers with zero generation calls; unanswerable memory questions fall through to guarded SQL |
@@ -39,6 +40,19 @@ precision/recall, or PII recall on real data. The opt-in live mode gives a limit
 
 The tenant suite (`scripts/api_isolation_eval.py`) drives the FastAPI app and the MCP suite
 (`scripts/mcp_tool_eval.py`) drives the MCP server, because framework-neutral `packages/` code may not import them.
+
+## Retrieval metrics
+
+`retrieval_cases.json` holds question-to-evidence labels. Evidence is a group of case-insensitive terms that must all appear in a
+retrieved chunk (chunk boundaries are an implementation detail, so labels do not name chunks). Per case: **recall@k** is the share of evidence
+groups found in the top-k, **precision@k** the share of returned chunks that satisfy any group, and **MRR** the reciprocal rank of the first relevant chunk.
+The report's `aggregate.retrieval_metrics` averages them over cases that have evidence and also reports the dense-only control, so the gain is
+visible: on the committed fixtures hybrid retrieval has recall@k 1.0 and MRR 0.8 against 0.6 and 0.47 for dense-only. `thresholds.json`
+`retrieval_metrics_min` (recall@k 1.0, MRR 0.5) fails the gate when a metric drops. These are *offline, hashing-embedder* figures; they say
+nothing about the real SentenceTransformer's behavior (see issue #14 for calibrated real-model evaluation).
+
+The scoring and fusion constants (`rrf_k`, BM25 `k1`/`b`, `min_term_coverage`, `max_rare_document_fraction`) are recorded under
+`retrieval_settings.hybrid` in the baseline, so changing any of them is a reviewed baseline change like a prompt edit.
 
 ## Hard failures versus thresholds
 
