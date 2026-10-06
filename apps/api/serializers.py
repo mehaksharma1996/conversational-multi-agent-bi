@@ -49,12 +49,13 @@ from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 
 
-def workspace_response(record: WorkspaceRecord) -> WorkspaceResponse:
+def workspace_response(record: WorkspaceRecord, retention_hours: int) -> WorkspaceResponse:
     return WorkspaceResponse(
         id=record.id,
         status="active",
         authentication_mode=record.authentication_mode,
         expires_at=record.expires_at,
+        retention_hours=retention_hours,
         gemini_configured=record.gemini_configured,
         local_only_mode=record.local_only_mode,
         consent_required=record.gemini_configured,

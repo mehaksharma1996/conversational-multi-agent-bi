@@ -564,6 +564,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Workspace
+         * @description Downloads everything the workspace holds for its owner as one ZIP: the uploaded files, conversation history with retained result tables, reports, earlier exports, and a manifest that states the retention period and what is not included. Another tenant's workspace returns `404`. An oversized workspace returns `413`. Streams the complete immutable representation in bounded chunks. `Content-Length` and attachment
+         *     `Content-Disposition` are always present. Byte ranges are not supported (`Accept-Ranges: none`), so
+         *     a partial transfer must be restarted with a new `GET`. A timeout or disconnect stops only that
+         *     transfer; it does not delete the resource or cancel report generation. The `GET` is safe to retry.
+         */
+        get: operations["export_workspace_api_v1_workspaces__workspace_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/tabular-uploads": {
         parameters: {
             query?: never;
@@ -1409,6 +1432,11 @@ export interface components {
             id: string;
             /** Local Only Mode */
             local_only_mode: boolean;
+            /**
+             * Retention Hours
+             * @description Hours of inactivity after which the workspace and all its data are deleted. Any use of the workspace extends `expires_at` by this amount.
+             */
+            retention_hours: number;
             /**
              * Status
              * @constant
@@ -4270,6 +4298,118 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentCollectionResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export_workspace_api_v1_workspaces__workspace_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ZIP archive of the workspace's own data */
+            200: {
+                headers: {
+                    /** @description Always `none`; partial byte ranges are not supported. */
+                    "Accept-Ranges"?: string;
+                    /** @description Always `private, no-store`. */
+                    "Cache-Control"?: string;
+                    /** @description Attachment filename for the representation. */
+                    "Content-Disposition"?: string;
+                    /** @description Exact representation size in bytes. */
+                    "Content-Length"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/zip": string;
                 };
             };
             /** @description Authentication required */

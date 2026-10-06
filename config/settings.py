@@ -48,6 +48,7 @@ class Settings:
     session_id: str | None = None
     max_tabular_upload_bytes: int = 50 * 1024 * 1024
     max_tabular_rows: int = 1_000_000
+    max_workspace_export_bytes: int = 200 * 1024 * 1024
     max_pdf_upload_bytes: int = 25 * 1024 * 1024
     max_total_pdf_bytes: int = 50 * 1024 * 1024
     max_pdf_pages: int = 500
@@ -394,6 +395,7 @@ def get_settings() -> Settings:
         embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
         max_tabular_upload_bytes=_positive_int("MAX_TABULAR_UPLOAD_BYTES", 50 * 1024 * 1024),
         max_tabular_rows=_positive_int("MAX_TABULAR_ROWS", 1_000_000),
+        max_workspace_export_bytes=_positive_int("MAX_WORKSPACE_EXPORT_BYTES", 200 * 1024 * 1024),
         max_pdf_upload_bytes=_positive_int("MAX_PDF_UPLOAD_BYTES", 25 * 1024 * 1024),
         max_total_pdf_bytes=_positive_int("MAX_TOTAL_PDF_BYTES", 50 * 1024 * 1024),
         max_pdf_pages=_positive_int("MAX_PDF_PAGES", 500),

@@ -46,9 +46,9 @@ class Context:
             ).status_code
             == 200
         )
-        assert (
-            client.post(f"/api/v1/datasets/{self.dataset_id}/analyses", json={}).status_code == 201
-        )
+        analysis = client.post(f"/api/v1/datasets/{self.dataset_id}/analyses", json={})
+        assert analysis.status_code == 201
+        self.analysis_id: str = analysis.json()["id"]
         documents = client.post(
             f"/api/v1/workspaces/{self.workspace_id}/document-collections",
             files=[("files", ("policy.pdf", _pdf_payload(), "application/pdf"))],

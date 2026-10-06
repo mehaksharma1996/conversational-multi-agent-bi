@@ -53,6 +53,7 @@ from apps.api.serializers import (
     message_response,
     report_response,
 )
+from apps.api.workspace_export import WorkspaceExportTooLargeError, build_workspace_export
 from config.settings import Settings
 from packages.connectors import IdentityContext
 from packages.observability import current_request_id, error_category
@@ -163,6 +164,57 @@ def accept_gemini_consent(
         accepted_at=workspace.consent_accepted_at,
         data_recipients=list(workspace.consent_recipients),
     )
+
+
+WORKSPACE_EXPORT_RESPONSES = {
+    **STANDARD_ERROR_RESPONSES,
+    200: {
+        "description": "ZIP archive of the workspace's own data",
+        "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
+        "headers": DOWNLOAD_RESPONSE_HEADERS,
+    },
+}
+
+
+@router.get(
+    "/workspaces/{workspace_id}/export",
+    dependencies=[requires(Capability.REPORT_EXPORT)],
+    responses=WORKSPACE_EXPORT_RESPONSES,
+    tags=["workspaces"],
+    description=(
+        "Downloads everything the workspace holds for its owner as one ZIP: the uploaded files, "
+        "conversation history with retained result tables, reports, earlier exports, and a "
+        "manifest that states the retention period and what is not included. Another tenant's "
+        "workspace returns `404`. An oversized workspace returns `413`. "
+    )
+    + DOWNLOAD_SEMANTICS,
+)
+def export_workspace(
+    workspace_id: str,
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+    settings: SettingsDependency,
+    observability: ObservabilityDependency,
+) -> StreamingResponse:
+    snapshot = repository.workspace_snapshot(workspace_id, identity.tenant_id)
+    try:
+        with observability.operation("workspace.export", identity) as operation:
+            payload, file_count = build_workspace_export(
+                snapshot,
+                retention_hours=repository.retention_hours,
+                max_bytes=settings.max_workspace_export_bytes,
+            )
+            operation.set(size_bytes=len(payload))
+    except WorkspaceExportTooLargeError as exc:
+        raise ApiError(413, "workspace_export_too_large", str(exc)) from exc
+    observability.audit(
+        "workspace.exported",
+        identity,
+        resource_id=workspace_id,
+        size_bytes=len(payload),
+        file_count=file_count,
+    )
+    return _download(payload, f"workspace-{workspace_id}.zip", "application/zip")
 
 
 @router.delete(

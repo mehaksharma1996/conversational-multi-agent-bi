@@ -14,6 +14,7 @@ import {
   deleteWorkspace,
   downloadReport,
   downloadResultExport,
+  downloadWorkspaceExport,
   listWorkbookSheets,
   runAnalysis,
   uploadTabular,
@@ -274,6 +275,19 @@ export default function App() {
     }
   };
 
+  const handleWorkspaceExport = async () => {
+    if (!workspace) return;
+    setTask("download");
+    setError(null);
+    try {
+      saveBlob(await downloadWorkspaceExport(workspace.id), `workspace-${workspace.id}.zip`);
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setTask(null);
+    }
+  };
+
   const handleReset = async () => {
     if (!workspace || !window.confirm("Delete this local workspace and all derived data?")) return;
     setTask("reset");
@@ -316,6 +330,14 @@ export default function App() {
                 ? "Starting workspace…"
                 : "Workspace unavailable"}
           </div>
+          <button
+            className="button button--secondary button--compact"
+            type="button"
+            disabled={!workspace || task !== null}
+            onClick={() => void handleWorkspaceExport()}
+          >
+            {task === "download" ? "Preparing…" : "Export my data"}
+          </button>
           <button
             className="button button--secondary button--compact"
             type="button"
@@ -461,7 +483,18 @@ export default function App() {
           ) : null}
         </div>
       </main>
-      <footer>Local workbench · Workspace data is isolated, retained for a bounded period, and resettable.</footer>
+      <footer>
+        Local workbench · Workspace data is isolated.{" "}
+        {workspace ? (
+          <span data-testid="retention-notice">
+            It is deleted {workspace.retention_hours} hours after its last use (currently{" "}
+            {new Date(workspace.expires_at).toLocaleString()}). You can export it or delete it at
+            any time.
+          </span>
+        ) : (
+          "It is kept for a bounded period, and you can export or delete it at any time."
+        )}
+      </footer>
     </>
   );
 }

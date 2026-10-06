@@ -91,6 +91,7 @@ Each event has: `name`, `occurred_at` (UTC), `tenant_id`, `request_id`, optional
 | `workspace.created` | A new workspace is created (idempotent replays are not re-audited) | authentication mode, Gemini/local-only flags, reason |
 | `workspace.expired` | Retention expiry removes a workspace | reason `retention_expired` |
 | `workspace.deleted` | The owner deletes a workspace | reason `user_requested` |
+| `workspace.exported` | The owner downloads the workspace export (`GET /workspaces/{id}/export`) | `size_bytes`, `file_count`; never file names or content |
 | `consent.accepted` | Gemini data-sharing notice accepted | notice version |
 | `tabular.uploaded` | A CSV/Excel upload is accepted | size, format |
 | `dataset.created` | A dataset is profiled | row and column counts |

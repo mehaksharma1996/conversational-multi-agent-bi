@@ -64,6 +64,12 @@ class WorkspaceResponse(StrictModel):
     status: Literal["active"]
     authentication_mode: str
     expires_at: datetime
+    retention_hours: int = Field(
+        description=(
+            "Hours of inactivity after which the workspace and all its data are deleted. "
+            "Any use of the workspace extends `expires_at` by this amount."
+        )
+    )
     gemini_configured: bool
     local_only_mode: bool
     consent_required: bool

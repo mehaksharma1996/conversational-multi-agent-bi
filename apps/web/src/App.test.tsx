@@ -11,6 +11,7 @@ import {
   createDataset,
   createWorkspace,
   decideSqlApproval,
+  downloadWorkspaceExport,
   listWorkbookSheets,
   runAnalysis,
   uploadDocuments,
@@ -43,6 +44,7 @@ vi.mock("./api/client", async (importOriginal) => {
     createConversation: vi.fn(),
     askQuestion: vi.fn(),
     decideSqlApproval: vi.fn(),
+    downloadWorkspaceExport: vi.fn(),
   };
 });
 
@@ -59,6 +61,39 @@ describe("tabular analysis journey", () => {
     vi.mocked(createConversation).mockResolvedValue(conversationFixture);
     vi.mocked(askQuestion).mockResolvedValue(messageFixture);
     vi.mocked(decideSqlApproval).mockResolvedValue(messageFixture);
+  });
+
+  it("tells the user how long data is kept and lets them export it", async () => {
+    const user = userEvent.setup();
+    const blob = new Blob(["zip bytes"], { type: "application/zip" });
+    vi.mocked(downloadWorkspaceExport).mockResolvedValue(blob);
+    const createUrl = vi.fn(() => "blob:workspace-export");
+    const revokeUrl = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: revokeUrl }));
+    render(<App />);
+
+    await screen.findByText("Local workspace ready");
+    expect(screen.getByTestId("retention-notice")).toHaveTextContent(
+      "deleted 24 hours after its last use",
+    );
+    await user.click(screen.getByRole("button", { name: "Export my data" }));
+
+    expect(downloadWorkspaceExport).toHaveBeenCalledWith("workspace-1");
+    expect(createUrl).toHaveBeenCalledWith(blob);
+    expect(revokeUrl).toHaveBeenCalledWith("blob:workspace-export");
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a safe error when the export fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(downloadWorkspaceExport).mockRejectedValue(new Error("boom"));
+    render(<App />);
+
+    await screen.findByText("Local workspace ready");
+    await user.click(screen.getByRole("button", { name: "Export my data" }));
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Export my data" })).toBeEnabled();
   });
 
   it("moves from upload through schema confirmation to deterministic results", async () => {
