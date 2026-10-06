@@ -15,6 +15,7 @@ from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
 from apps.api.job_routes import router as job_router
+from apps.api.metadata_store import MetadataError, MetadataStore
 from apps.api.models import ErrorResponse, HealthResponse
 from apps.api.observability import ApiObservability
 from apps.api.oidc_login import IdTokenVerifier, OidcLoginService
@@ -87,9 +88,15 @@ def create_app(
         application.state.session_store,
         login_service,
     )
+    storage_root = active_settings.app_data_dir / "api"
     application.state.repository = repository or LocalResourceRepository(
-        storage_root=active_settings.app_data_dir / "api",
+        storage_root=storage_root,
         retention_hours=active_settings.session_retention_hours,
+        metadata_store=(
+            MetadataStore(storage_root.resolve() / ".metadata" / "metadata.db")
+            if active_settings.durable_metadata
+            else None
+        ),
     )
     if telemetry_sink is None:
         configure_telemetry_logging()
@@ -221,11 +228,21 @@ def _start(app: FastAPI) -> None:
     repository: LocalResourceRepository = app.state.repository
     observability: ApiObservability = app.state.observability
     audit_ready = getattr(observability.audit_sink, "ready", None)
+    not_writable = "Workspace or audit storage is not writable; refusing to start."
+    try:
+        recovery = repository.recover()
+    except MetadataError as exc:
+        # A newer or altered schema, or a database that cannot be opened even after quarantine.
+        raise RuntimeError(f"Workspace metadata cannot be used; refusing to start. {exc}") from exc
+    except OSError as exc:
+        raise RuntimeError(not_writable) from exc
     if not repository.ready() or (audit_ready is not None and not audit_ready()):
-        raise RuntimeError("Workspace or audit storage is not writable; refusing to start.")
+        raise RuntimeError(not_writable)
     swept_count = 0
     failures = 0
-    if settings.sweep_orphaned_workspaces:
+    # If the metadata database was quarantined, every workspace directory looks orphaned. Keep them
+    # until an operator restores the database or backup; never sweep on top of a recovery failure.
+    if settings.sweep_orphaned_workspaces and not recovery.metadata_quarantined:
         result = repository.sweep_orphaned_storage()
         swept_count, failures = len(result.removed), result.failed
         for tenant_id, workspace_id in result.removed:
@@ -243,6 +260,14 @@ def _start(app: FastAPI) -> None:
         sweep_enabled=settings.sweep_orphaned_workspaces,
         orphans_swept=swept_count,
         orphan_sweep_failures=failures,
+        durable_metadata=recovery.enabled,
+        metadata_schema_version=recovery.schema_version,
+        metadata_migrations_applied=recovery.migrations_applied,
+        metadata_quarantined=recovery.metadata_quarantined,
+        workspaces_restored=recovery.workspaces_restored,
+        workspaces_expired_on_start=recovery.workspaces_expired,
+        uploads_restored=recovery.uploads_restored,
+        uploads_dropped=recovery.uploads_dropped,
     )
 
 

@@ -16,6 +16,15 @@ from uuid import uuid4
 import pandas as pd
 
 from apps.api.errors import ResourceNotFoundError
+from apps.api.metadata_store import (
+    MetadataCorruptError,
+    MetadataStore,
+    StoredUpload,
+    StoredWorkspace,
+    file_sha256,
+    key_hash,
+    write_payload_atomically,
+)
 from src.agents.report_agent import BusinessReport
 from src.analytics.pipeline import AnalysisBundle
 from src.charts.chart_builder import ChartSpec
@@ -29,12 +38,30 @@ from src.storage.sqlite_store import StoredTable
 
 _TENANT_DIR = re.compile(r"[a-f0-9]{32}")
 _WORKSPACE_DIR = re.compile(r"ws_[a-f0-9]{32}")
+_UPLOAD_ID = re.compile(r"upl_[a-f0-9]{32}")
+_EXPIRY_PERSIST_INTERVAL = timedelta(minutes=5)
+"""A sliding-expiry touch is persisted at most this often; a crash can lose at most this much."""
 
 
 @dataclass(frozen=True)
 class OrphanSweepResult:
     removed: tuple[tuple[str, str], ...]
     failed: int
+
+
+@dataclass(frozen=True)
+class RecoveryReport:
+    """Content-free counts describing what startup recovery found and did."""
+
+    enabled: bool = False
+    schema_version: int = 0
+    migrations_applied: int = 0
+    workspaces_restored: int = 0
+    workspaces_expired: int = 0
+    uploads_restored: int = 0
+    uploads_dropped: int = 0
+    rows_invalid: int = 0
+    metadata_quarantined: bool = False
 
 
 WorkspaceLifecycleListener = Callable[[str, "WorkspaceRecord", str], None]
@@ -47,6 +74,22 @@ def _resource_id(prefix: str) -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _stored_workspace(workspace: WorkspaceRecord) -> StoredWorkspace:
+    return StoredWorkspace(
+        id=workspace.id,
+        tenant_id=workspace.tenant_id,
+        authentication_mode=workspace.authentication_mode,
+        expires_at=workspace.expires_at,
+        gemini_configured=workspace.gemini_configured,
+        local_only_mode=workspace.local_only_mode,
+        consent_notice_version=workspace.consent_notice_version,
+        consent_accepted_at=workspace.consent_accepted_at,
+        created_at=workspace.created_at,
+        data_recipients=workspace.data_recipients,
+        consent_recipients=workspace.consent_recipients,
+    )
 
 
 @dataclass(frozen=True)
@@ -185,10 +228,14 @@ class LocalResourceRepository:
         self,
         storage_root: Path | None = None,
         retention_hours: int = 24,
+        metadata_store: MetadataStore | None = None,
     ) -> None:
         if retention_hours < 1:
             raise ValueError("retention_hours must be at least 1.")
         self._lock = RLock()
+        self._store = metadata_store
+        self._persisted_expiry: dict[str, datetime] = {}
+        self._lazy_uploads: dict[str, StoredUpload] = {}
         self.lifecycle_listener: WorkspaceLifecycleListener | None = None
         self.storage_root = (storage_root or Path("data/api")).resolve()
         self.retention_hours = retention_hours
@@ -212,13 +259,129 @@ class LocalResourceRepository:
             probe.unlink()
         except OSError:
             return False
-        return True
+        return self._store.ping() if self._store is not None else True
 
     def close(self) -> None:
-        """Release open vector indexes (used at graceful shutdown)."""
+        """Release open vector indexes and the metadata store (used at graceful shutdown)."""
         with self._lock:
             for record in self._document_collections.values():
                 record.retriever.close()
+            if self._store is not None:
+                self._store.close()
+
+    def recover(self) -> RecoveryReport:
+        """Open the metadata store and rebuild process state from it (a no-op when disabled).
+
+        Reconciliation is conservative: an unreadable database is quarantined, never deleted;
+        expired workspaces are removed through the normal audited path; and metadata rows whose
+        files are missing or the wrong size are dropped as partial state. A schema written by a
+        newer build raises ``MetadataVersionError`` and stops startup.
+        """
+        store = self._store
+        if store is None:
+            return RecoveryReport()
+        with self._lock:
+            self.storage_root.mkdir(parents=True, exist_ok=True)
+            quarantined = False
+            try:
+                opened = store.open()
+            except MetadataCorruptError:
+                store.quarantine(_now().strftime("%Y%m%dT%H%M%SZ"))
+                opened = store.open()
+                quarantined = True
+            self._workspaces.clear()
+            self._workspace_creation_keys.clear()
+            self._uploads.clear()
+            self._lazy_uploads.clear()
+            self._persisted_expiry.clear()
+            now = _now()
+            invalid = 0
+            expired: list[WorkspaceRecord] = []
+            for stored in store.load_workspaces():
+                if (
+                    _TENANT_DIR.fullmatch(stored.tenant_id) is None
+                    or _WORKSPACE_DIR.fullmatch(stored.id) is None
+                ):
+                    store.delete_workspace(stored.id)
+                    invalid += 1
+                    continue
+                record = WorkspaceRecord(
+                    id=stored.id,
+                    tenant_id=stored.tenant_id,
+                    authentication_mode=stored.authentication_mode,
+                    expires_at=stored.expires_at,
+                    gemini_configured=stored.gemini_configured,
+                    local_only_mode=stored.local_only_mode,
+                    consent_notice_version=stored.consent_notice_version,
+                    consent_accepted_at=stored.consent_accepted_at,
+                    created_at=stored.created_at,
+                    data_recipients=stored.data_recipients,
+                    consent_recipients=stored.consent_recipients,
+                )
+                if record.expires_at <= now:
+                    expired.append(record)
+                    continue
+                self._workspaces[record.id] = record
+                self._persisted_expiry[record.id] = record.expires_at
+            for tenant_id, hashed, workspace_id in store.load_creation_keys():
+                if workspace_id in self._workspaces:
+                    self._workspace_creation_keys[(tenant_id, hashed)] = workspace_id
+            restored_uploads = 0
+            dropped_uploads = 0
+            for stored_upload in store.load_uploads():
+                workspace = self._workspaces.get(stored_upload.workspace_id)
+                path = self._upload_path(
+                    stored_upload.tenant_id, stored_upload.workspace_id, stored_upload.id
+                )
+                valid = (
+                    workspace is not None
+                    and workspace.tenant_id == stored_upload.tenant_id
+                    and _UPLOAD_ID.fullmatch(stored_upload.id) is not None
+                    and path is not None
+                    and path.is_file()
+                    and path.stat().st_size == stored_upload.size_bytes
+                )
+                if not valid:
+                    store.delete_upload(stored_upload.id)
+                    if path is not None and path.is_file():
+                        path.unlink(missing_ok=True)
+                    dropped_uploads += 1
+                    continue
+                self._lazy_uploads[stored_upload.id] = stored_upload
+                self._uploads[stored_upload.id] = TabularUploadRecord(
+                    id=stored_upload.id,
+                    workspace_id=stored_upload.workspace_id,
+                    tenant_id=stored_upload.tenant_id,
+                    filename=stored_upload.filename,
+                    content_type=stored_upload.content_type,
+                    payload=b"",
+                    created_at=stored_upload.created_at,
+                )
+                restored_uploads += 1
+            for workspace in expired:
+                self._delete_workspace_unlocked(workspace, "retention_expired")
+            return RecoveryReport(
+                enabled=True,
+                schema_version=opened.schema_version,
+                migrations_applied=len(opened.migrations_applied),
+                workspaces_restored=len(self._workspaces),
+                workspaces_expired=len(expired),
+                uploads_restored=restored_uploads,
+                uploads_dropped=dropped_uploads,
+                rows_invalid=invalid,
+                metadata_quarantined=quarantined,
+            )
+
+    def _upload_path(self, tenant_id: str, workspace_id: str, upload_id: str) -> Path | None:
+        """Where an upload payload lives, or None if the identifiers would escape the root."""
+        if (
+            _TENANT_DIR.fullmatch(tenant_id) is None
+            or _WORKSPACE_DIR.fullmatch(workspace_id) is None
+            or _UPLOAD_ID.fullmatch(upload_id) is None
+        ):
+            return None
+        target = self.storage_root / tenant_id / workspace_id / "uploads" / f"{upload_id}.bin"
+        return target if target.resolve().is_relative_to(self.storage_root) else None
 
     def sweep_orphaned_storage(self) -> OrphanSweepResult:
         """Delete workspace directories that no in-memory record owns.
@@ -270,8 +433,9 @@ class LocalResourceRepository:
     ) -> WorkspaceRecord:
         with self._lock:
             self._purge_expired_unlocked()
-            if idempotency_key is not None:
-                existing_id = self._workspace_creation_keys.get((tenant_id, idempotency_key))
+            creation_key = key_hash(idempotency_key) if idempotency_key is not None else None
+            if creation_key is not None:
+                existing_id = self._workspace_creation_keys.get((tenant_id, creation_key))
                 if existing_id is not None:
                     existing = self._workspaces.get(existing_id)
                     if existing is not None and existing.expires_at > _now():
@@ -288,9 +452,14 @@ class LocalResourceRepository:
                 consent_accepted_at=None,
                 created_at=_now(),
             )
+            if self._store is not None:
+                self._store.save_workspace(_stored_workspace(workspace))
+                if creation_key is not None:
+                    self._store.save_creation_key(tenant_id, creation_key, workspace.id)
+                self._persisted_expiry[workspace.id] = workspace.expires_at
             self._workspaces[workspace.id] = workspace
-            if idempotency_key is not None:
-                self._workspace_creation_keys[(tenant_id, idempotency_key)] = workspace.id
+            if creation_key is not None:
+                self._workspace_creation_keys[(tenant_id, creation_key)] = workspace.id
             self._notify("created", workspace, "requested")
             return workspace
 
@@ -313,6 +482,8 @@ class LocalResourceRepository:
                 consent_accepted_at=_now(),
                 consent_recipients=recipients,
             )
+            if self._store is not None:
+                self._store.save_workspace(_stored_workspace(updated))
             self._workspaces[workspace_id] = updated
             return self._touch_workspace_unlocked(updated)
 
@@ -343,12 +514,52 @@ class LocalResourceRepository:
                 payload=payload,
                 created_at=_now(),
             )
+            if self._store is not None:
+                path = self._upload_path(tenant_id, workspace_id, upload.id)
+                if path is None:
+                    raise ValueError("Refusing to use storage outside the API data directory.")
+                digest = write_payload_atomically(path, payload)
+                try:
+                    self._store.save_upload(
+                        StoredUpload(
+                            id=upload.id,
+                            workspace_id=workspace_id,
+                            tenant_id=tenant_id,
+                            filename=filename,
+                            content_type=content_type,
+                            size_bytes=len(payload),
+                            sha256=digest,
+                            created_at=upload.created_at,
+                        )
+                    )
+                except Exception:
+                    path.unlink(missing_ok=True)
+                    raise
             self._uploads[upload.id] = upload
             return upload
 
     def get_upload(self, upload_id: str, tenant_id: str) -> TabularUploadRecord:
         with self._lock:
-            return self._owned(self._uploads, upload_id, tenant_id, "Tabular upload")
+            upload = self._owned(self._uploads, upload_id, tenant_id, "Tabular upload")
+            stored = self._lazy_uploads.get(upload_id)
+            if stored is None:
+                return upload
+            path = self._upload_path(stored.tenant_id, stored.workspace_id, stored.id)
+            if path is None or not path.is_file() or file_sha256(path) != stored.sha256:
+                self._drop_upload_unlocked(upload_id)
+                raise ResourceNotFoundError("Tabular upload")
+            return replace(upload, payload=path.read_bytes())
+
+    def _drop_upload_unlocked(self, upload_id: str) -> None:
+        """Forget an upload whose payload is missing or fails its checksum (partial state)."""
+        stored = self._lazy_uploads.pop(upload_id, None)
+        self._uploads.pop(upload_id, None)
+        if self._store is not None:
+            self._store.delete_upload(upload_id)
+        if stored is not None:
+            path = self._upload_path(stored.tenant_id, stored.workspace_id, stored.id)
+            if path is not None:
+                path.unlink(missing_ok=True)
 
     def create_dataset(
         self,
@@ -796,6 +1007,11 @@ class LocalResourceRepository:
             expires_at=_now() + timedelta(hours=self.retention_hours),
         )
         self._workspaces[workspace.id] = updated
+        if self._store is not None:
+            persisted = self._persisted_expiry.get(workspace.id)
+            if persisted is None or updated.expires_at - persisted >= _EXPIRY_PERSIST_INTERVAL:
+                self._store.update_expiry(workspace.id, updated.expires_at)
+                self._persisted_expiry[workspace.id] = updated.expires_at
         return updated
 
     def _delete_workspace_unlocked(
@@ -830,9 +1046,18 @@ class LocalResourceRepository:
                 records.pop(key, None)
 
         self._workspaces.pop(workspace.id, None)
+        self._persisted_expiry.pop(workspace.id, None)
         for creation_key, value in list(self._workspace_creation_keys.items()):
             if value == workspace.id:
                 self._workspace_creation_keys.pop(creation_key)
+        for upload_id in [
+            key for key, stored in self._lazy_uploads.items() if stored.workspace_id == workspace.id
+        ]:
+            self._lazy_uploads.pop(upload_id)
+        if self._store is not None:
+            # Row first: a crash before the directory is removed leaves an orphan directory,
+            # which the startup sweep deletes, never a row pointing at missing files.
+            self._store.delete_workspace(workspace.id)
 
         target = (self.storage_root / workspace.tenant_id / workspace.id).resolve()
         if target.is_relative_to(self.storage_root) and target.exists():
