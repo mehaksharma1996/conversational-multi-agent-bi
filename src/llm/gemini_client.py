@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from config.settings import Settings
 from src.llm.base import LLMConfigurationError, LLMGenerationError, LLMResponse, SchemaT
+from src.llm.observability import report_usage
 from src.utils.error_reporting import report_error
 
 GEMINI_PROVIDER = "gemini"
@@ -68,6 +69,7 @@ class GeminiClient:
             raise ValueError("Prompt cannot be empty.")
 
         response = None
+        retries = 0
         for attempt in range(self.max_retries + 1):
             try:
                 kwargs: dict[str, Any] = {
@@ -93,6 +95,7 @@ class GeminiClient:
                 if attempt >= self.max_retries or not _is_retryable_error(exc):
                     message = report_error(LOGGER, "Gemini generation failed", exc)
                     raise LLMGenerationError(message) from exc
+                retries += 1
                 sleep(0.25 * (2**attempt))
 
         text = getattr(response, "text", None)
@@ -100,6 +103,11 @@ class GeminiClient:
             raise LLMGenerationError("Gemini returned an empty response.")
 
         usage = getattr(response, "usage_metadata", None)
+        report_usage(
+            prompt_tokens=getattr(usage, "prompt_token_count", None),
+            output_tokens=getattr(usage, "candidates_token_count", None),
+            retries=retries,
+        )
         LOGGER.info(
             "gemini_generation model=%s prompt_tokens=%s output_tokens=%s",
             self.model,
