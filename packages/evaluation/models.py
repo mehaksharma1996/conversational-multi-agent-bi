@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-EVALUATOR_VERSION = "1.0.0"
+EVALUATOR_VERSION = "1.1.0"
 REPORT_VERSION = 1
 
 # A failure of any of these can never be offset by passing checks elsewhere.

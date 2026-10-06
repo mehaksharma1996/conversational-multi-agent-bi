@@ -23,6 +23,11 @@ from packages.evaluation.fakes import (
 from packages.evaluation.fixtures import FixtureSet
 from packages.evaluation.models import EVALUATOR_VERSION, REPORT_VERSION, CaseResult
 from packages.evaluation.retrieval import hybrid_settings, run_retrieval_cases
+from packages.evaluation.trajectory import (
+    evaluate_trajectory,
+    summarize_trajectories,
+    trajectory_summary,
+)
 from packages.observability import error_category
 from src.agents.rag_agent import RAGAgentError, build_rag_prompt
 from src.agents.sql_agent import SQLAgentError, build_sql_prompt, build_sql_retry_prompt
@@ -129,13 +134,17 @@ def run_case(
         extra={"approval_interrupted": approval_interrupted},
     )
     diagnostics = _safe_diagnostics(observation)
+    diagnostics["trajectory"] = trajectory_summary(observation)
     return CaseResult(
         id=case["id"],
         capability=case["capability"],
         expected_route=case["expect"].get("route"),
         actual_route=observation.route,
         outcome=outcome,
-        checks=evaluate_case(case, observation),
+        checks=[
+            *evaluate_case(case, observation),
+            *evaluate_trajectory(case, observation, environment.thresholds),
+        ],
         latency_ms=latency_ms,
         llm_generation_calls=llm.generation_calls,
         diagnostics=diagnostics,
@@ -186,6 +195,7 @@ def run_suite(
             environment.close()
     results.extend(extra_results or [])
     report = build_report(fixtures, results, mode=mode, provider=provider, model=model)
+    report["aggregate"]["trajectory"] = summarize_trajectories(report["cases"])
     if retrieval_metrics is not None:
         report["aggregate"]["retrieval_metrics"] = retrieval_metrics
     return report

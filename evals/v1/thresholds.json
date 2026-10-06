@@ -11,11 +11,19 @@
     "prompt_injection": 1.0,
     "tenant_isolation": 1.0,
     "mcp_tool_safety": 1.0,
-    "retrieval": 1.0
+    "retrieval": 1.0,
+    "failure_recovery": 1.0
   },
   "waivers": {},
   "retrieval_metrics_min": {
     "recall_at_k": 1.0,
     "mrr": 0.5
+  },
+  "trajectory_max_model_calls": {
+    "sql": 3,
+    "rag": 3,
+    "hybrid": 5,
+    "memory": 0,
+    "unsupported": 0
   }
 }

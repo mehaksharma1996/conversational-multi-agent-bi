@@ -1,0 +1,171 @@
+[
+  {
+    "id": "recovery-classification-provider-error-uses-keyword-routing",
+    "capability": "failure_recovery",
+    "question": "How many transactions are flagged?",
+    "rationale": "When the routing model fails, the documented fallback is the deterministic keyword router. The question is still answered, and the model is asked to classify exactly once (no retry loop).",
+    "context": {
+      "dataset": "transactions"
+    },
+    "script": {
+      "classification": {
+        "route": "sql",
+        "confidence": 1
+      },
+      "failures": {
+        "classification": "provider_error"
+      },
+      "sql": [
+        "SELECT COUNT(*) AS \"flagged_count\" FROM \"uploaded_data\" WHERE \"status\" = 'flagged'"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "sql",
+      "sql": {
+        "row_count": 1,
+        "expected_rows": [
+          [
+            3
+          ]
+        ]
+      },
+      "trajectory": {
+        "max_model_calls": 2,
+        "recovered": true
+      }
+    }
+  },
+  {
+    "id": "recovery-classification-timeout-uses-keyword-routing",
+    "capability": "failure_recovery",
+    "question": "How many transactions are flagged?",
+    "rationale": "A routing-model timeout (surfaced by the client as a provider failure after its own retries) degrades to keyword routing rather than failing the question.",
+    "context": {
+      "dataset": "transactions"
+    },
+    "script": {
+      "classification": {
+        "route": "sql",
+        "confidence": 1
+      },
+      "failures": {
+        "classification": "timeout"
+      },
+      "sql": [
+        "SELECT COUNT(*) AS \"flagged_count\" FROM \"uploaded_data\" WHERE \"status\" = 'flagged'"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "sql",
+      "trajectory": {
+        "max_model_calls": 2,
+        "recovered": true
+      }
+    }
+  },
+  {
+    "id": "recovery-sql-generation-failure-is-a-bounded-safe-refusal",
+    "capability": "failure_recovery",
+    "question": "How many transactions are flagged?",
+    "rationale": "If the SQL-writing model fails, the answer is a categorised refusal after exactly one attempt: no loop, no crash, dataset untouched.",
+    "context": {
+      "dataset": "transactions"
+    },
+    "script": {
+      "failures": {
+        "sql": "provider_error"
+      }
+    },
+    "expect": {
+      "outcome": "refused",
+      "refusal_category": "provider_failure",
+      "llm_generation_calls": {
+        "exact": 1
+      },
+      "trajectory": {
+        "max_model_calls": 1,
+        "recovered": true
+      }
+    }
+  },
+  {
+    "id": "recovery-rag-generation-failure-is-a-bounded-safe-refusal",
+    "capability": "failure_recovery",
+    "question": "According to the review policy, which transactions require escalation?",
+    "rationale": "If the answer-writing model fails after evidence was retrieved, the user gets a categorised refusal after one attempt rather than an ungrounded or partial answer.",
+    "context": {
+      "corpus": "review_policy"
+    },
+    "script": {
+      "failures": {
+        "rag": "timeout"
+      }
+    },
+    "expect": {
+      "outcome": "refused",
+      "refusal_category": "provider_failure",
+      "llm_generation_calls": {
+        "exact": 1
+      },
+      "trajectory": {
+        "max_model_calls": 1,
+        "recovered": true
+      }
+    }
+  },
+  {
+    "id": "recovery-criteria-extraction-failure-falls-back-to-excerpts",
+    "capability": "failure_recovery",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "If criteria extraction fails, the hybrid route degrades to passing the redacted excerpts as data (documented excerpt_fallback) instead of failing the whole question.",
+    "context": {
+      "dataset": "transactions",
+      "corpus": "review_policy"
+    },
+    "script": {
+      "failures": {
+        "criteria": "provider_error"
+      },
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"status\" = 'flagged'"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "hybrid",
+      "hybrid": {
+        "provenance": "excerpt_fallback"
+      },
+      "trajectory": {
+        "max_model_calls": 3,
+        "recovered": true
+      }
+    }
+  },
+  {
+    "id": "recovery-empty-retrieval-refuses-without-calling-the-model",
+    "capability": "failure_recovery",
+    "question": "What is the weather in Paris today?",
+    "rationale": "With no relevant evidence the system must refuse before any generation call; there is nothing to recover and nothing to loop on.",
+    "context": {
+      "corpus": "review_policy"
+    },
+    "script": {
+      "rag_answer": "This must never be requested."
+    },
+    "expect": {
+      "outcome": "refused",
+      "refusal_category": "retrieval_or_grounding",
+      "llm_generation_calls": {
+        "exact": 0
+      },
+      "trajectory": {
+        "max_model_calls": 0,
+        "recovered": true
+      }
+    }
+  }
+]

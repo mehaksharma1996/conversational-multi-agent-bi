@@ -36,6 +36,10 @@ class EvaluationEnvironment:
         self._expected_rows: dict[str, int] = {}
         self._retrievers: dict[str, DocumentRetriever] = {}
 
+    @property
+    def thresholds(self) -> dict[str, Any]:
+        return self._fixtures.thresholds
+
     def stored_table(self, name: str) -> StoredTable:
         if name not in self._tables:
             spec = self._fixtures.datasets[name]

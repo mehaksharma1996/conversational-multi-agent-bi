@@ -14,7 +14,7 @@ from hashlib import sha256
 from typing import Any
 
 from src.documents.retriever import RetrievalResult, Retriever
-from src.llm.base import LLMClient, LLMResponse
+from src.llm.base import LLMClient, LLMGenerationError, LLMResponse
 
 EMBEDDING_DIMENSIONS = 1024
 _STOPWORDS = frozenset(
@@ -82,12 +82,19 @@ class ScriptedLLM(RecordingLLM):
         super().__init__()
         self._script = deepcopy(script)
         self._sql_responses = list(script.get("sql", []))
+        self._failures: dict[str, str] = dict(script.get("failures", {}))
         # Without a classification script the "model" is unconfigured, so only the
         # deterministic router runs, exactly as in local-only mode.
         self.configured = "classification" in script
 
     def generate(self, prompt: str) -> LLMResponse:
         kind = self.record(prompt)
+        failure = self._failures.get(kind)
+        if failure is not None:
+            # What the real client raises once its own retries are exhausted (timeouts included).
+            raise LLMGenerationError(
+                "Scripted model timeout." if failure == "timeout" else "Scripted provider failure."
+            )
         if kind == "classification":
             classification = self._next("classification")
             text = (

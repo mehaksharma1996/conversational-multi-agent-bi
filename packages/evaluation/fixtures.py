@@ -27,7 +27,10 @@ CASE_KEYS = {
 }
 REQUIRED_CASE_KEYS = {"id", "capability", "question", "rationale", "context", "expect"}
 CONTEXT_KEYS = {"dataset", "corpus", "memory"}
-SCRIPT_KEYS = {"classification", "sql", "rag_answer", "criteria"}
+SCRIPT_KEYS = {"classification", "sql", "rag_answer", "criteria", "failures"}
+FAILURE_KINDS = {"classification", "sql", "sql_retry", "rag", "criteria"}
+FAILURE_MODES = {"provider_error", "timeout"}
+TRAJECTORY_EXPECT_KEYS = {"max_model_calls", "recovered"}
 EXPECT_KEYS = {
     "outcome",
     "route",
@@ -45,6 +48,7 @@ EXPECT_KEYS = {
     "structured_output_failures",
     "status",
     "approval_interrupt",
+    "trajectory",
 }
 RETRIEVAL_CASE_KEYS = {"id", "corpus", "question", "rationale", "k", "evidence", "expect"}
 RETRIEVAL_REQUIRED_KEYS = {"id", "corpus", "question", "rationale", "evidence", "expect"}
@@ -189,6 +193,12 @@ def _validate_case(case: dict[str, Any], case_id: str, fixtures: FixtureSet) -> 
         raise FixtureError(f"case {case_id} references unknown corpus {context['corpus']!r}.")
 
     _only_keys(case.get("script", {}), SCRIPT_KEYS, f"case {case_id} script")
+    failures = case.get("script", {}).get("failures", {})
+    _only_keys(failures, FAILURE_KINDS, f"case {case_id} script.failures")
+    if any(mode not in FAILURE_MODES for mode in failures.values()):
+        raise FixtureError(
+            f"case {case_id} script.failures modes must be in {sorted(FAILURE_MODES)}."
+        )
     if "approval" in case:
         _only_keys(case["approval"], APPROVAL_KEYS, f"case {case_id} approval")
         if case["approval"].get("decision") not in {"approve", "reject"}:
@@ -198,6 +208,10 @@ def _validate_case(case: dict[str, Any], case_id: str, fixtures: FixtureSet) -> 
     _only_keys(expect, EXPECT_KEYS, f"case {case_id} expect")
     if expect.get("outcome") not in OUTCOMES:
         raise FixtureError(f"case {case_id} expect.outcome must be one of {sorted(OUTCOMES)}.")
+    if "trajectory" in expect:
+        _only_keys(
+            expect["trajectory"], TRAJECTORY_EXPECT_KEYS, f"case {case_id} expect.trajectory"
+        )
     for name, allowed in (
         ("sql", SQL_EXPECT_KEYS),
         ("retrieval", RETRIEVAL_EXPECT_KEYS),
@@ -216,6 +230,9 @@ def _validate_thresholds(thresholds: dict[str, Any]) -> None:
             raise FixtureError(f"thresholds.json is missing {key!r}.")
     if thresholds["critical_failures_allowed"] != 0:
         raise FixtureError("critical_failures_allowed must remain 0.")
+    for route, budget in thresholds.get("trajectory_max_model_calls", {}).items():
+        if route not in {"sql", "rag", "hybrid", "memory", "unsupported"} or int(budget) < 0:
+            raise FixtureError(f"trajectory_max_model_calls has an invalid entry: {route}.")
     for metric, minimum in thresholds.get("retrieval_metrics_min", {}).items():
         if metric not in {"recall_at_k", "precision_at_k", "mrr"} or not 0 < float(minimum) <= 1:
             raise FixtureError(f"retrieval_metrics_min has an invalid entry: {metric}.")

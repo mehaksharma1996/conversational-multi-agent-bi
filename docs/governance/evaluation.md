@@ -18,7 +18,7 @@ substituted so the run is offline and repeatable:
 So it verifies the system's *reactions* to model behavior, not the model's own accuracy.
 There is deliberately **no blended quality score**: every result is a named property check.
 
-Not measured: real-model SQL accuracy, real embedding quality, answer helpfulness, anomaly
+Not measured by the deterministic gate: whether answers are *good* (only that they are safe, grounded by structure, and reached in a bounded way), the judge's opinions (advisory only), real-model SQL accuracy, real embedding quality, answer helpfulness, anomaly
 precision/recall, or PII recall on real data. The opt-in live mode gives a limited real-model signal
 (below).
 
@@ -28,6 +28,7 @@ precision/recall, or PII recall on real data. The opt-in live mode gives a limit
 |---|---|
 | `routing` | Expected route; unavailable-route and low-confidence or malformed classifications ignored; schema-invalid outputs get one bounded repair |
 | `text_to_sql` | Read-only validity; required columns/fragments; expected rows and columns; row cap; one bounded correction; refusal of DROP/PRAGMA/ATTACH/catalog reads/disallowed functions; statement tail discarded; dataset intact afterwards |
+| `failure_recovery` | Injected provider errors and timeouts at each model step (routing, SQL, answer, criteria) degrade to the documented fallback or a categorised, bounded refusal: keyword routing, excerpt fallback, one attempt and then refuse; empty retrieval refuses before any generation call; never a crash or a retry loop |
 | `retrieval` | Labelled evidence is retrieved (recall@k, precision@k, MRR over `evals/v1/retrieval_cases.json`); exact-term and rare-word questions the dense stage misses are recovered; a **dense-only negative control** must keep missing them so each case keeps proving the lexical stage; off-topic questions are still refused (critical) |
 | `document_rag` | Evidence retrieved from the expected source; irrelevant chunks rejected; citation present and valid; quotes verbatim; uncited and warning statuses reported; **no model call without evidence** |
 | `hybrid` | Criteria outputs are schema validated and repaired at most once; criteria keys allowlisted; untraceable values dropped and absent from the SQL prompt; `traced` / `unreferenced` / `excerpt_fallback` provenance; safe fallback to the document answer; approval interrupt, rejection, and unsafe edited approval |
@@ -40,6 +41,36 @@ precision/recall, or PII recall on real data. The opt-in live mode gives a limit
 
 The tenant suite (`scripts/api_isolation_eval.py`) drives the FastAPI app and the MCP suite
 (`scripts/mcp_tool_eval.py`) drives the MCP server, because framework-neutral `packages/` code may not import them.
+
+## Trajectory metrics and call budgets
+
+Every case also reports a **trajectory**: the ordered *kinds* of model calls it made (`classification`, `sql`, `sql_retry`, `rag`, `criteria`),
+the number of calls, generation calls, SQL corrections, structured-output repairs, and unnecessary calls. It is content-free and derived from what the
+harness already records. Two checks run on every case:
+
+- `trajectory.within_call_budget`: total model calls must not exceed the budget for the route in `thresholds.json` `trajectory_max_model_calls`
+  (or a tighter per-case `expect.trajectory.max_model_calls`). The committed budgets equal today's maxima (sql 3, rag 3, hybrid 5, memory 0, unsupported 0),
+  so one extra call is a reviewed change, not drift.
+- `trajectory.no_unnecessary_calls`: no generation call on a route that must be deterministic (`memory`, `unsupported`), and no more than one
+  classification plus one structured-output repair.
+
+`expect.trajectory.recovered` adds `trajectory.recovered_without_crash`: after an injected failure the outcome must be an answer or a refusal with a safe category
+(not `internal`). The report's `aggregate.trajectory` summarizes calls per route (mean, max, unnecessary). Latency is reported per case but is never gated:
+it is not deterministic. Failures are injected with `script.failures` (`{"sql": "provider_error"}` or `"timeout"`), which raise what the real client raises after its own
+retries, so the case exercises the same recovery path as production.
+
+## Advisory LLM-as-judge
+
+`scripts/run_judge.py` scores answers with a model against a rubric (groundedness, completeness, relevance; 1-5; version in `packages/evaluation/judge.py`) on the
+small **synthetic** labelled set in `evals/judge/v1/labelled.json`, and reports calibration against the human labels: mean absolute error, agreement within one point,
+mean signed error (leniency bias), Pearson correlation, and a length-bias probe. It is manual (`RUN_JUDGE_EVALS=1` and a configured hosted provider; local-only mode and the
+scripted fakes are refused), sends only the synthetic set, writes `evals/results/judge.json` (git-ignored), and **can never fail the gate**: it is not imported by
+`scripts.run_evaluations` or the runner (a test asserts this), it exits 0 whatever the scores, and its report is marked `advisory: true, gate: null`. The report records the
+judge provider and model, rubric version, prompt fingerprint, labelled-set revision, and token usage.
+
+Known biases, which is why the output is calibration statistics and not a quality score: LLM judges favor longer and more fluent answers, are lenient toward confident wording,
+are sensitive to prompt wording and score anchors, may prefer their own model family, and vary between runs. Ten labelled items give very wide uncertainty; treat the numbers as a
+reason to look at specific answers, not as a measurement. Do not point the judge at private data.
 
 ## Retrieval metrics
 
