@@ -91,6 +91,7 @@ services:
       <<: *app-environment
       # Workspaces, consent, and uploaded files survive a restart (ADR 0022). Directories that
       # no metadata row owns are removed at startup (single API process only).
+      AUDIT_MAX_SEGMENT_BYTES: "67108864"  # rotate each tenant's audit file at 64 MiB
       DURABLE_METADATA: "true"
       SWEEP_ORPHANED_WORKSPACES: "true"
     volumes:

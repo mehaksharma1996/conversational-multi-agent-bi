@@ -132,8 +132,16 @@ Not audited yet: reset-vs-delete distinction, configuration changes, and retenti
 `hash` (SHA-256 over the previous hash and the canonical record). `verify(tenant_id)` detects edits, deletions, and reordering. This is tamper-*evidence* on one node,
 not immutability: someone with filesystem access can rewrite an entire file and its chain.
 
-Audit files live outside workspace directories and are not deleted with a workspace. There is no rotation, retention limit, or access control beyond filesystem permissions,
-and a single process is assumed.
+Audit files live outside workspace directories and are not deleted with a workspace. There is no access control beyond filesystem permissions, and a single process is assumed.
+
+**Rotation and retention.** With `AUDIT_MAX_SEGMENT_BYTES` set (Compose sets 64 MiB), a tenant's active file is sealed as
+`<tenant-id>.<NNNNNN>.jsonl` when it reaches that size, and a new active file continues the *same* chain: `sequence` and `prev_hash` carry across segments, so `verify`
+and `scripts.verify_audit` need no special handling and a deleted, reordered, or edited segment still breaks the chain. Retention is an explicit operator action:
+`python -m scripts.audit_maintenance prune --archive-dir <dir> --keep-segments N` moves older sealed segments to an archive and writes `<tenant-id>.anchor.json`
+(the last removed sequence and hash) so the retained chain still verifies. The anchor says where the retained chain starts, not what came before; copy the archive off-host
+if the full history must be provable. Nothing is ever deleted by the application. `status` and `rotate` are also available; see the
+[operations guide](../operations/local-containers.md#audit-rotation-and-retention). Rotation is covered by `tests/test_audit_rotation.py`
+(continuity across segments and restarts in every state, tampering, a removed middle segment, pruning, anchors, and the CLI).
 
 ## Known limitations
 

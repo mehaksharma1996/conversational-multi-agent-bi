@@ -139,6 +139,24 @@ verification fails, the API stays stopped so you can investigate; nothing is del
 `backups/` directory. Backups contain no user content (audit records are content-free) but do
 contain opaque tenant identifiers, so treat them as internal.
 
+## Audit rotation and retention
+
+Compose sets `AUDIT_MAX_SEGMENT_BYTES` to 64 MiB: when a tenant's audit file reaches that size it is sealed
+as `<tenant>.<NNNNNN>.jsonl` and the same hash chain continues in a new file, so `scripts.verify_audit` keeps
+working across segments and the existing backup and restore (`ops/backup.*`, `ops/restore.*`) include every
+segment. To archive old history, stop (or idle) the API and run:
+
+```powershell
+docker compose exec api python -m scripts.audit_maintenance status
+docker compose exec api python -m scripts.audit_maintenance prune --archive-dir /audit/archive --keep-segments 3
+docker compose exec api python -m scripts.verify_audit --require-files
+```
+
+`prune` refuses to run on a broken chain, moves (never deletes) the older sealed segments into the archive
+directory, and records an anchor so the retained chain still verifies. Copy the archive off the host: the
+anchor proves where the retained chain starts, not what came before. This procedure is exercised by
+`tests/test_audit_rotation.py`; the `docker compose exec` invocations themselves are not run in CI.
+
 ## Backup and restore (workspace state)
 
 `scripts/workspace_backup.py` writes one `.tar.gz` holding a consistent copy of the metadata database,

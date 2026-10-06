@@ -109,7 +109,10 @@ def create_app(
         configure_telemetry_logging()
     observability = ApiObservability.create(
         telemetry_sink=telemetry_sink or LoggingTelemetrySink(),
-        audit_sink=audit_sink or JsonlAuditSink(active_settings.audit_dir),
+        audit_sink=audit_sink
+        or JsonlAuditSink(
+            active_settings.audit_dir, max_segment_bytes=active_settings.audit_max_segment_bytes
+        ),
     )
     application.state.observability = observability
     application.state.approval_checkpoints = ApprovalCheckpoints()
