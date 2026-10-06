@@ -12,6 +12,7 @@ from apps.api.approvals import ApprovalCheckpoints
 from apps.api.auth import RequestIdentityProvider
 from apps.api.errors import AuthenticationError, CsrfError
 from apps.api.observability import ApiObservability
+from apps.api.rate_limit import InMemoryRateLimiter
 from apps.api.repository import LocalResourceRepository
 from apps.api.sessions import (
     CSRF_HEADER_NAME,
@@ -111,6 +112,10 @@ def get_observability(request: Request) -> ApiObservability:
 
 def get_approval_checkpoints(request: Request) -> ApprovalCheckpoints:
     return request.app.state.approval_checkpoints
+
+
+def get_rate_limiter(request: Request) -> InMemoryRateLimiter:
+    return request.app.state.rate_limiter
 
 
 def get_tabular_service(request: Request) -> TabularApplicationService:

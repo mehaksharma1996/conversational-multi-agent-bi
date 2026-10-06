@@ -17,6 +17,7 @@ from apps.api.feature_routes import router as feature_router
 from apps.api.models import ErrorResponse, HealthResponse
 from apps.api.observability import ApiObservability
 from apps.api.oidc_login import IdTokenVerifier, OidcLoginService
+from apps.api.rate_limit import InMemoryRateLimiter
 from apps.api.repository import LocalResourceRepository, WorkspaceRecord
 from apps.api.routes import router
 from apps.api.sessions import InMemorySessionStore
@@ -33,6 +34,7 @@ from packages.observability import (
 )
 from packages.retrieval import DocumentApplicationService
 from src.documents.embedding import SentenceTransformerEmbedder, TextEmbedder
+from src.documents.embedding_cache import EmbeddingVectorCache
 from src.llm.base import LLMClient
 from src.llm.factory import build_llm_client
 
@@ -47,6 +49,8 @@ def create_app(
     identity_provider: RequestIdentityProvider | None = None,
     session_store: InMemorySessionStore | None = None,
     login_service: OidcLoginService | None = None,
+    rate_limiter: InMemoryRateLimiter | None = None,
+    embedding_cache: EmbeddingVectorCache | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
@@ -92,12 +96,37 @@ def create_app(
     )
     application.state.observability = observability
     application.state.approval_checkpoints = ApprovalCheckpoints()
+    application.state.rate_limiter = rate_limiter or InMemoryRateLimiter(
+        observer=lambda tenant_id, operation, limited, remaining: observability.telemetry.emit(
+            "rate_limit.decision",
+            tenant_id=tenant_id,
+            rate_limit_operation=operation,
+            rate_limited=limited,
+            rate_limit_remaining=remaining,
+        )
+    )
+    application.state.embedding_cache = embedding_cache or EmbeddingVectorCache(
+        active_settings.embedding_cache_max_entries
+    )
     application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(
-        observability, application.state.approval_checkpoints
+        observability,
+        application.state.approval_checkpoints,
+        application.state.rate_limiter,
+        application.state.embedding_cache,
     )
     application.state.tabular_service = TabularApplicationService()
     active_embedder_factory = embedder_factory or SentenceTransformerEmbedder
-    application.state.document_service = DocumentApplicationService(active_embedder_factory)
+    application.state.document_service = DocumentApplicationService(
+        active_embedder_factory,
+        application.state.embedding_cache,
+        cache_observer=lambda tenant_id, hits, misses, entries: observability.telemetry.emit(
+            "embedding.cache",
+            tenant_id=tenant_id,
+            cache_hits=hits,
+            cache_misses=misses,
+            cache_entries=entries,
+        ),
+    )
     application.state.llm_client_factory = llm_client_factory or build_llm_client
 
     @application.middleware("http")
@@ -220,12 +249,16 @@ def _stop(app: FastAPI) -> None:
 def _workspace_lifecycle_listener(
     observability: ApiObservability,
     approval_checkpoints: ApprovalCheckpoints,
+    rate_limiter: InMemoryRateLimiter,
+    embedding_cache: EmbeddingVectorCache,
 ) -> Callable[[str, WorkspaceRecord, str], None]:
     """Audit workspace lifecycle from the stored (server-side) record's tenant."""
 
     def listener(event: str, workspace: WorkspaceRecord, reason: str) -> None:
         if event in {"expired", "deleted"}:
             approval_checkpoints.delete_workspace(workspace.id)
+            rate_limiter.delete_workspace(workspace.tenant_id, workspace.id)
+            embedding_cache.delete_workspace(workspace.tenant_id, workspace.id)
         observability.telemetry.emit(
             "workspace.lifecycle",
             tenant_id=workspace.tenant_id,

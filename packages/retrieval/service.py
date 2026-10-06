@@ -9,6 +9,7 @@ from pathlib import Path
 
 from src.documents.chunker import chunk_document_pages
 from src.documents.embedding import TextEmbedder
+from src.documents.embedding_cache import CachingTextEmbedder, EmbeddingVectorCache
 from src.documents.pgvector_store import PgvectorDocumentStore
 from src.documents.retriever import DocumentRetriever
 from src.documents.vector_store import ChromaDocumentStore
@@ -37,6 +38,8 @@ class IndexDocumentsCommand:
     index_scope: str | None = None
     pgvector_connect: Callable[[], object] | None = field(default=None, repr=False)
     pgvector_auto_migrate: bool = False
+    cache_tenant_id: str | None = None
+    cache_workspace_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,8 +52,15 @@ class DocumentIndexResult:
 
 
 class DocumentApplicationService:
-    def __init__(self, embedder_factory: Callable[[str], TextEmbedder]) -> None:
+    def __init__(
+        self,
+        embedder_factory: Callable[[str], TextEmbedder],
+        embedding_cache: EmbeddingVectorCache | None = None,
+        cache_observer: Callable[[str, int, int, int], None] | None = None,
+    ) -> None:
         self._embedder_factory = embedder_factory
+        self._embedding_cache = embedding_cache
+        self._cache_observer = cache_observer
 
     def index(self, command: IndexDocumentsCommand) -> DocumentIndexResult:
         if not command.documents:
@@ -111,7 +121,26 @@ class DocumentApplicationService:
     def _open_store(
         self, command: IndexDocumentsCommand
     ) -> ChromaDocumentStore | PgvectorDocumentStore:
-        embedder = self._embedder_factory(command.embedding_model)
+        embedder: TextEmbedder = self._embedder_factory(command.embedding_model)
+        if (
+            self._embedding_cache is not None
+            and command.cache_tenant_id is not None
+            and command.cache_workspace_id is not None
+        ):
+            tenant_id = command.cache_tenant_id
+            embedder = CachingTextEmbedder(
+                embedder,
+                self._embedding_cache,
+                tenant_id=tenant_id,
+                workspace_id=command.cache_workspace_id,
+                model_identity=command.embedding_model,
+                observer=lambda hits, misses, entries: self._observe_cache(
+                    tenant_id,
+                    hits,
+                    misses,
+                    entries,
+                ),
+            )
         if command.index_backend == "pgvector":
             if command.pgvector_connect is None or not command.index_scope:
                 raise ValueError(
@@ -126,3 +155,7 @@ class DocumentApplicationService:
         if command.index_backend != "chroma":
             raise ValueError("Unknown document index backend.")
         return ChromaDocumentStore(persist_dir=command.persist_dir, embedder=embedder)
+
+    def _observe_cache(self, tenant_id: str, hits: int, misses: int, entries: int) -> None:
+        if self._cache_observer is not None:
+            self._cache_observer(tenant_id, hits, misses, entries)

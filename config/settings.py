@@ -98,6 +98,12 @@ class Settings:
     ollama_trusted_hosts: tuple[str, ...] = ()
     llm_input_cost_per_million_usd: float | None = None
     llm_output_cost_per_million_usd: float | None = None
+    rate_limit_window_seconds: int = 60
+    rate_limit_tabular_uploads: int = 60
+    rate_limit_document_indexes: int = 20
+    rate_limit_analyses: int = 60
+    rate_limit_messages: int = 120
+    embedding_cache_max_entries: int = 10_000
 
     @property
     def oidc_login_configured(self) -> bool:
@@ -448,6 +454,12 @@ def get_settings() -> Settings:
         ollama_trusted_hosts=_csv_values("OLLAMA_TRUSTED_HOSTS", ()),
         llm_input_cost_per_million_usd=_optional_float("LLM_INPUT_COST_PER_MILLION_USD", None),
         llm_output_cost_per_million_usd=_optional_float("LLM_OUTPUT_COST_PER_MILLION_USD", None),
+        rate_limit_window_seconds=_positive_int("RATE_LIMIT_WINDOW_SECONDS", 60),
+        rate_limit_tabular_uploads=_positive_int("RATE_LIMIT_TABULAR_UPLOADS", 60),
+        rate_limit_document_indexes=_positive_int("RATE_LIMIT_DOCUMENT_INDEXES", 20),
+        rate_limit_analyses=_positive_int("RATE_LIMIT_ANALYSES", 60),
+        rate_limit_messages=_positive_int("RATE_LIMIT_MESSAGES", 120),
+        embedding_cache_max_entries=_positive_int("EMBEDDING_CACHE_MAX_ENTRIES", 10_000),
     )
     settings.validate_identity_configuration()
     settings.validate_llm_pricing()

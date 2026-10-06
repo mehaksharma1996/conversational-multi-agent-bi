@@ -91,6 +91,12 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "sweep_enabled": "bool",
     "orphans_swept": "int",
     "orphan_sweep_failures": "int",
+    "rate_limit_operation": "token",
+    "rate_limited": "bool",
+    "rate_limit_remaining": "int",
+    "cache_hits": "int",
+    "cache_misses": "int",
+    "cache_entries": "int",
 }
 
 AttributeValue = str | int | float | bool

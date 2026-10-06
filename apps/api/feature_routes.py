@@ -19,6 +19,7 @@ from apps.api.dependencies import (
     get_identity,
     get_llm_client,
     get_observability,
+    get_rate_limiter,
     get_repository,
 )
 from apps.api.errors import STANDARD_ERROR_RESPONSES, ApiError, ResourceConflictError
@@ -38,6 +39,7 @@ from apps.api.models import (
     ReportResponse,
 )
 from apps.api.observability import ApiObservability
+from apps.api.rate_limit import InMemoryRateLimiter, enforce_rate_limit
 from apps.api.repository import LocalResourceRepository
 from apps.api.serializers import (
     conversation_response,
@@ -73,6 +75,7 @@ DocumentServiceDependency = Annotated[DocumentApplicationService, Depends(get_do
 LLMDependency = Annotated[LLMClient, Depends(get_llm_client)]
 ObservabilityDependency = Annotated[ApiObservability, Depends(get_observability)]
 ApprovalCheckpointsDependency = Annotated[ApprovalCheckpoints, Depends(get_approval_checkpoints)]
+RateLimiterDependency = Annotated[InMemoryRateLimiter, Depends(get_rate_limiter)]
 
 REPORT_CONTENT_RESPONSES = {
     **STANDARD_ERROR_RESPONSES,
@@ -168,9 +171,18 @@ async def create_document_collection(
     settings: SettingsDependency,
     service: DocumentServiceDependency,
     observability: ObservabilityDependency,
+    rate_limiter: RateLimiterDependency,
     files: Annotated[list[UploadFile], File(description="One or more PDF documents")],
 ) -> DocumentCollectionResponse:
     repository.get_workspace(workspace_id, identity.tenant_id)
+    enforce_rate_limit(
+        rate_limiter,
+        operation="document_index",
+        tenant_id=identity.tenant_id,
+        workspace_id=workspace_id,
+        limit=settings.rate_limit_document_indexes,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
     payloads: list[DocumentPayload] = []
     total_bytes = 0
     try:
@@ -222,6 +234,8 @@ async def create_document_collection(
                         else None
                     ),
                     pgvector_auto_migrate=settings.postgres_auto_migrate,
+                    cache_tenant_id=identity.tenant_id,
+                    cache_workspace_id=workspace_id,
                 )
             )
             operation.set(
@@ -329,8 +343,17 @@ def create_message(
     llm_client: LLMDependency,
     observability: ObservabilityDependency,
     approval_checkpoints: ApprovalCheckpointsDependency,
+    rate_limiter: RateLimiterDependency,
 ) -> MessageResponse:
     conversation = repository.get_conversation(conversation_id, identity.tenant_id)
+    enforce_rate_limit(
+        rate_limiter,
+        operation="message",
+        tenant_id=identity.tenant_id,
+        workspace_id=conversation.workspace_id,
+        limit=settings.rate_limit_messages,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
     if any(
         message.status == "pending_approval"
         for message in repository.list_messages(conversation.id, identity.tenant_id)
