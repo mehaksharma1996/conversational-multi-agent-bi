@@ -78,7 +78,10 @@ jobs:
         run: |
           python -m scripts.generate_openapi
           git diff --exit-code -- openapi/openapi.json
-          if [ -z "${BASE_REF}" ] || echo "${BASE_REF}" | grep -Eq '^0+$'; then
+          # No base, a new branch, or a force-push (for example a Dependabot rebase) whose
+          # previous tip is no longer reachable: compare against the parent commit instead.
+          if [ -z "${BASE_REF}" ] || echo "${BASE_REF}" | grep -Eq '^0+$' \
+            || ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
             BASE_REF="HEAD^"
           fi
           python -m scripts.check_openapi_compatibility --base-ref "${BASE_REF}"
