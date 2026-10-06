@@ -24,12 +24,14 @@ class ApiError(Exception):
         code: str,
         message: str,
         details: list[ErrorDetail] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
         self.details = details or []
+        self.headers = headers or {}
 
 
 class ResourceNotFoundError(ApiError):
@@ -40,6 +42,25 @@ class ResourceNotFoundError(ApiError):
 class ResourceConflictError(ApiError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(409, code, message)
+
+
+class AuthenticationError(ApiError):
+    def __init__(self, message: str = "Valid authentication credentials are required.") -> None:
+        super().__init__(
+            401,
+            "authentication_required",
+            message,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+class AuthenticationUnavailableError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(
+            503,
+            "authentication_unavailable",
+            "The authentication service is temporarily unavailable.",
+        )
 
 
 def request_id_for(request: Request) -> str:
@@ -53,6 +74,7 @@ def error_response(
     code: str,
     message: str,
     details: list[ErrorDetail] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     request_id = request_id_for(request)
     request.state.error_code = code
@@ -64,10 +86,12 @@ def error_response(
             details=details or [],
         )
     )
+    response_headers = {"X-Request-ID": request_id}
+    response_headers.update(headers or {})
     return JSONResponse(
         status_code=status_code,
         content=payload.model_dump(mode="json"),
-        headers={"X-Request-ID": request_id},
+        headers=response_headers,
     )
 
 
@@ -81,6 +105,7 @@ def install_exception_handlers(app: FastAPI) -> None:
             code=exc.code,
             message=exc.message,
             details=exc.details,
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -134,9 +159,11 @@ def install_exception_handlers(app: FastAPI) -> None:
 
 
 STANDARD_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    401: {"model": ErrorResponse, "description": "Authentication required"},
     404: {"model": ErrorResponse, "description": "Resource not found"},
     409: {"model": ErrorResponse, "description": "Resource state conflict"},
     413: {"model": ErrorResponse, "description": "Upload limit exceeded"},
     422: {"model": ErrorResponse, "description": "Request validation failed"},
     500: {"model": ErrorResponse, "description": "Sanitized internal error"},
+    503: {"model": ErrorResponse, "description": "Dependency unavailable"},
 }

@@ -34,10 +34,17 @@ environment variables, never baked into images or build arguments. See
 
 ### Exposure warning
 
-The API has no user authentication yet: every request runs as one fixed local development
-identity. Compose therefore publishes the web port on `127.0.0.1` only. Do not change the port
-mapping to `0.0.0.0` or put the service on a shared network without adding real authentication
-in front of it.
+Compose defaults to `API_AUTH_MODE=local`, where every request runs as one fixed development
+identity. The API can verify OIDC Bearer JWTs when `API_AUTH_MODE=oidc` and the issuer, audience,
+JWKS URL, and asymmetric algorithms are configured, but the bundled React client does not yet
+perform browser sign-in or attach tokens. Roles, logout, CSRF, and the final CORS policy also remain
+open under issue #9. Compose therefore publishes the web port on `127.0.0.1` only; do not change the
+mapping to `0.0.0.0` or put the service on a shared network yet.
+
+The OIDC foundation is intended for direct API clients during this phase. Required settings are
+listed in `.env.example`. The API validates `iss`, `aud`, `sub`, `exp`, optional time claims, and the
+configured asymmetric signature algorithm against a bounded in-memory JWKS cache. Partial OIDC
+configuration fails startup rather than activating local mode.
 
 Change the port with `WEB_PORT` (default `8080`).
 

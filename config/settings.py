@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -17,6 +18,7 @@ load_dotenv()
 # 0.91-1.0. 0.7 sits in the gap, rejecting off-topic retrieval while still
 # accepting on-topic questions phrased differently from the source text.
 DEFAULT_RETRIEVAL_MAX_DISTANCE = 0.7
+ALLOWED_OIDC_SIGNING_ALGORITHMS = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"})
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,14 @@ class Settings:
     max_chat_dataframes_retained: int = 10
     audit_log_dir: Path | None = None
     sweep_orphaned_workspaces: bool = False
+    api_auth_mode: str = "local"
+    oidc_issuer_url: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
+    oidc_allowed_algorithms: tuple[str, ...] = ("RS256",)
+    oidc_clock_skew_seconds: int = 60
+    oidc_jwks_cache_seconds: int = 300
+    oidc_http_timeout_seconds: float = 5.0
 
     @property
     def audit_dir(self) -> Path:
@@ -56,6 +66,56 @@ class Settings:
     @property
     def gemini_configured(self) -> bool:
         return bool(self.gemini_api_key) and not self.local_only_mode
+
+    def validate_identity_configuration(self) -> None:
+        """Reject identity configuration that could silently fall back to local access."""
+        if self.api_auth_mode not in {"local", "oidc"}:
+            raise ValueError("API_AUTH_MODE must be either 'local' or 'oidc'.")
+
+        oidc_values = (self.oidc_issuer_url, self.oidc_audience, self.oidc_jwks_url)
+        if self.api_auth_mode == "local":
+            if any(value is not None for value in oidc_values):
+                raise ValueError(
+                    "OIDC settings require API_AUTH_MODE=oidc; refusing a silent local fallback."
+                )
+            return
+
+        missing = [
+            name
+            for name, value in (
+                ("OIDC_ISSUER_URL", self.oidc_issuer_url),
+                ("OIDC_AUDIENCE", self.oidc_audience),
+                ("OIDC_JWKS_URL", self.oidc_jwks_url),
+            )
+            if value is None or not value.strip()
+        ]
+        if missing:
+            raise ValueError(f"OIDC mode requires: {', '.join(missing)}.")
+        assert self.oidc_issuer_url is not None
+        assert self.oidc_jwks_url is not None
+        for name, value in (
+            ("OIDC_ISSUER_URL", self.oidc_issuer_url),
+            ("OIDC_JWKS_URL", self.oidc_jwks_url),
+        ):
+            parsed = urlparse(value)
+            if parsed.scheme != "https" or not parsed.netloc or parsed.username is not None:
+                raise ValueError(f"{name} must be an HTTPS URL without embedded credentials.")
+            if name == "OIDC_ISSUER_URL" and (parsed.query or parsed.fragment):
+                raise ValueError("OIDC_ISSUER_URL cannot contain a query string or fragment.")
+        if not self.oidc_allowed_algorithms:
+            raise ValueError("OIDC_ALLOWED_ALGORITHMS must contain at least one algorithm.")
+        unsupported = set(self.oidc_allowed_algorithms) - ALLOWED_OIDC_SIGNING_ALGORITHMS
+        if unsupported:
+            raise ValueError(
+                "OIDC_ALLOWED_ALGORITHMS contains unsupported values: "
+                + ", ".join(sorted(unsupported))
+            )
+        if self.oidc_clock_skew_seconds < 0:
+            raise ValueError("OIDC_CLOCK_SKEW_SECONDS cannot be negative.")
+        if self.oidc_jwks_cache_seconds < 1:
+            raise ValueError("OIDC_JWKS_CACHE_SECONDS must be at least 1.")
+        if self.oidc_http_timeout_seconds <= 0:
+            raise ValueError("OIDC_HTTP_TIMEOUT_SECONDS must be greater than zero.")
 
     @property
     def session_dir(self) -> Path | None:
@@ -83,7 +143,7 @@ class Settings:
 def get_settings() -> Settings:
     data_dir = Path(os.getenv("APP_DATA_DIR", "data"))
 
-    return Settings(
+    settings = Settings(
         app_data_dir=data_dir,
         sqlite_db_path=Path(os.getenv("SQLITE_DB_PATH", data_dir / "sqlite" / "app.db")),
         chroma_persist_dir=Path(os.getenv("CHROMA_PERSIST_DIR", data_dir / "vectorstore")),
@@ -110,7 +170,17 @@ def get_settings() -> Settings:
         max_chat_dataframes_retained=_non_negative_int("MAX_CHAT_DATAFRAMES_RETAINED", 10),
         audit_log_dir=_optional_path("AUDIT_LOG_DIR"),
         sweep_orphaned_workspaces=_flag("SWEEP_ORPHANED_WORKSPACES"),
+        api_auth_mode=os.getenv("API_AUTH_MODE", "local").strip().lower(),
+        oidc_issuer_url=_optional_text("OIDC_ISSUER_URL"),
+        oidc_audience=_optional_text("OIDC_AUDIENCE"),
+        oidc_jwks_url=_optional_text("OIDC_JWKS_URL"),
+        oidc_allowed_algorithms=_csv_values("OIDC_ALLOWED_ALGORITHMS", ("RS256",)),
+        oidc_clock_skew_seconds=_non_negative_int("OIDC_CLOCK_SKEW_SECONDS", 60),
+        oidc_jwks_cache_seconds=_positive_int("OIDC_JWKS_CACHE_SECONDS", 300),
+        oidc_http_timeout_seconds=_positive_float("OIDC_HTTP_TIMEOUT_SECONDS", 5.0),
     )
+    settings.validate_identity_configuration()
+    return settings
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -142,6 +212,27 @@ def _optional_path(name: str) -> Path | None:
     if raw is None or not raw.strip():
         return None
     return Path(raw.strip())
+
+
+def _optional_text(name: str) -> str | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    return raw.strip()
+
+
+def _csv_values(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _positive_float(name: str, default: float) -> float:
+    value = float(os.getenv(name, str(default)))
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero.")
+    return value
 
 
 def _flag(name: str, default: bool = False) -> bool:

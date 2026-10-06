@@ -9,6 +9,7 @@ from time import perf_counter
 from fastapi import FastAPI, Request
 
 from apps.api.approvals import ApprovalCheckpoints
+from apps.api.auth import RequestIdentityProvider, build_identity_provider
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
@@ -40,8 +41,10 @@ def create_app(
     llm_client_factory: Callable[[Settings], LLMClient] | None = None,
     telemetry_sink: TelemetrySink | None = None,
     audit_sink: AuditSink | None = None,
+    identity_provider: RequestIdentityProvider | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
+    active_settings.validate_identity_configuration()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -61,6 +64,9 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.settings = active_settings
+    application.state.identity_provider = identity_provider or build_identity_provider(
+        active_settings
+    )
     application.state.repository = repository or LocalResourceRepository(
         storage_root=active_settings.app_data_dir / "api",
         retention_hours=active_settings.session_retention_hours,

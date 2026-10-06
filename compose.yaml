@@ -8,9 +8,9 @@
 # Configuration comes from the environment or a local .env file (never baked into an
 # image). Nothing here assumes a hosting platform. See docs/operations/local-containers.md.
 #
-# SECURITY: the API has no user authentication yet (a fixed local development identity
-# is used), so the web port is published on the loopback interface only. Do not expose it
-# to a network without adding real authentication in front of it.
+# SECURITY: local mode uses a fixed development identity. OIDC bearer verification exists,
+# but browser login, roles, CSRF/CORS, and logout are not complete, so the web port remains
+# loopback-only. Do not expose it to a network until issue #9 is complete.
 
 name: conversational-bi
 
@@ -28,6 +28,14 @@ x-hardened: &hardened
       max-file: "3"
 
 x-app-environment: &app-environment
+  API_AUTH_MODE: ${API_AUTH_MODE:-local}
+  OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+  OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+  OIDC_JWKS_URL: ${OIDC_JWKS_URL:-}
+  OIDC_ALLOWED_ALGORITHMS: ${OIDC_ALLOWED_ALGORITHMS:-RS256}
+  OIDC_CLOCK_SKEW_SECONDS: ${OIDC_CLOCK_SKEW_SECONDS:-60}
+  OIDC_JWKS_CACHE_SECONDS: ${OIDC_JWKS_CACHE_SECONDS:-300}
+  OIDC_HTTP_TIMEOUT_SECONDS: ${OIDC_HTTP_TIMEOUT_SECONDS:-5}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
   LOCAL_ONLY_MODE: ${LOCAL_ONLY_MODE:-false}
