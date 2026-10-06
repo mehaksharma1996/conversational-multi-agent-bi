@@ -1,4 +1,4 @@
-streamlit==1.64.0
+streamlit==1.65.0
 fastapi==0.141.1
 pydantic==2.13.5
 uvicorn==0.54.0
