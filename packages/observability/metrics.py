@@ -23,6 +23,7 @@ OVERFLOW = "other"
 DURATION_BUCKETS_MS: tuple[float, ...] = (10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000)
 _OUTCOMES = {"success", "failure"}
 _ROUTES = {"memory", "sql", "rag", "hybrid", "unsupported"}
+_JOB_STATUSES = {"queued", "running", "succeeded", "failed", "cancelled", "expired"}
 _ERROR_CATEGORIES = set(ERROR_CATEGORIES)
 
 Labels = tuple[tuple[str, str], ...]
@@ -169,6 +170,18 @@ class MetricsRegistry:
             retries = attributes.get("llm_retries")
             if isinstance(retries, int) and not isinstance(retries, bool) and retries > 0:
                 self._count("bi_llm_retries_total", "Model call retries.", (), float(retries))
+        if event.name == "job.transition":
+            operation = attributes.get("job_operation")
+            status = attributes.get("job_status")
+            if isinstance(operation, str) and status in _JOB_STATUSES:
+                self._count(
+                    "bi_jobs_total",
+                    "Job state transitions by operation and resulting status.",
+                    (
+                        ("operation", self._label("bi_jobs_total", "operation", operation)),
+                        ("status", str(status)),
+                    ),
+                )
         if event.name == "rate_limit.decision" and attributes.get("rate_limited") is True:
             operation = attributes.get("rate_limit_operation")
             if isinstance(operation, str):

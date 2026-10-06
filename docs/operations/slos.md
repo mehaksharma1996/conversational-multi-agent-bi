@@ -33,6 +33,7 @@ becomes `other`). `tests/test_metrics.py` proves each of these properties.
 | `bi_llm_calls_total` | counter | `provider`, `model`, `outcome` | Model calls |
 | `bi_llm_tokens_total` | counter | `provider`, `model`, `kind` | Provider-reported prompt/output tokens |
 | `bi_llm_retries_total` | counter | none | Model call retries |
+| `bi_jobs_total` | counter | `operation`, `status` | Job state transitions (`queued`, `running`, `succeeded`, `failed`, `cancelled`, `expired`) |
 | `bi_rate_limited_total` | counter | `operation` | Requests refused by a rate limit |
 | `bi_retrieval_rejected_total` | counter | none | Retrieval candidates rejected by the distance threshold |
 | `bi_dropped_attributes_total` | counter | none | Attributes the allowlist rejected; should stay at zero |
@@ -47,6 +48,8 @@ becomes `other`). `tests/test_metrics.py` proves each of these properties.
 | 4 | **Model call success** | at least 95% | `1 - sum(rate(bi_llm_calls_total{outcome="failure"}[28d])) / sum(rate(bi_llm_calls_total[28d]))` |
 | 5 | **Throttling**: refused requests | under 1% of requests | `sum(rate(bi_rate_limited_total[28d])) / sum(rate(bi_http_requests_total[28d]))` |
 | 6 | **Privacy**: allowlist violations | exactly zero | `increase(bi_dropped_attributes_total[28d]) == 0` |
+| 7 | **Job completion**: share of finished jobs that succeed | at least 99% (cancellations excluded) | `sum(rate(bi_jobs_total{status="succeeded"}[28d])) / (sum(rate(bi_jobs_total{status="succeeded"}[28d])) + sum(rate(bi_jobs_total{status="failed"}[28d])))` |
+| 8 | **Job latency**: p95 of a job's final transition | at most 30 s for the operations that run as jobs | `histogram_quantile(0.95, sum by (le) (rate(bi_event_duration_ms_bucket{event="job.transition"}[28d])))` |
 
 Objective 6 is a canary, not a performance target: a non-zero value means some code path tried to emit an
 attribute that could carry content. Find it with the log query below, fix the caller, and never widen the
@@ -77,8 +80,10 @@ The audit chain answers "who did what" for the same `request_id`:
 
 One `X-Request-ID` is created per request (or taken from a bound context), returned to the browser, shown
 in the UI on errors, stamped on every telemetry event and audit event for that request, and included in the
-error body. Jobs carry their own IDs in their HTTP representation but do not yet emit telemetry events, so
-a job's work is correlated through the `request_id` of the request that created it.
+error body. A job's lifecycle (`job.transition` events: operation, status, attempt, duration, safe error
+category) carries the `request_id` of the request that created it, so a slow or failed job is found with the
+same `jq` query as any other request. Job IDs appear in the job's HTTP representation but are deliberately not
+telemetry attributes or metric labels (they are unbounded identifiers).
 
 ## Not done yet (remaining in #15)
 
@@ -86,6 +91,7 @@ a job's work is correlated through the `request_id` of the request that created 
   dependency, an image-size and license review, and its own privacy tests. ADR 0015 records the deferral.
 - **An optional Compose profile** that scrapes `/metrics` and demonstrates diagnosing injected failures.
   Requires a digest-pinned, non-root metrics image and loopback-only publishing.
-- **Job metrics** (queue depth, retries, cancellations): jobs do not emit telemetry events today.
+- **Job gauges**: transitions and outcomes are exported, but there is no queue-depth or in-flight gauge; a
+  gauge needs the executor to report its own state, which is a separate change.
 - **Storage and resource-limit gauges** (volume usage, memory): not derived from request events.
 - **Alerting rules.** The objectives above are written as queries, not as alerts.
