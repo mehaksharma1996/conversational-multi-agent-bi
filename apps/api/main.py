@@ -120,7 +120,10 @@ def create_app(
         telemetry_sink=(
             FanOutTelemetrySink([base_sink, metrics_registry]) if metrics_registry else base_sink
         ),
-        audit_sink=audit_sink or JsonlAuditSink(active_settings.audit_dir),
+        audit_sink=audit_sink
+        or JsonlAuditSink(
+            active_settings.audit_dir, max_segment_bytes=active_settings.audit_max_segment_bytes
+        ),
     )
     application.state.observability = observability
     application.state.approval_checkpoints = ApprovalCheckpoints()

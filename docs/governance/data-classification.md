@@ -28,7 +28,7 @@ code does today; where a control is missing, the gap is stated rather than impli
 | Metadata database | C1 | `<data>/api/.metadata/metadata.db` | Plain SQLite (no content) | Workspace lifetime | Workspace delete or expiry |
 | Jobs and rate-limit windows | C1 | Process memory | Memory only | Short TTL | Workspace delete or expiry |
 | SQL approval checkpoints | C2 | Process memory | Memory only | Until decided or workspace removal | Workspace delete or expiry |
-| Audit log | C1 | `<audit dir>/<tenant>.jsonl` | Plain, hash-chained | **No automatic retention or rotation yet** | Operator (see gaps) |
+| Audit log | C1 | `<audit dir>/<tenant>.jsonl` plus sealed `<tenant>.NNNNNN.jsonl` segments | Plain, hash-chained | Rotated at `AUDIT_MAX_SEGMENT_BYTES`; **retained until the operator archives it** with `scripts.audit_maintenance` (nothing is deleted automatically) | Operator, by archiving off-host |
 | Telemetry | C1 | Process logs | Container log rotation | Log rotation (10 MB x 3) | Log rotation |
 | Secrets | C3 | Environment, never in images, compose files, or logs | Operator's secret handling | Operator's | Operator |
 
@@ -53,8 +53,12 @@ C2 location above except process memory, so a backup is C2 and must be protected
 
 ## Known gaps
 
-- The audit log has no automatic retention, rotation, or off-host copy (tracked in #18).
+- The audit log rotates and can be archived by an operator, but there is no automatic age-based retention and no
+  built-in off-host copy; an anchor proves where the retained chain starts, not what was archived (tracked in #18).
 - The Chroma index is unencrypted (ADR 0021). Uploaded files and `metadata.db` are plain files; `content.db`
   and `app.db` are encrypted only when a key is configured.
-- There is no user-facing retention inspection or workspace export in the API yet (tracked in #18).
+- Users can see how long data is kept (`retention_hours`, `expires_at`; shown in the UI footer) and download
+  everything the workspace holds as one ZIP (`GET /workspaces/{id}/export`, UI button "Export my data"). The
+  export is built in memory and capped by `MAX_WORKSPACE_EXPORT_BYTES`; indexed PDFs are not retained, so only
+  their names and counts are included. The download is audited as `workspace.exported` without content.
 - Redaction is regex-based best effort and does not apply to the typed question.

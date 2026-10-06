@@ -48,6 +48,7 @@ class Settings:
     session_id: str | None = None
     max_tabular_upload_bytes: int = 50 * 1024 * 1024
     max_tabular_rows: int = 1_000_000
+    max_workspace_export_bytes: int = 200 * 1024 * 1024
     max_pdf_upload_bytes: int = 25 * 1024 * 1024
     max_total_pdf_bytes: int = 50 * 1024 * 1024
     max_pdf_pages: int = 500
@@ -64,6 +65,7 @@ class Settings:
     max_chat_messages: int = 50
     max_chat_dataframes_retained: int = 10
     audit_log_dir: Path | None = None
+    audit_max_segment_bytes: int | None = None
     sweep_orphaned_workspaces: bool = False
     durable_metadata: bool = False
     metrics_enabled: bool = False
@@ -394,6 +396,7 @@ def get_settings() -> Settings:
         embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
         max_tabular_upload_bytes=_positive_int("MAX_TABULAR_UPLOAD_BYTES", 50 * 1024 * 1024),
         max_tabular_rows=_positive_int("MAX_TABULAR_ROWS", 1_000_000),
+        max_workspace_export_bytes=_positive_int("MAX_WORKSPACE_EXPORT_BYTES", 200 * 1024 * 1024),
         max_pdf_upload_bytes=_positive_int("MAX_PDF_UPLOAD_BYTES", 25 * 1024 * 1024),
         max_total_pdf_bytes=_positive_int("MAX_TOTAL_PDF_BYTES", 50 * 1024 * 1024),
         max_pdf_pages=_positive_int("MAX_PDF_PAGES", 500),
@@ -413,6 +416,7 @@ def get_settings() -> Settings:
         max_chat_messages=_positive_int("MAX_CHAT_MESSAGES", 50),
         max_chat_dataframes_retained=_non_negative_int("MAX_CHAT_DATAFRAMES_RETAINED", 10),
         audit_log_dir=_optional_path("AUDIT_LOG_DIR"),
+        audit_max_segment_bytes=_optional_positive_int("AUDIT_MAX_SEGMENT_BYTES"),
         sweep_orphaned_workspaces=_flag("SWEEP_ORPHANED_WORKSPACES"),
         durable_metadata=_flag("DURABLE_METADATA"),
         metrics_enabled=_flag("METRICS_ENABLED"),
@@ -494,6 +498,16 @@ def _validate_web_origin(value: str) -> None:
 
 def _positive_int(name: str, default: int) -> int:
     value = int(os.getenv(name, str(default)))
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1.")
+    return value
+
+
+def _optional_positive_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    value = int(raw)
     if value < 1:
         raise ValueError(f"{name} must be at least 1.")
     return value

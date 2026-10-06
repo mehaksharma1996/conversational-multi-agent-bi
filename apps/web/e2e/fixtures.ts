@@ -5,6 +5,7 @@ export const workspaceFixture = {
   status: "active",
   authentication_mode: "local_development",
   expires_at: "2026-09-30T12:00:00Z",
+  retention_hours: 24,
   gemini_configured: true,
   local_only_mode: false,
   consent_required: true,

@@ -22,6 +22,14 @@ updates:
       interval: "weekly"
     labels:
       - "dependencies"
+    # Digest and patch updates of the pinned tags are welcome. Moving the toolchain itself (Node and
+    # Python major/minor) is a coordinated change across .nvmrc, package.json "engines",
+    # pyproject.toml, requirements.lock, the CI matrix, and the Dockerfiles, so it is done by hand.
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

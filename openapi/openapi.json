@@ -2076,6 +2076,11 @@
             "title": "Local Only Mode",
             "type": "boolean"
           },
+          "retention_hours": {
+            "description": "Hours of inactivity after which the workspace and all its data are deleted. Any use of the workspace extends `expires_at` by this amount.",
+            "title": "Retention Hours",
+            "type": "integer"
+          },
           "status": {
             "const": "active",
             "title": "Status",
@@ -2087,6 +2092,7 @@
           "status",
           "authentication_mode",
           "expires_at",
+          "retention_hours",
           "gemini_configured",
           "local_only_mode",
           "consent_required",
@@ -5958,6 +5964,168 @@
         "summary": "Create Document Collection",
         "tags": [
           "documents"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/export": {
+      "get": {
+        "description": "Downloads everything the workspace holds for its owner as one ZIP: the uploaded files, conversation history with retained result tables, reports, earlier exports, and a manifest that states the retention period and what is not included. Another tenant's workspace returns `404`. An oversized workspace returns `413`. Streams the complete immutable representation in bounded chunks. `Content-Length` and attachment\n`Content-Disposition` are always present. Byte ranges are not supported (`Accept-Ranges: none`), so\na partial transfer must be restarted with a new `GET`. A timeout or disconnect stops only that\ntransfer; it does not delete the resource or cancel report generation. The `GET` is safe to retry.",
+        "operationId": "export_workspace_api_v1_workspaces__workspace_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "ZIP archive of the workspace's own data",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Always `none`; partial byte ranges are not supported.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "Attachment filename for the representation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Exact representation size in bytes.",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Export Workspace",
+        "tags": [
+          "workspaces"
         ]
       }
     },

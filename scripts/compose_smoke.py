@@ -198,6 +198,10 @@ def run_journey(client: Client, csv_path: Path, expect_local_only: bool) -> None
     status, _, pdf = client.request("GET", f"/api/v1/reports/{report['id']}/content?format=pdf")
     check(status == 200 and pdf.startswith(b"%PDF"), "PDF report downloads")
 
+    check(workspace["retention_hours"] >= 1, "the workspace states its retention period")
+    status, _, archive = client.request("GET", f"/api/v1/workspaces/{workspace_id}/export")
+    check(status == 200 and archive[:2] == b"PK", "the workspace export is a ZIP archive")
+
     status, _, _ = client.request("DELETE", f"/api/v1/workspaces/{workspace_id}")
     check(status == 204, "workspace deleted")
     status, _, raw = client.request("GET", f"/api/v1/workspaces/{workspace_id}")

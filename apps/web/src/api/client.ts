@@ -294,6 +294,15 @@ export async function downloadResultExport(exportId: string): Promise<Blob> {
   return data as Blob;
 }
 
+export async function downloadWorkspaceExport(workspaceId: string): Promise<Blob> {
+  const { data, error, response } = await api.GET("/api/v1/workspaces/{workspace_id}/export", {
+    params: { path: { workspace_id: workspaceId } },
+    parseAs: "blob",
+  });
+  if (!response.ok || data === undefined) unwrap(undefined, error, response);
+  return data as Blob;
+}
+
 export async function getAuthConfig(): Promise<AuthConfig> {
   const { data, error, response } = await api.GET("/api/v1/auth/config");
   return unwrap(data, error, response);
