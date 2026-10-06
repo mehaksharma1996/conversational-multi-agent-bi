@@ -14,6 +14,14 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+  # Digest-pinned base images in Dockerfile.api and Dockerfile.web (matched by name). A digest
+  # bump must pass the containers CI job before merge; see docs/operations/local-containers.md.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

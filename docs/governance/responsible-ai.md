@@ -233,7 +233,8 @@ Limitations:
   `APP_ENCRYPTION_KEY` is set, are deleted with the workspace and on retention expiry, and are included in
   workspace backups. A SQL approval pending at restart is failed safely. Without the flag every record is lost
   and the directories are orphaned until swept.
-- Chroma vector storage is not encrypted at rest.
+- Chroma vector storage is not encrypted at rest (time-bounded waiver and compensating controls:
+  [ADR 0021](../adr/0021-vector-store-encryption-waiver.md); use host disk encryption).
 - There is no retention or rotation policy for the audit files.
 - Deletion is not independently verified beyond the directory no longer existing.
 
