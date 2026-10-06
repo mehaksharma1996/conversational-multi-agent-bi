@@ -90,6 +90,9 @@ python -m scripts.run_evaluations
 python -m scripts.check_openapi_compatibility --base-ref origin/main
 ```
 
+Indicative benchmarks (never a gate; see `docs/operations/benchmarks.md`):
+`python -m scripts.run_benchmarks [--quick] [--only <group>] [--profile <case>]`.
+
 Prefer `python -m scripts.check_all` (add `--full` for API or web changes, `--only <name>` to rerun
 one check): it prints one PASS/FAIL line per check and only the tail of a failure. For a roadmap
 issue, read its brief in `docs/agents/briefs/` before exploring; see `docs/agents/README.md`.
