@@ -79,6 +79,7 @@ Each event has: `name`, `occurred_at` (UTC), `tenant_id`, `request_id`, optional
 | `auth.logout` | A browser session is ended | authentication mode |
 | `auth.csrf_rejected` | A cookie-authenticated write fails the CSRF token or Origin check | authentication mode, reason `token_mismatch` or `origin_mismatch` |
 | `authz.denied` | An authenticated caller lacks the capability an operation requires | server-owned capability name, authentication mode |
+| `mcp.tool_executed` | An MCP tool call finishes (stdio server, ADR 0014); written under `<audit dir>/mcp/` | tool name, outcome, safe error category, result row count, source count |
 
 Authentication and authorization events take their tenant from verified server-side state: the verified session, the verified ID-token subject, or the reserved
 `anonymous` tenant for a started login that failed before any identity was verified. Subjects, tokens, authorization codes, `state`, `nonce`, CSRF values, session identifiers,

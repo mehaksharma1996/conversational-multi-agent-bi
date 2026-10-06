@@ -32,6 +32,7 @@ from packages.evaluation.fakes import HashingEmbedder, ScriptedLLM, UnscriptedPr
 from packages.evaluation.fixtures import validate_fixtures
 from scripts import run_evaluations
 from scripts.api_isolation_eval import run_api_isolation_suite
+from scripts.mcp_tool_eval import run_mcp_tool_suite
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "evals" / "v1"
 
@@ -43,7 +44,7 @@ def fixtures() -> FixtureSet:
 
 @pytest.fixture(scope="module")
 def full_report(fixtures: FixtureSet) -> dict[str, Any]:
-    return run_suite(fixtures, extra_results=run_api_isolation_suite())
+    return run_suite(fixtures, extra_results=[*run_api_isolation_suite(), *run_mcp_tool_suite()])
 
 
 def _critical_failures(report: dict[str, Any]) -> set[tuple[str, str]]:
@@ -490,3 +491,54 @@ def test_live_mode_is_opt_in_and_needs_the_explicit_flag(
 
     assert status == 2
     assert "RUN_LIVE_EVALS=1" in capsys.readouterr().err
+
+
+def _failed_critical(results: list[Any]) -> set[str]:
+    return {
+        check.name
+        for result in results
+        for check in result.checks
+        if check.critical and not check.passed
+    }
+
+
+def test_mcp_suite_passes_with_the_shipped_safeguards() -> None:
+    results = run_mcp_tool_suite()
+
+    assert len(results) == 5
+    assert _failed_critical(results) == set()
+
+
+def test_removed_sql_allowlist_is_caught_by_the_mcp_suite() -> None:
+    from src.storage import query_executor
+
+    real = query_executor.execute_read_query
+
+    def unrestricted(*args: Any, **kwargs: Any) -> Any:
+        kwargs["allowed_tables"] = None
+        kwargs["allowed_columns"] = None
+        return real(*args, **kwargs)
+
+    with patch("apps.mcp.core.execute_read_query", unrestricted):
+        failed = _failed_critical(run_mcp_tool_suite())
+
+    assert "mcp.destructive_sql_rejected" in failed
+
+
+def test_removed_output_bounds_are_caught_by_the_mcp_suite() -> None:
+    with patch("apps.mcp.core._clip", lambda value, limit: value):
+        failed = _failed_critical(run_mcp_tool_suite())
+
+    assert "mcp.output_bounded" in failed
+
+
+def test_dropped_untrusted_marker_is_caught_by_the_mcp_suite() -> None:
+    from apps.mcp.core import Provenance
+
+    class Unmarked(Provenance):
+        untrusted_data: bool = False
+
+    with patch("apps.mcp.core.Provenance", Unmarked):
+        failed = _failed_critical(run_mcp_tool_suite())
+
+    assert "mcp.poisoned_content_untrusted" in failed

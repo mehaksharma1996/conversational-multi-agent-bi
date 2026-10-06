@@ -34,6 +34,7 @@ document retrieval, anomaly detection, visualization, and report generation.
   local product under ADR 0011.
 - `apps/web/` is the React and TypeScript browser client.
 - `apps/api/` is the versioned FastAPI service boundary.
+- `apps/mcp/` is the read-only stdio MCP server over the guarded SQL and retrieval core (ADR 0014); it is never imported by `src/` or `packages/`.
 - `src/ui/` contains upload, dashboard, and chat interfaces.
 - `src/ingestion/` loads tabular files and PDFs.
 - `src/profiling/` handles schema mapping, profiling, and capability detection.

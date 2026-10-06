@@ -30,6 +30,7 @@ from packages.evaluation import (
 )
 from packages.evaluation.fakes import CountingLLM, RecordingLLM
 from scripts.api_isolation_eval import run_api_isolation_suite
+from scripts.mcp_tool_eval import run_mcp_tool_suite
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FIXTURES = REPO_ROOT / "evals" / "v1"
@@ -63,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_deterministic(fixtures: Any) -> dict[str, Any]:
-    return run_suite(fixtures, extra_results=run_api_isolation_suite())
+    return run_suite(fixtures, extra_results=[*run_api_isolation_suite(), *run_mcp_tool_suite()])
 
 
 def _update_baseline(

@@ -9,7 +9,8 @@
     "unsupported": 1.0,
     "privacy_redaction": 1.0,
     "prompt_injection": 1.0,
-    "tenant_isolation": 1.0
+    "tenant_isolation": 1.0,
+    "mcp_tool_safety": 1.0
   },
   "waivers": {}
 }
