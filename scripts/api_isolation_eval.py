@@ -147,7 +147,10 @@ def _owner_journey(client: TestClient) -> dict[str, str]:
 
 def _as_tenant_b(app: FastAPI) -> None:
     app.dependency_overrides[get_identity] = lambda: IdentityContext(
-        tenant_id=TENANT_B, subject="tenant-b-user", authentication_mode="test"
+        tenant_id=TENANT_B,
+        subject="tenant-b-user",
+        authentication_mode="test",
+        roles=frozenset({"workspace_admin"}),
     )
 
 

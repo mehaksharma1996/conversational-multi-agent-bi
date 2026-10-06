@@ -180,7 +180,7 @@ def test_oidc_mode_requires_bearer_token_at_api_boundary(signing_key: RSAKey) ->
     rejected = client.post("/api/v1/workspaces")
     accepted = client.post(
         "/api/v1/workspaces",
-        headers={"Authorization": f"Bearer {_token(signing_key)}"},
+        headers={"Authorization": f"Bearer {_token(signing_key, roles=['analyst'])}"},
     )
 
     assert rejected.status_code == 401
@@ -202,7 +202,7 @@ def test_oidc_provider_outage_is_a_safe_api_503(signing_key: RSAKey) -> None:
     )
     response = TestClient(app).post(
         "/api/v1/workspaces",
-        headers={"Authorization": f"Bearer {_token(signing_key)}"},
+        headers={"Authorization": f"Bearer {_token(signing_key, roles=['analyst'])}"},
     )
 
     assert response.status_code == 503

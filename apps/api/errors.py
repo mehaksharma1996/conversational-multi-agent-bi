@@ -54,6 +54,15 @@ class AuthenticationError(ApiError):
         )
 
 
+class AuthorizationError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(
+            403,
+            "permission_denied",
+            "You do not have permission to perform this operation.",
+        )
+
+
 class AuthenticationUnavailableError(ApiError):
     def __init__(self) -> None:
         super().__init__(
@@ -160,6 +169,7 @@ def install_exception_handlers(app: FastAPI) -> None:
 
 STANDARD_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorResponse, "description": "Authentication required"},
+    403: {"model": ErrorResponse, "description": "Permission denied"},
     404: {"model": ErrorResponse, "description": "Resource not found"},
     409: {"model": ErrorResponse, "description": "Resource state conflict"},
     413: {"model": ErrorResponse, "description": "Upload limit exceeded"},

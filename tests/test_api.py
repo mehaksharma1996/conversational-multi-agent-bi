@@ -201,6 +201,7 @@ def test_tenant_scope_is_derived_from_dependency_not_request_headers(
         tenant_id="b" * 32,
         subject="other-user",
         authentication_mode="test",
+        roles=frozenset({"workspace_admin"}),
     )
     try:
         responses = [

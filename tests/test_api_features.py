@@ -269,6 +269,7 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
         tenant_id="b" * 32,
         subject="other-user",
         authentication_mode="test",
+        roles=frozenset({"workspace_admin"}),
     )
     try:
         isolated_responses = [
@@ -335,6 +336,7 @@ def test_sql_approval_api_is_tenant_scoped_revalidated_and_audited() -> None:
         tenant_id="b" * 32,
         subject="other-user",
         authentication_mode="test",
+        roles=frozenset({"workspace_admin"}),
     )
     try:
         cross_tenant = client.post(

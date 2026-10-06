@@ -57,6 +57,7 @@ class Settings:
     oidc_clock_skew_seconds: int = 60
     oidc_jwks_cache_seconds: int = 300
     oidc_http_timeout_seconds: float = 5.0
+    oidc_roles_claim: str = "roles"
 
     @property
     def audit_dir(self) -> Path:
@@ -116,6 +117,8 @@ class Settings:
             raise ValueError("OIDC_JWKS_CACHE_SECONDS must be at least 1.")
         if self.oidc_http_timeout_seconds <= 0:
             raise ValueError("OIDC_HTTP_TIMEOUT_SECONDS must be greater than zero.")
+        if not self.oidc_roles_claim.strip() or len(self.oidc_roles_claim) > 64:
+            raise ValueError("OIDC_ROLES_CLAIM must be a claim name of 1 to 64 characters.")
 
     @property
     def session_dir(self) -> Path | None:
@@ -178,6 +181,7 @@ def get_settings() -> Settings:
         oidc_clock_skew_seconds=_non_negative_int("OIDC_CLOCK_SKEW_SECONDS", 60),
         oidc_jwks_cache_seconds=_positive_int("OIDC_JWKS_CACHE_SECONDS", 300),
         oidc_http_timeout_seconds=_positive_float("OIDC_HTTP_TIMEOUT_SECONDS", 5.0),
+        oidc_roles_claim=os.getenv("OIDC_ROLES_CLAIM", "roles").strip() or "roles",
     )
     settings.validate_identity_configuration()
     return settings

@@ -212,3 +212,18 @@ def test_direct_oidc_settings_validate_numeric_bounds() -> None:
 
     with pytest.raises(ValueError, match="CLOCK_SKEW"):
         settings.validate_identity_configuration()
+
+
+def test_oidc_roles_claim_is_bounded_and_defaults_to_roles(monkeypatch) -> None:
+    assert _settings().oidc_roles_claim == "roles"
+    settings = replace(
+        _settings(),
+        api_auth_mode="oidc",
+        oidc_issuer_url="https://id.test",
+        oidc_audience="api",
+        oidc_jwks_url="https://id.test/jwks",
+        oidc_roles_claim="r" * 65,
+    )
+
+    with pytest.raises(ValueError, match="ROLES_CLAIM"):
+        settings.validate_identity_configuration()

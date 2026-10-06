@@ -20,6 +20,7 @@ class IdentityContext:
     tenant_id: str
     subject: str | None = None
     authentication_mode: str = "local"
+    roles: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

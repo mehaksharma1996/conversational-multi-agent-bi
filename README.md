@@ -305,8 +305,17 @@ signature algorithm and the `iss`, `aud`, `sub`, `exp`, and optional time claims
 tenant from `sub`; request headers and token tenant claims are never authority. Partial or malformed
 OIDC configuration fails startup instead of falling back to local mode.
 
-This is the API authentication foundation, not completed browser authentication. The bundled React
-client does not yet run an OAuth redirect/callback or attach tokens, and roles, logout, CSRF, and the
+Authorization is capability-based and server-owned. Every `/api/v1` operation requires one of
+`workspace:read`, `data:write`, `analysis:run`, `report:export`, or `workspace:admin`. In OIDC mode the
+capabilities come only from the verified token claim named by `OIDC_ROLES_CLAIM` (default `roles`),
+whose values map as `viewer` (read), `analyst` (viewer + upload, query/chat, report/export), and
+`workspace_admin` (analyst + consent and workspace deletion). Unknown, missing, or malformed roles grant
+nothing and receive a 403 `permission_denied`. Local mode explicitly grants every capability to its one
+loopback-only development user; no other mode receives implicit permissions. Headers, query strings, and
+bodies never supply tenant, role, or capability.
+
+This is API authentication and authorization, not completed browser authentication. The bundled React
+client does not yet run an OAuth redirect/callback or attach tokens, and logout, CSRF, and the
 final CORS policy remain [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
 Keep the packaged web application loopback-only until those slices are complete.
 
