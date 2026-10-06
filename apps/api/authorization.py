@@ -10,10 +10,11 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from apps.api.dependencies import get_identity
 from apps.api.errors import AuthorizationError
+from apps.api.observability import ApiObservability
 from packages.connectors import IdentityContext
 
 
@@ -54,8 +55,19 @@ class CapabilityRequirement:
     def __init__(self, capability: Capability) -> None:
         self.capability = capability
 
-    def __call__(self, identity: Annotated[IdentityContext, Depends(get_identity)]) -> None:
+    def __call__(
+        self,
+        request: Request,
+        identity: Annotated[IdentityContext, Depends(get_identity)],
+    ) -> None:
         if self.capability not in capabilities_for(identity):
+            observability: ApiObservability = request.app.state.observability
+            observability.audit(
+                "authz.denied",
+                identity,
+                capability=self.capability.value,
+                authentication_mode=identity.authentication_mode,
+            )
             raise AuthorizationError()
 
 

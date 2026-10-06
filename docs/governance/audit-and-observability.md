@@ -74,9 +74,21 @@ Each event has: `name`, `occurred_at` (UTC), `tenant_id`, `request_id`, optional
 | `agent.route_executed` | A question is answered or refused | route, outcome, safe error category, provider/model, provider used, has SQL, result row count, source count, grounding status |
 | `report.generated` / `report.downloaded` | A report is created / rendered | charts flag; format, size |
 | `export.created` / `export.downloaded` | A result export is created / fetched | format, size, rows |
+| `auth.login_succeeded` | A browser signs in (ID token verified) | authentication mode |
+| `auth.login_failed` | A login that was genuinely started fails after the callback matched its `state` and binding cookie | authentication mode, reason token (`no_authorization_code`, `token_exchange_rejected`, `invalid_token_response`, `id_token_rejected`, `provider_unavailable`) |
+| `auth.logout` | A browser session is ended | authentication mode |
+| `auth.csrf_rejected` | A cookie-authenticated write fails the CSRF token or Origin check | authentication mode, reason `token_mismatch` or `origin_mismatch` |
+| `authz.denied` | An authenticated caller lacks the capability an operation requires | server-owned capability name, authentication mode |
 
-Not audited yet: authentication decisions (only the local identity exists), reset-vs-delete distinction, configuration changes, and retention cleanup performed by
-Streamlit's separate sweep.
+Authentication and authorization events take their tenant from verified server-side state: the verified session, the verified ID-token subject, or the reserved
+`anonymous` tenant for a started login that failed before any identity was verified. Subjects, tokens, authorization codes, `state`, `nonce`, CSRF values, session identifiers,
+role lists, and provider error text are never recorded.
+
+Deliberately *not* audited, because an unauthenticated caller can trigger them at will and each would let anyone grow the log: missing, malformed, expired, or bad-signature
+credentials; unknown `state`; and callbacks without the login binding cookie. Those still appear as `http.request` telemetry with a status code and error code. A caller who
+starts a real login and then fails it can still add `auth.login_failed` lines to the `anonymous` file; there is no rate limit or rotation, so monitor its size.
+
+Not audited yet: reset-vs-delete distinction, configuration changes, and retention cleanup performed by Streamlit's separate sweep.
 
 ### Trust and privacy rules
 

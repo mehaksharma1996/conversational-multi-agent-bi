@@ -94,7 +94,7 @@ class Exchange:
 
 
 class Harness:
-    def __init__(self, name: str, **setting_overrides: Any) -> None:
+    def __init__(self, name: str, *, audit_sink: Any = None, **setting_overrides: Any) -> None:
         self.key = RSAKey.generate_key(auto_kid=True)
         self.settings = _login_settings(name, **setting_overrides)
         self.provider: OidcBearerIdentityProvider = _provider(self.key)
@@ -114,6 +114,7 @@ class Harness:
             identity_provider=self.provider,
             session_store=self.store,
             login_service=service,
+            **({"audit_sink": audit_sink} if audit_sink is not None else {}),
         )
         self.client = TestClient(app, base_url="https://testserver", follow_redirects=False)
 

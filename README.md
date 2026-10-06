@@ -329,7 +329,8 @@ signature, issuer, audience, expiry, and nonce, then discards every provider tok
 logs omit query strings so authorization codes never reach logs.
 
 The React client implements sign-in, sign-out, CSRF-token handling, and expired-session recovery.
-Authentication and authorization audit events and Docker-validated deployment are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
+Sign-in, sign-out, CSRF rejections, and authorization denials are recorded as privacy-safe audit events (see
+`docs/governance/audit-and-observability.md`). Docker-validated deployment and a live identity-provider check are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
 Keep the packaged web application loopback-only until those slices are complete.
 
 The developer-only Streamlit compatibility surface supports native OIDC login (`st.login()`/`st.user`) for
