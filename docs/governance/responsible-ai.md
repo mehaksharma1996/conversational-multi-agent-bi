@@ -228,7 +228,8 @@ Limitations:
 
 - API resource metadata is process-local. A restart loses every record, and workspace directories
   under `APP_DATA_DIR/api/` from before the restart become orphaned until removed manually.
-- Chroma vector storage is not encrypted at rest.
+- Chroma vector storage is not encrypted at rest (time-bounded waiver and compensating controls:
+  [ADR 0021](../adr/0021-vector-store-encryption-waiver.md); use host disk encryption).
 - There is no retention or rotation policy for the audit files.
 - Deletion is not independently verified beyond the directory no longer existing.
 
