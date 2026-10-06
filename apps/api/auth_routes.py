@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -34,6 +34,7 @@ from apps.api.sessions import (
     BrowserSession,
     InMemorySessionStore,
 )
+from config.settings import Settings
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -62,12 +63,33 @@ def _redirect(path: str) -> RedirectResponse:
     return response
 
 
+class AuthConfigResponse(BaseModel):
+    """Lets the SPA tell local development (no sign-in) from OIDC (sign-in required)."""
+
+    mode: Literal["local", "oidc"]
+    login_available: bool
+
+
 class SessionResponse(BaseModel):
     """What the SPA may know: its CSRF value, roles for UI gating, and when the session ends."""
 
     csrf_token: str
     roles: list[str]
     expires_at: datetime
+
+
+@router.get(
+    "/config",
+    response_model=AuthConfigResponse,
+    summary="Describe how this deployment authenticates browsers",
+)
+def read_auth_config(request: Request, response: Response) -> AuthConfigResponse:
+    response.headers["Cache-Control"] = "no-store"
+    settings: Settings = request.app.state.settings
+    return AuthConfigResponse(
+        mode="oidc" if settings.api_auth_mode == "oidc" else "local",
+        login_available=request.app.state.login_service is not None,
+    )
 
 
 @router.get(

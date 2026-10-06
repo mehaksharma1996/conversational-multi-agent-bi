@@ -30,6 +30,10 @@ async function routeTabularJourney(page: Page, includeChart = false) {
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/auth/config") {
+      await route.fallback();
+      return;
+    }
     if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: workspaceFixture });
     } else if (request.method() === "POST" && path.endsWith("/tabular-uploads")) {
@@ -105,6 +109,10 @@ test("axe baseline: chat answer and provenance warning", async ({ page }) => {
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/auth/config") {
+      await route.fallback();
+      return;
+    }
     if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: { ...workspaceFixture, consent_accepted: true } });
     } else if (request.method() === "POST" && path.endsWith("/document-collections")) {
@@ -143,6 +151,10 @@ test("axe baseline: pending SQL approval controls", async ({ page }) => {
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/auth/config") {
+      await route.fallback();
+      return;
+    }
     if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: { ...workspaceFixture, consent_accepted: true } });
     } else if (request.method() === "POST" && path.endsWith("/document-collections")) {

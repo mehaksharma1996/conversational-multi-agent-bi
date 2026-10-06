@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Describe how this deployment authenticates browsers */
+        get: operations["read_auth_config_api_v1_auth_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -544,6 +561,19 @@ export interface components {
             score_percentiles: {
                 [key: string]: number;
             };
+        };
+        /**
+         * AuthConfigResponse
+         * @description Lets the SPA tell local development (no sign-in) from OIDC (sign-in required).
+         */
+        AuthConfigResponse: {
+            /** Login Available */
+            login_available: boolean;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "local" | "oidc";
         };
         /** Body_create_document_collection_api_v1_workspaces__workspace_id__document_collections_post */
         Body_create_document_collection_api_v1_workspaces__workspace_id__document_collections_post: {
@@ -1349,6 +1379,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_auth_config_api_v1_auth_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthConfigResponse"];
                 };
             };
         };

@@ -40,6 +40,7 @@ def _app(signing_key: RSAKey, name: str) -> FastAPI:
 # (a caller can only read or end its own session). None declare a capability. Any other
 # unprotected route is a bug.
 AUTH_ROUTES = {
+    "/api/v1/auth/config",
     "/api/v1/auth/login",
     "/api/v1/auth/callback",
     "/api/v1/auth/session",

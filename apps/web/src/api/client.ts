@@ -6,6 +6,36 @@ const api = createClient<paths>({
   baseUrl: import.meta.env.VITE_API_BASE_URL ?? "",
 });
 
+// Session transport (ADR 0013): the browser authenticates with an HttpOnly cookie it cannot read.
+// The per-session CSRF value lives only in this module's memory - never in storage, URLs, or logs.
+const CSRF_HEADER = "X-CSRF-Token";
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+let csrfToken: string | null = null;
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+/** Called when an authenticated API request is rejected with 401 (expired or revoked session). */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
+
+api.use({
+  onRequest({ request }) {
+    if (csrfToken !== null && !SAFE_METHODS.has(request.method.toUpperCase())) {
+      request.headers.set(CSRF_HEADER, csrfToken);
+    }
+    return request;
+  },
+  onResponse({ response, schemaPath }) {
+    if (response.status === 401 && !schemaPath.startsWith("/api/v1/auth/")) {
+      unauthorizedHandler?.();
+    }
+  },
+});
+
 export type Workspace = components["schemas"]["WorkspaceResponse"];
 export type TabularUpload = components["schemas"]["TabularUploadResponse"];
 export type Dataset = components["schemas"]["DatasetResponse"];
@@ -18,6 +48,8 @@ export type Message = components["schemas"]["MessageResponse"];
 export type Report = components["schemas"]["ReportResponse"];
 export type Export = components["schemas"]["ExportResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
+export type AuthConfig = components["schemas"]["AuthConfigResponse"];
+export type BrowserSession = components["schemas"]["SessionResponse"];
 
 export class ApiClientError extends Error {
   readonly code: string;
@@ -260,4 +292,23 @@ export async function downloadResultExport(exportId: string): Promise<Blob> {
   );
   if (!response.ok || data === undefined) unwrap(undefined, error, response);
   return data as Blob;
+}
+
+export async function getAuthConfig(): Promise<AuthConfig> {
+  const { data, error, response } = await api.GET("/api/v1/auth/config");
+  return unwrap(data, error, response);
+}
+
+/** Returns the current browser session, or null when the caller is not signed in. */
+export async function getBrowserSession(): Promise<BrowserSession | null> {
+  const { data, error, response } = await api.GET("/api/v1/auth/session");
+  if (response.status === 401) return null;
+  return unwrap(data, error, response);
+}
+
+export async function endBrowserSession(): Promise<void> {
+  const { error, response } = await api.POST("/api/v1/auth/logout");
+  // 401 means the session is already gone, which is the outcome logout wants.
+  if (response.ok || response.status === 401) return;
+  unwrap(undefined, error, response);
 }
