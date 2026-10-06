@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from src.documents.retriever import Retriever
 from src.documents.vector_store import RetrievedChunk
 from src.llm.base import LLMClient
+from src.llm.observability import llm_purpose
 from src.utils.pii_redaction import redact_pii
 
 _CITATION_PATTERN = re.compile(r"Source\s+(\d+)", re.IGNORECASE)
@@ -80,7 +81,8 @@ def answer_with_documents(
         raise RAGAgentError("No relevant document chunks were found.", **counts)
 
     prompt = build_rag_prompt(question=question, chunks=retrieval.chunks)
-    response = llm_client.generate(prompt)
+    with llm_purpose("rag_answer"):
+        response = llm_client.generate(prompt)
 
     cited_numbers = sorted({int(match) for match in _CITATION_PATTERN.findall(response.text)})
     valid_numbers = set(range(1, len(retrieval.chunks) + 1))

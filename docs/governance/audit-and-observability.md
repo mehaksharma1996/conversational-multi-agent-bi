@@ -44,6 +44,32 @@ file names, or document text.
 Never recorded by default: uploaded content, filenames, document excerpts, result rows, SQL, prompts, model responses, questions (only their length), secrets,
 or raw tenant identifiers. Tests assert this over a complete journey with `DEBUG_LOG_RAW_CONTENT` both off and on.
 
+### Model-call telemetry (`llm.call`)
+
+Every model call made through the API emits exactly one `llm.call` event, whether it is a text or a structured call and
+whether it succeeds or fails. Attributes (all allowlisted, no content):
+
+| Attribute | Meaning |
+|---|---|
+| `llm_purpose` | `route`, `sql_generation`, `sql_correction`, `rag_answer`, `criteria_extraction` (or `unspecified`) |
+| `llm_provider`, `llm_model` | Provider and model tokens |
+| `duration_ms` | Wall time of the call, including the provider client's own retries |
+| `llm_prompt_tokens`, `llm_output_tokens` | Reported by the provider; **absent** when it does not report them |
+| `llm_estimated_cost_microusd` | Estimate in millionths of a USD; present only when both prices below are configured and tokens were reported |
+| `llm_retries` | Provider-client retries inside this call (a structured-output *repair* is a separate call and a separate event) |
+| `outcome`, `error_category` | `success` / `failure` and a safe category |
+
+`agent.answer` additionally carries the per-answer totals `llm_calls`, `llm_failures`, `llm_duration_ms`, `llm_prompt_tokens`,
+`llm_output_tokens`, and `llm_estimated_cost_microusd`, so latency and cost per route can be answered from one line. Per-step latency is the
+`duration_ms` of each `llm.call` that shares the request ID.
+
+Estimated cost is an operator estimate, not billing. Set both `LLM_INPUT_COST_PER_MILLION_USD` and `LLM_OUTPUT_COST_PER_MILLION_USD`
+from your provider's current price list; setting only one is a startup error. Costs are integers in micro-USD because telemetry floats are
+rounded to three decimals, which would erase per-call costs.
+
+The wrapper never reads prompt or completion text. Evaluation reports fill `metadata.token_usage` from the same counters for opt-in live
+runs and keep it `null` for scripted runs. There is no trace exporter: see [ADR 0015](../adr/0015-llm-telemetry-and-trace-export.md).
+
 ### `DEBUG_LOG_RAW_CONTENT`
 
 This existing setting makes the orchestrator write the raw question and generated SQL to its logger at `DEBUG`. It does **not** feed telemetry or audit,

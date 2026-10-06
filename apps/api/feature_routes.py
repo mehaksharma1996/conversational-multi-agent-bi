@@ -775,6 +775,19 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
     }
     if diagnostics.sql_execution_seconds is not None:
         attributes["sql_duration_ms"] = diagnostics.sql_execution_seconds * 1000
+    if diagnostics.llm_calls:
+        attributes.update(
+            llm_calls=diagnostics.llm_calls,
+            llm_failures=diagnostics.llm_failures,
+            llm_duration_ms=diagnostics.llm_duration_ms,
+            llm_prompt_tokens=diagnostics.llm_prompt_tokens,
+            llm_output_tokens=diagnostics.llm_output_tokens,
+            llm_estimated_cost_microusd=(
+                round(diagnostics.llm_estimated_cost_usd * 1_000_000)
+                if diagnostics.llm_estimated_cost_usd is not None
+                else None
+            ),
+        )
     return {name: value for name, value in attributes.items() if value is not None}
 
 

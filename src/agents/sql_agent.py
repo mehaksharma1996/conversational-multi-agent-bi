@@ -9,6 +9,7 @@ from time import monotonic
 import pandas as pd
 
 from src.llm.base import LLMClient
+from src.llm.observability import llm_purpose
 from src.storage.query_executor import (
     QueryTimeoutError,
     UnsafeQueryError,
@@ -48,7 +49,8 @@ def answer_with_sql(
         stored_table=stored_table,
         conversation_context=conversation_context,
     )
-    llm_response = llm_client.generate(prompt)
+    with llm_purpose("sql_generation"):
+        llm_response = llm_client.generate(prompt)
     sql = extract_sql(llm_response.text)
     safe_sql = validate_generated_sql(sql)
     execution_seconds = 0.0
@@ -66,7 +68,8 @@ def answer_with_sql(
             failed_sql=safe_sql,
             error=str(exc),
         )
-        retry_response = llm_client.generate(retry_prompt)
+        with llm_purpose("sql_correction"):
+            retry_response = llm_client.generate(retry_prompt)
         retry_sql = validate_generated_sql(extract_sql(retry_response.text))
         started_at = monotonic()
         try:
@@ -91,9 +94,12 @@ def answer_with_sql(
     )
 
 
-def generate_sql(prompt: str, llm_client: LLMClient) -> tuple[str, str]:
+def generate_sql(
+    prompt: str, llm_client: LLMClient, purpose: str = "sql_generation"
+) -> tuple[str, str]:
     """Generate SQL and return the extracted statement plus original model text."""
-    response = llm_client.generate(prompt)
+    with llm_purpose(purpose):
+        response = llm_client.generate(prompt)
     return extract_sql(response.text), response.text
 
 

@@ -95,12 +95,23 @@ def _run_live(args: argparse.Namespace, fixtures: Any) -> int:
         return 2
     from config.settings import get_settings
     from src.llm.gemini_client import build_gemini_client
+    from src.llm.observability import LLMPricing, ObservedLLMClient
 
     settings = get_settings()
     if not settings.gemini_configured:
         print("Live evaluation requires a configured Gemini API key.", file=sys.stderr)
         return 2
-    client = build_gemini_client(settings)
+    pricing = (
+        LLMPricing(
+            settings.llm_input_cost_per_million_usd,
+            settings.llm_output_cost_per_million_usd,
+        )
+        if settings.llm_input_cost_per_million_usd is not None
+        and settings.llm_output_cost_per_million_usd is not None
+        else None
+    )
+    # The observing wrapper collects content-free token counts into each answer's diagnostics.
+    client = ObservedLLMClient(build_gemini_client(settings), pricing=pricing)
     used = 0
 
     def factory(_case: dict[str, Any]) -> RecordingLLM:

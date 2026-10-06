@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass, field, replace
@@ -69,6 +70,8 @@ class Settings:
     oidc_client_secret: str | None = field(default=None, repr=False)
     oidc_redirect_uri: str | None = None
     oidc_scopes: tuple[str, ...] = ("openid",)
+    llm_input_cost_per_million_usd: float | None = None
+    llm_output_cost_per_million_usd: float | None = None
 
     @property
     def oidc_login_configured(self) -> bool:
@@ -151,6 +154,23 @@ class Settings:
             raise ValueError(
                 "API_SESSION_MAX_AGE_SECONDS must not be shorter than the idle timeout."
             )
+
+    def validate_llm_pricing(self) -> None:
+        """Cost estimates need both prices; partial or absurd values are rejected."""
+        prices = (self.llm_input_cost_per_million_usd, self.llm_output_cost_per_million_usd)
+        if all(price is None for price in prices):
+            return
+        if any(price is None for price in prices):
+            raise ValueError(
+                "LLM_INPUT_COST_PER_MILLION_USD and LLM_OUTPUT_COST_PER_MILLION_USD must be "
+                "set together."
+            )
+        if any(
+            not math.isfinite(price) or price < 0 or price > 100_000
+            for price in prices
+            if price is not None
+        ):
+            raise ValueError("LLM cost per million tokens must be between 0 and 100000 USD.")
 
     def _login_values(self) -> tuple[str | None, ...]:
         return (
@@ -285,8 +305,11 @@ def get_settings() -> Settings:
         oidc_client_secret=_optional_text("OIDC_CLIENT_SECRET"),
         oidc_redirect_uri=_optional_text("OIDC_REDIRECT_URI"),
         oidc_scopes=_scopes("OIDC_SCOPES"),
+        llm_input_cost_per_million_usd=_optional_float("LLM_INPUT_COST_PER_MILLION_USD", None),
+        llm_output_cost_per_million_usd=_optional_float("LLM_OUTPUT_COST_PER_MILLION_USD", None),
     )
     settings.validate_identity_configuration()
+    settings.validate_llm_pricing()
     return settings
 
 

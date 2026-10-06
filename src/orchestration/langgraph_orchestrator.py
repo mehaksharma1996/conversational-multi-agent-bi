@@ -29,6 +29,7 @@ from src.agents.sql_agent import (
 )
 from src.documents.retriever import Retriever
 from src.llm.base import LLMClient, SchemaT
+from src.llm.observability import QuestionUsage, collect_question_usage, llm_purpose
 from src.llm.structured import HybridCriteria, RouteDecision
 from src.memory.session_memory import SessionMemory, answer_from_memory
 from src.orchestration.graph_state import (
@@ -161,11 +162,12 @@ class QuestionOrchestrator:
             "sql_correction_attempts": 0,
             "sql_execution_seconds": 0.0,
         }
-        final_state = self._graph.invoke(
-            initial_state,
-            {"configurable": {"thread_id": thread_id or uuid4().hex}},
-        )
-        return self._result_from_state(final_state, question, started_at)
+        with collect_question_usage() as usage:
+            final_state = self._graph.invoke(
+                initial_state,
+                {"configurable": {"thread_id": thread_id or uuid4().hex}},
+            )
+        return self._result_from_state(final_state, question, started_at, usage)
 
     def resume_approval(
         self,
@@ -178,18 +180,22 @@ class QuestionOrchestrator:
         if decision not in {"approve", "reject"}:
             raise ValueError("Unsupported approval decision.")
         started_at = monotonic()
-        final_state = self._graph.invoke(
-            Command(resume={"decision": decision, "sql": sql}),
-            {"configurable": {"thread_id": thread_id}},
-        )
+        with collect_question_usage() as usage:
+            final_state = self._graph.invoke(
+                Command(resume={"decision": decision, "sql": sql}),
+                {"configurable": {"thread_id": thread_id}},
+            )
         self.last_route = final_state.get("route")
-        return self._result_from_state(final_state, final_state.get("question", ""), started_at)
+        return self._result_from_state(
+            final_state, final_state.get("question", ""), started_at, usage
+        )
 
     def _result_from_state(
         self,
         final_state: dict[str, Any],
         question: str,
         started_at: float,
+        usage: QuestionUsage | None = None,
     ) -> OrchestratorResult:
         interrupted = bool(final_state.get("__interrupt__"))
         diagnostics = final_state.get("diagnostics", AnswerDiagnostics())
@@ -211,6 +217,7 @@ class QuestionOrchestrator:
                     diagnostics.structured_output_failures,
                     self._structured_failures,
                 ),
+                **_usage_fields(usage),
             ),
         )
         LOGGER.info(
@@ -559,7 +566,7 @@ Return matching or highest-priority rows identifiable from the table columns.
             state["validated_sql"],
             state["sql_error"],
         )
-        sql, model_text = generate_sql(prompt, self.llm_client)
+        sql, model_text = generate_sql(prompt, self.llm_client, "sql_correction")
         return {
             **state,
             "sql_candidate": sql,
@@ -686,11 +693,13 @@ Excerpts: {json.dumps(excerpts, ensure_ascii=True)}
 
     def _generate_validated(self, prompt: str, schema: type[SchemaT]) -> SchemaT:
         structured = getattr(self.llm_client, "generate_structured", None)
+        purpose = "route" if schema is RouteDecision else "criteria_extraction"
         for attempt in range(2):
             try:
-                if callable(structured):
-                    return structured(prompt, schema)
-                response = self.llm_client.generate(prompt)
+                with llm_purpose(purpose):
+                    if callable(structured):
+                        return structured(prompt, schema)
+                    response = self.llm_client.generate(prompt)
                 return schema.model_validate(_parse_json_object(response.text))
             except (ValidationError, ValueError, TypeError):
                 if attempt:
@@ -720,6 +729,20 @@ class _ExtractedCriteria:
     rejected_keys: int = 0
     dropped_values: int = 0
     provenance: CriteriaProvenance = "traced"
+
+
+def _usage_fields(usage: QuestionUsage | None) -> dict[str, Any]:
+    """Content-free per-answer model usage, or nothing when no observed client made calls."""
+    if usage is None or usage.calls == 0:
+        return {}
+    return {
+        "llm_calls": usage.calls,
+        "llm_failures": usage.failures,
+        "llm_duration_ms": usage.duration_ms,
+        "llm_prompt_tokens": usage.prompt_tokens,
+        "llm_output_tokens": usage.output_tokens,
+        "llm_estimated_cost_usd": usage.estimated_cost_usd,
+    }
 
 
 def _document_diagnostics(result: RAGAnswer) -> AnswerDiagnostics:

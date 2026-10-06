@@ -21,6 +21,7 @@ React/FastAPI runtime became the primary local product.
 | [0012](0012-deliberate-non-goals.md) | Deliberate non-goals for the local BI product | Accepted |
 | [0013](0013-browser-authentication-transport.md) | Browser authentication transport (BFF session, CSRF, no CORS) | Accepted |
 | [0014](0014-mcp-server.md) | Read-only MCP server over the guarded data core (stdio) | Accepted |
+| [0015](0015-llm-telemetry-and-trace-export.md) | Content-free LLM call telemetry; no trace export yet | Accepted |
 
 ## ADR lifecycle
 

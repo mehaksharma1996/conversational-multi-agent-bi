@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 from typing import Annotated
 
-from fastapi import Request, Security
+from fastapi import Depends, Request, Security
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
 
 from apps.api.approvals import ApprovalCheckpoints
@@ -24,6 +24,7 @@ from packages.analytics import TabularApplicationService
 from packages.connectors import IdentityContext
 from packages.retrieval import DocumentApplicationService
 from src.llm.base import LLMClient
+from src.llm.observability import LLMCallRecord, LLMPricing, ObservedLLMClient
 
 bearer_scheme = HTTPBearer(auto_error=False)
 session_cookie_scheme = APIKeyCookie(name=SESSION_COOKIE_NAME, auto_error=False)
@@ -120,8 +121,45 @@ def get_document_service(request: Request) -> DocumentApplicationService:
     return request.app.state.document_service
 
 
-def get_llm_client(request: Request) -> LLMClient:
-    return request.app.state.llm_client_factory(request.app.state.settings)
+def get_llm_client(
+    request: Request,
+    identity: Annotated[IdentityContext, Depends(get_identity)],
+) -> LLMClient:
+    """Wrap the configured provider so every model call emits one content-free ``llm.call``."""
+    settings: Settings = request.app.state.settings
+    inner = request.app.state.llm_client_factory(settings)
+    observability: ApiObservability = request.app.state.observability
+    pricing = (
+        LLMPricing(
+            settings.llm_input_cost_per_million_usd,
+            settings.llm_output_cost_per_million_usd,
+        )
+        if settings.llm_input_cost_per_million_usd is not None
+        and settings.llm_output_cost_per_million_usd is not None
+        else None
+    )
+
+    def observe(record: LLMCallRecord) -> None:
+        observability.telemetry.emit(
+            "llm.call",
+            tenant_id=identity.tenant_id,
+            llm_purpose=record.purpose,
+            llm_provider=record.provider,
+            llm_model=record.model,
+            duration_ms=record.duration_ms,
+            outcome=record.outcome,
+            error_category=record.error_category,
+            llm_retries=record.retries,
+            llm_prompt_tokens=record.prompt_tokens,
+            llm_output_tokens=record.output_tokens,
+            llm_estimated_cost_microusd=(
+                round(record.estimated_cost_usd * 1_000_000)
+                if record.estimated_cost_usd is not None
+                else None
+            ),
+        )
+
+    return ObservedLLMClient(inner, observe, pricing)
 
 
 def get_api_settings(request: Request) -> Settings:

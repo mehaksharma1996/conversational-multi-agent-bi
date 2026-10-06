@@ -29,6 +29,11 @@ Get-Content data\audit\<tenant-id>.jsonl | Select-String '"request_id": "<the id
 
 Tenant IDs are opaque hashes of the identity; in local development mode there is one fixed tenant.
 
+To see *which model step* was slow, failing, or expensive, filter the same request ID for `llm.call` lines: each one has the step
+(`llm_purpose`), `duration_ms`, token counts when the provider reports them, `llm_retries`, and `outcome`. `agent.answer` carries the totals
+(`llm_calls`, `llm_duration_ms`, `llm_prompt_tokens`, `llm_output_tokens`, `llm_estimated_cost_microusd`). Many `route` or `sql_correction` calls
+for one question suggest repeated structured-output repairs or SQL retries; high `llm_retries` points at provider throttling.
+
 ## 2. Read the error category
 
 | `error_category` / `error_code` | Meaning | First checks |

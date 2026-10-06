@@ -200,10 +200,41 @@ def build_report(
             },
             "retrieval_settings": fixtures.retrieval,
             "prompt_fingerprints": prompt_fingerprints(),
-            "token_usage": None,
+            "token_usage": token_usage(results),
         },
         "aggregate": summarize(results),
         "cases": [result.as_dict() for result in results],
+    }
+
+
+def token_usage(results: list[CaseResult]) -> dict[str, Any] | None:
+    """Totals across cases that reported usage; ``None`` for runs (scripted) that have none.
+
+    Reads only the content-free counters in each case's diagnostics.
+    """
+    prompt = output = calls = 0
+    cost: float | None = None
+    reported = False
+    for result in results:
+        diagnostics = result.diagnostics
+        prompt_tokens = diagnostics.get("llm_prompt_tokens")
+        output_tokens = diagnostics.get("llm_output_tokens")
+        if prompt_tokens is None and output_tokens is None:
+            continue
+        reported = True
+        prompt += prompt_tokens or 0
+        output += output_tokens or 0
+        calls += diagnostics.get("llm_calls") or 0
+        case_cost = diagnostics.get("llm_estimated_cost_usd")
+        if case_cost is not None:
+            cost = (cost or 0.0) + case_cost
+    if not reported:
+        return None
+    return {
+        "calls": calls,
+        "prompt_tokens": prompt,
+        "output_tokens": output,
+        "estimated_cost_usd": round(cost, 6) if cost is not None else None,
     }
 
 

@@ -46,6 +46,12 @@ class AnswerDiagnostics:
     hybrid_fell_back_to_documents: bool = False
     structured_output_repairs: int = 0
     structured_output_failures: int = 0
+    llm_calls: int = 0
+    llm_failures: int = 0
+    llm_duration_ms: float = 0.0
+    llm_prompt_tokens: int | None = None
+    llm_output_tokens: int | None = None
+    llm_estimated_cost_usd: float | None = None
 
 
 class QuestionGraphState(TypedDict, total=False):
