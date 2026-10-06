@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from time import perf_counter
 
 from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 
 from apps.api.approvals import ApprovalCheckpoints
 from apps.api.auth import RequestIdentityProvider, build_identity_provider
@@ -31,7 +32,9 @@ from packages.connectors import AuditSink
 from packages.governance import JsonlAuditSink
 from packages.jobs import InMemoryJobStore, InProcessJobExecutor
 from packages.observability import (
+    FanOutTelemetrySink,
     LoggingTelemetrySink,
+    MetricsRegistry,
     TelemetrySink,
     bind_request_id,
     configure_telemetry_logging,
@@ -107,8 +110,16 @@ def create_app(
     )
     if telemetry_sink is None:
         configure_telemetry_logging()
+    # Metrics are derived from the same allowlisted events as the logs and are served only when
+    # explicitly enabled; they carry no content, identity, or secrets
+    # (packages/observability/metrics.py).
+    metrics_registry = MetricsRegistry() if active_settings.metrics_enabled else None
+    application.state.metrics_registry = metrics_registry
+    base_sink = telemetry_sink or LoggingTelemetrySink()
     observability = ApiObservability.create(
-        telemetry_sink=telemetry_sink or LoggingTelemetrySink(),
+        telemetry_sink=(
+            FanOutTelemetrySink([base_sink, metrics_registry]) if metrics_registry else base_sink
+        ),
         audit_sink=audit_sink or JsonlAuditSink(active_settings.audit_dir),
     )
     application.state.observability = observability
@@ -166,7 +177,7 @@ def create_app(
                 response.headers["X-Request-ID"] = request_id
                 return response
             finally:
-                if not request.url.path.startswith("/health/"):
+                if not request.url.path.startswith(("/health/", "/metrics")):
                     route = request.scope.get("route")
                     observability.telemetry.emit(
                         "http.request",
@@ -199,6 +210,17 @@ def create_app(
         if not active_repository.ready() or (audit_ready is not None and not audit_ready()):
             raise ApiError(503, "service_not_ready", "The API is not ready to accept work.")
         return HealthResponse(status="ready")
+
+    if metrics_registry is not None:
+
+        @application.get("/metrics", include_in_schema=False)
+        def metrics() -> PlainTextResponse:
+            """Prometheus text exposition. Outside /api and not in the OpenAPI contract."""
+            return PlainTextResponse(
+                metrics_registry.render(),
+                media_type="text/plain; version=0.0.4; charset=utf-8",
+                headers={"Cache-Control": "no-store"},
+            )
 
     application.include_router(auth_router)
     application.include_router(router)
