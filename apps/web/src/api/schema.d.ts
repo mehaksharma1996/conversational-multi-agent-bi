@@ -1042,6 +1042,15 @@ export interface operations {
                     "application/json": components["schemas"]["AnalysisResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1080,6 +1089,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1113,6 +1131,15 @@ export interface operations {
                     "application/json": components["schemas"]["ReportResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1151,6 +1178,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1180,6 +1216,15 @@ export interface operations {
                     "application/json": components["schemas"]["ConversationResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1218,6 +1263,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1247,6 +1301,15 @@ export interface operations {
                     "application/json": components["schemas"]["MessageListResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1285,6 +1348,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1318,6 +1390,15 @@ export interface operations {
                     "application/json": components["schemas"]["MessageResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1356,6 +1437,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1385,6 +1475,15 @@ export interface operations {
                     "application/json": components["schemas"]["DatasetResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1423,6 +1522,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1456,6 +1564,15 @@ export interface operations {
                     "application/json": components["schemas"]["AnalysisResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1494,6 +1611,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1527,6 +1653,15 @@ export interface operations {
                     "application/json": components["schemas"]["DatasetResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1565,6 +1700,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1594,6 +1738,15 @@ export interface operations {
                     "application/json": components["schemas"]["DocumentCollectionResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1632,6 +1785,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1663,6 +1825,15 @@ export interface operations {
                     "text/csv": string;
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1701,6 +1872,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1734,6 +1914,15 @@ export interface operations {
                     "application/json": components["schemas"]["MessageResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1772,6 +1961,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1805,6 +2003,15 @@ export interface operations {
                     "application/json": components["schemas"]["ExportResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1843,6 +2050,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1876,6 +2092,15 @@ export interface operations {
                     "text/markdown": string;
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1914,6 +2139,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1947,6 +2181,15 @@ export interface operations {
                     "application/json": components["schemas"]["DatasetResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -1985,6 +2228,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2014,6 +2266,15 @@ export interface operations {
                     "application/json": components["schemas"]["WorkbookSheetsResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2052,6 +2313,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2081,6 +2351,15 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2119,6 +2398,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2148,6 +2436,15 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2186,6 +2483,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2213,6 +2519,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2251,6 +2566,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2284,6 +2608,15 @@ export interface operations {
                     "application/json": components["schemas"]["ConsentResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2322,6 +2655,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2355,6 +2697,15 @@ export interface operations {
                     "application/json": components["schemas"]["ConversationResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2393,6 +2744,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2426,6 +2786,15 @@ export interface operations {
                     "application/json": components["schemas"]["DocumentCollectionResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2464,6 +2833,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2497,6 +2875,15 @@ export interface operations {
                     "application/json": components["schemas"]["TabularUploadResponse"];
                 };
             };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Resource not found */
             404: {
                 headers: {
@@ -2535,6 +2922,15 @@ export interface operations {
             };
             /** @description Sanitized internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

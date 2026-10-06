@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import Request
+from typing import Annotated
+
+from fastapi import Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from apps.api.approvals import ApprovalCheckpoints
+from apps.api.auth import RequestIdentityProvider
 from apps.api.observability import ApiObservability
 from apps.api.repository import LocalResourceRepository
 from config.settings import Settings
@@ -12,19 +16,21 @@ from packages.analytics import TabularApplicationService
 from packages.connectors import IdentityContext
 from packages.retrieval import DocumentApplicationService
 from src.llm.base import LLMClient
-from src.utils.identity import LOCAL_DEV_TENANT_ID
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def get_identity() -> IdentityContext:
-    """Return the explicit local-development identity.
-
-    Browser-provided tenant headers are deliberately ignored. A future OIDC
-    adapter will replace this dependency with verified server-side claims.
-    """
-    return IdentityContext(
-        tenant_id=LOCAL_DEV_TENANT_ID,
-        authentication_mode="local",
-    )
+def get_identity(
+    request: Request,
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Security(bearer_scheme),
+    ],
+) -> IdentityContext:
+    """Resolve identity through the application-owned trusted provider."""
+    provider: RequestIdentityProvider = request.app.state.identity_provider
+    token = credentials.credentials if credentials is not None else None
+    return provider.authenticate(token)
 
 
 def get_repository(request: Request) -> LocalResourceRepository:

@@ -28,3 +28,20 @@ def test_openapi_contract_is_versioned_and_never_accepts_tenant_authority() -> N
     assert "/api/v1/conversations/{conversation_id}/messages" in paths
     assert "/api/v1/reports/{report_id}/content" in paths
     assert "/api/v1/workspaces/{workspace_id}" in paths
+
+
+def test_openapi_declares_bearer_auth_for_api_resources_but_not_health() -> None:
+    contract = create_app().openapi()
+
+    assert contract["components"]["securitySchemes"]["HTTPBearer"] == {
+        "type": "http",
+        "scheme": "bearer",
+    }
+    for path, operations in contract["paths"].items():
+        for operation in operations.values():
+            if not isinstance(operation, dict) or "responses" not in operation:
+                continue
+            if path.startswith("/api/v1/"):
+                assert operation["security"] == [{"HTTPBearer": []}]
+            if path.startswith("/health/"):
+                assert "security" not in operation

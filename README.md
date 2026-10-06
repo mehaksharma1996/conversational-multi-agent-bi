@@ -298,6 +298,18 @@ context are available.
 
 ## Authentication
 
+The FastAPI boundary has two explicit identity modes. The default `API_AUTH_MODE=local` uses one
+fixed development tenant. `API_AUTH_MODE=oidc` requires an HTTPS issuer, audience, and JWKS URL and
+requires a signed Bearer JWT on every `/api/v1` request. The API verifies the configured asymmetric
+signature algorithm and the `iss`, `aud`, `sub`, `exp`, and optional time claims before deriving the
+tenant from `sub`; request headers and token tenant claims are never authority. Partial or malformed
+OIDC configuration fails startup instead of falling back to local mode.
+
+This is the API authentication foundation, not completed browser authentication. The bundled React
+client does not yet run an OAuth redirect/callback or attach tokens, and roles, logout, CSRF, and the
+final CORS policy remain [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
+Keep the packaged web application loopback-only until those slices are complete.
+
 The developer-only Streamlit compatibility surface supports native OIDC login (`st.login()`/`st.user`) for
 gating access and scoping storage per authenticated user. To enable it, copy
 `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in a

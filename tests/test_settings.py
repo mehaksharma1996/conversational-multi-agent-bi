@@ -1,5 +1,6 @@
 """Tests for application and per-session settings."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -154,3 +155,60 @@ def test_max_chat_dataframes_retained_rejects_negative(monkeypatch) -> None:
 
     with pytest.raises(ValueError):
         get_settings()
+
+
+def test_api_auth_defaults_to_explicit_local_mode(monkeypatch) -> None:
+    for name in ("API_AUTH_MODE", "OIDC_ISSUER_URL", "OIDC_AUDIENCE", "OIDC_JWKS_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = get_settings()
+
+    assert settings.api_auth_mode == "local"
+    settings.validate_identity_configuration()
+
+
+def test_oidc_mode_requires_complete_https_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("API_AUTH_MODE", "oidc")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "https://identity.example.test")
+    monkeypatch.setenv("OIDC_AUDIENCE", "bi-api")
+    monkeypatch.delenv("OIDC_JWKS_URL", raising=False)
+
+    with pytest.raises(ValueError, match="OIDC_JWKS_URL"):
+        get_settings()
+
+    monkeypatch.setenv("OIDC_JWKS_URL", "http://identity.example.test/jwks")
+    with pytest.raises(ValueError, match="HTTPS URL"):
+        get_settings()
+
+
+def test_oidc_settings_cannot_silently_fall_back_to_local(monkeypatch) -> None:
+    monkeypatch.setenv("API_AUTH_MODE", "local")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "https://identity.example.test")
+
+    with pytest.raises(ValueError, match="silent local fallback"):
+        get_settings()
+
+
+def test_oidc_rejects_symmetric_or_none_algorithms(monkeypatch) -> None:
+    monkeypatch.setenv("API_AUTH_MODE", "oidc")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "https://identity.example.test")
+    monkeypatch.setenv("OIDC_AUDIENCE", "bi-api")
+    monkeypatch.setenv("OIDC_JWKS_URL", "https://identity.example.test/jwks")
+    monkeypatch.setenv("OIDC_ALLOWED_ALGORITHMS", "RS256,HS256,none")
+
+    with pytest.raises(ValueError, match="HS256, none"):
+        get_settings()
+
+
+def test_direct_oidc_settings_validate_numeric_bounds() -> None:
+    settings = replace(
+        _settings(),
+        api_auth_mode="oidc",
+        oidc_issuer_url="https://id.test",
+        oidc_audience="api",
+        oidc_jwks_url="https://id.test/jwks",
+        oidc_clock_skew_seconds=-1,
+    )
+
+    with pytest.raises(ValueError, match="CLOCK_SKEW"):
+        settings.validate_identity_configuration()
