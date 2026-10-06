@@ -203,6 +203,10 @@ def _build_real_session_memory(document_status: dict | None = None, previous_mem
             ReportSection(title="Executive Summary", bullets=["Analyzed 8 rows."]),
             ReportSection(title="Analytics Highlights", bullets=["Trend detected."]),
             ReportSection(title="Anomaly Findings", bullets=["Flagged rows: 1"]),
+            ReportSection(
+                title="Supervised Classification",
+                bullets=["Holdout PR-AUC: 0.800", "Human review required."],
+            ),
             ReportSection(title="Limitations", bullets=["Missing canonical fields: date"]),
         ],
     )
@@ -226,6 +230,10 @@ def test_build_session_memory_populates_fields_from_analysis_outputs() -> None:
     assert memory.column_count == 3
     assert memory.analytics_highlights == ["Trend detected."]
     assert memory.anomaly_findings == ["Flagged rows: 1"]
+    assert memory.classification_findings == [
+        "Holdout PR-AUC: 0.800",
+        "Human review required.",
+    ]
     assert memory.limitations == ["Missing canonical fields: date"]
     assert memory.last_sql is None
     assert memory.recent_questions == []

@@ -13,6 +13,8 @@ from apps.api.models import (
     BusinessReportResponse,
     CapabilityResponse,
     ChartResponse,
+    ClassificationMetricsResponse,
+    ClassificationResponse,
     ColumnProfileResponse,
     ConversationResponse,
     DataProfileResponse,
@@ -99,6 +101,7 @@ def analysis_response(record: AnalysisRecord) -> AnalysisResponse:
     bundle = record.bundle
     analytics = bundle.analytics_report
     anomaly = bundle.anomaly_report
+    classification = bundle.classification_report
     return AnalysisResponse(
         id=record.id,
         workspace_id=record.workspace_id,
@@ -137,6 +140,35 @@ def analysis_response(record: AnalysisRecord) -> AnalysisResponse:
             score_percentiles=anomaly.score_percentiles,
             flagged_rows=_records(anomaly.flagged_rows),
             limitations=anomaly.limitations,
+        ),
+        classification=ClassificationResponse(
+            enabled=classification.enabled,
+            reason=classification.reason,
+            method=classification.method,
+            label_column=classification.label_column,
+            positive_label=classification.positive_label,
+            feature_columns=classification.feature_columns,
+            excluded_columns=classification.excluded_columns,
+            metrics=(
+                ClassificationMetricsResponse(
+                    precision=classification.metrics.precision,
+                    recall=classification.metrics.recall,
+                    f1=classification.metrics.f1,
+                    roc_auc=classification.metrics.roc_auc,
+                    pr_auc=classification.metrics.pr_auc,
+                    cv_pr_auc=classification.metrics.cv_pr_auc,
+                    threshold=classification.metrics.threshold,
+                    positive_rate=classification.metrics.positive_rate,
+                    true_negative=classification.metrics.true_negative,
+                    false_positive=classification.metrics.false_positive,
+                    false_negative=classification.metrics.false_negative,
+                    true_positive=classification.metrics.true_positive,
+                )
+                if classification.metrics is not None
+                else None
+            ),
+            review_candidates=_records(classification.review_candidates),
+            limitations=classification.limitations,
         ),
         charts=[
             ChartResponse(

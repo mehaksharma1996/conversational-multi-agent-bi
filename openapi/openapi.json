@@ -82,6 +82,9 @@
             "title": "Charts",
             "type": "array"
           },
+          "classification": {
+            "$ref": "#/components/schemas/ClassificationResponse"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -158,6 +161,7 @@
           "trend",
           "analytics_limitations",
           "anomaly",
+          "classification",
           "charts",
           "report"
         ],
@@ -395,6 +399,167 @@
           "figure"
         ],
         "title": "ChartResponse",
+        "type": "object"
+      },
+      "ClassificationMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cv_pr_auc": {
+            "title": "Cv Pr Auc",
+            "type": "number"
+          },
+          "f1": {
+            "title": "F1",
+            "type": "number"
+          },
+          "false_negative": {
+            "title": "False Negative",
+            "type": "integer"
+          },
+          "false_positive": {
+            "title": "False Positive",
+            "type": "integer"
+          },
+          "positive_rate": {
+            "title": "Positive Rate",
+            "type": "number"
+          },
+          "pr_auc": {
+            "title": "Pr Auc",
+            "type": "number"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "number"
+          },
+          "recall": {
+            "title": "Recall",
+            "type": "number"
+          },
+          "roc_auc": {
+            "title": "Roc Auc",
+            "type": "number"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "true_negative": {
+            "title": "True Negative",
+            "type": "integer"
+          },
+          "true_positive": {
+            "title": "True Positive",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc",
+          "pr_auc",
+          "cv_pr_auc",
+          "threshold",
+          "positive_rate",
+          "true_negative",
+          "false_positive",
+          "false_negative",
+          "true_positive"
+        ],
+        "title": "ClassificationMetricsResponse",
+        "type": "object"
+      },
+      "ClassificationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "excluded_columns": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Excluded Columns",
+            "type": "object"
+          },
+          "feature_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Feature Columns",
+            "type": "array"
+          },
+          "label_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Column"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClassificationMetricsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "positive_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positive Label"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "review_candidates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Review Candidates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "reason",
+          "method",
+          "label_column",
+          "positive_label",
+          "feature_columns",
+          "excluded_columns",
+          "metrics",
+          "review_candidates",
+          "limitations"
+        ],
+        "title": "ClassificationResponse",
         "type": "object"
       },
       "ColumnProfileResponse": {

@@ -32,6 +32,7 @@ class SessionMemory:
     last_sql: str | None = None
     last_sql_question: str | None = None
     recent_questions: list[str] = field(default_factory=list)
+    classification_findings: list[str] = field(default_factory=list)
 
 
 def build_session_memory(
@@ -70,6 +71,7 @@ def build_session_memory(
         last_sql=previous_memory.last_sql if previous_memory else None,
         last_sql_question=previous_memory.last_sql_question if previous_memory else None,
         recent_questions=list(previous_memory.recent_questions) if previous_memory else [],
+        classification_findings=report_sections.get("Supervised Classification", []),
     )
 
 
@@ -159,10 +161,11 @@ def _capability_answer(memory: SessionMemory) -> str:
 
 
 def _risk_answer(memory: SessionMemory) -> str:
-    if not memory.anomaly_findings:
+    findings = [*memory.anomaly_findings, *memory.classification_findings]
+    if not findings:
         return "No anomaly findings are stored in session memory yet."
     return "Top risk and anomaly context:\n" + "\n".join(
-        f"- {finding}" for finding in memory.anomaly_findings[:8]
+        f"- {finding}" for finding in findings[:10]
     )
 
 

@@ -81,7 +81,9 @@ describe("tabular analysis journey", () => {
     await user.click(screen.getByRole("button", { name: "Run deterministic analysis" }));
 
     expect(await screen.findByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
-    expect(screen.getByText("Anomaly flags are review candidates", { exact: false })).toBeVisible();
+    expect(screen.getByText("Anomaly flags and classifier scores", { exact: false })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Supervised classification" })).toBeVisible();
+    expect(screen.getByText("Classifier candidates for human review")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Business analysis summary" })).toBeVisible();
     expect(runAnalysis).toHaveBeenCalledWith("dataset-1", {
       anomaly_contamination: 0.05,

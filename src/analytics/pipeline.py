@@ -9,6 +9,10 @@ import pandas as pd
 from src.agents.report_agent import BusinessReport, generate_business_report
 from src.analytics.anomaly_detection import AnomalyReport, detect_anomalies
 from src.analytics.basic_analytics import AnalyticsReport, run_basic_analytics
+from src.analytics.supervised_classification import (
+    SupervisedClassificationReport,
+    run_supervised_classification,
+)
 from src.charts.chart_builder import ChartSpec, build_charts
 from src.profiling.capability_detector import CapabilityReport, detect_capabilities
 from src.profiling.data_profiler import DataProfile
@@ -20,6 +24,7 @@ class AnalysisBundle:
     capability_report: CapabilityReport
     analytics_report: AnalyticsReport
     anomaly_report: AnomalyReport
+    classification_report: SupervisedClassificationReport
     chart_specs: list[ChartSpec]
     business_report: BusinessReport
 
@@ -32,7 +37,8 @@ def build_analysis_bundle(
     anomaly_contamination: float,
     document_status: dict | None,
 ) -> AnalysisBundle:
-    capability_report = detect_capabilities(profile, schema_mapping)
+    classification_report = run_supervised_classification(dataframe, profile, schema_mapping)
+    capability_report = detect_capabilities(profile, schema_mapping, dataframe)
     analytics_report = run_basic_analytics(dataframe, profile, schema_mapping)
     anomaly_report = detect_anomalies(
         dataframe,
@@ -47,6 +53,7 @@ def build_analysis_bundle(
         schema_mapping=schema_mapping,
         analytics_report=analytics_report,
         anomaly_report=anomaly_report,
+        classification_report=classification_report,
     )
     business_report = generate_business_report(
         profile=profile,
@@ -54,6 +61,7 @@ def build_analysis_bundle(
         capability_report=capability_report,
         analytics_report=analytics_report,
         anomaly_report=anomaly_report,
+        classification_report=classification_report,
         chart_specs=chart_specs,
         document_status=document_status,
     )
@@ -61,6 +69,7 @@ def build_analysis_bundle(
         capability_report=capability_report,
         analytics_report=analytics_report,
         anomaly_report=anomaly_report,
+        classification_report=classification_report,
         chart_specs=chart_specs,
         business_report=business_report,
     )

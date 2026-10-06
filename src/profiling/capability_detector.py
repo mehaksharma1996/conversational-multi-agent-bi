@@ -33,6 +33,7 @@ class CapabilityReport:
 def detect_capabilities(
     profile: DataProfile,
     schema_mapping: SchemaMapping,
+    dataframe: pd.DataFrame | None = None,
 ) -> CapabilityReport:
     """Detect available analysis paths from profile and canonical mappings."""
     mapped_fields = schema_mapping.mapped_fields()
@@ -51,7 +52,11 @@ def detect_capabilities(
             mapped_fields=mapped_fields,
             success_reason="A date field and numeric amount-like field are available.",
         ),
-        _classification_capability(profile=profile, mapped_fields=mapped_fields),
+        _classification_capability(
+            profile=profile,
+            schema_mapping=schema_mapping,
+            dataframe=dataframe,
+        ),
         _build_capability(
             name="Location analysis",
             required_fields=["location", "amount"],
@@ -117,10 +122,12 @@ def _generic_anomaly_capability(profile: DataProfile) -> Capability:
 
 def _classification_capability(
     profile: DataProfile,
-    mapped_fields: dict[str, str],
+    schema_mapping: SchemaMapping,
+    dataframe: pd.DataFrame | None,
 ) -> Capability:
     required_fields = ["label", "at least one feature column"]
-    has_label = "label" in mapped_fields or bool(profile.possible_label_columns)
+    mapped_fields = schema_mapping.mapped_fields()
+    has_label = "label" in mapped_fields
     has_features = profile.column_count >= 2
 
     missing_fields = []
@@ -129,12 +136,25 @@ def _classification_capability(
     if not has_features:
         missing_fields.append("at least one feature column")
 
-    return Capability(
+    capability = Capability(
         name="Classification readiness",
         available=has_label and has_features,
         required_fields=required_fields,
         missing_fields=missing_fields,
-        reason="A label-like column and feature columns are available."
+        reason="A confirmed label mapping and feature columns are available."
         if has_label and has_features
         else f"Missing required field(s): {', '.join(missing_fields)}.",
+    )
+    if not capability.available or dataframe is None:
+        return capability
+
+    from src.analytics.supervised_classification import assess_classification_eligibility
+
+    eligibility = assess_classification_eligibility(dataframe, profile, schema_mapping)
+    return Capability(
+        name=capability.name,
+        available=eligibility.enabled,
+        required_fields=capability.required_fields,
+        missing_fields=[] if eligibility.enabled else ["eligible binary labelled dataset"],
+        reason=eligibility.reason,
     )

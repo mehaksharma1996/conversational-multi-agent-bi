@@ -146,6 +146,8 @@ def test_tabular_vertical_slice_requires_review_before_analysis(client: TestClie
     assert body["dataset_mapping_version"] == 1
     assert body["dataset_summary"]["rows"] == 10
     assert body["capabilities"]
+    assert body["classification"]["enabled"] is False
+    assert body["classification"]["metrics"] is None
     assert body["charts"]
     assert body["report"]["sections"]
 
