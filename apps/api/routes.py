@@ -95,7 +95,7 @@ def create_workspace(
         data_recipients=settings.hosted_recipients(),
         local_only_mode=settings.local_only_mode,
     )
-    return workspace_response(record)
+    return workspace_response(record, repository.retention_hours)
 
 
 @router.get(
@@ -110,7 +110,9 @@ def get_workspace(
     identity: IdentityDependency,
     repository: RepositoryDependency,
 ) -> WorkspaceResponse:
-    return workspace_response(repository.get_workspace(workspace_id, identity.tenant_id))
+    return workspace_response(
+        repository.get_workspace(workspace_id, identity.tenant_id), repository.retention_hours
+    )
 
 
 @router.post(

@@ -365,6 +365,20 @@ class ExportRecord:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class WorkspaceSnapshot:
+    """A tenant-checked, point-in-time copy of one workspace's records (for data export)."""
+
+    workspace: WorkspaceRecord
+    uploads: tuple[TabularUploadRecord, ...]
+    conversations: tuple[ConversationRecord, ...]
+    messages: tuple[MessageRecord, ...]
+    reports: tuple[ReportRecord, ...]
+    exports: tuple[ExportRecord, ...]
+    document_collections: tuple[DocumentCollectionRecord, ...]
+    datasets: tuple[DatasetRecord, ...]
+
+
 class LocalResourceRepository:
     """Initial single-process repository with ownership checks on every lookup.
 
@@ -1521,6 +1535,45 @@ class LocalResourceRepository:
     def get_export(self, export_id: str, tenant_id: str) -> ExportRecord:
         with self._lock:
             return self._owned(self._exports, export_id, tenant_id, "Export")
+
+    def workspace_snapshot(self, workspace_id: str, tenant_id: str) -> WorkspaceSnapshot:
+        """Everything the workspace holds for its owner, for a data export.
+
+        Recovered resources are rebuilt first, and each upload is returned with its (verified)
+        payload. Nothing here is visible to another tenant.
+        """
+        with self._lock:
+            workspace = self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
+            self._hydrate_workspace_unlocked(workspace_id)
+            uploads: list[TabularUploadRecord] = []
+            for upload_id, record in list(self._uploads.items()):
+                if record.workspace_id != workspace_id or record.tenant_id != tenant_id:
+                    continue
+                try:
+                    uploads.append(self._upload_with_payload_unlocked(upload_id))
+                except ResourceNotFoundError:
+                    continue  # a corrupt upload was dropped; it is not exported
+
+            def owned[RecordT](records: dict[str, RecordT]) -> tuple[RecordT, ...]:
+                return tuple(
+                    record
+                    for record in records.values()
+                    if getattr(record, "workspace_id", None) == workspace_id
+                    and getattr(record, "tenant_id", None) == tenant_id
+                )
+
+            conversations = owned(self._conversations)
+            messages = sorted(owned(self._messages), key=lambda item: (item.created_at, item.id))
+            return WorkspaceSnapshot(
+                workspace=workspace,
+                uploads=tuple(uploads),
+                conversations=conversations,
+                messages=tuple(messages),
+                reports=owned(self._reports),
+                exports=owned(self._exports),
+                document_collections=owned(self._document_collections),
+                datasets=owned(self._datasets),
+            )
 
     def delete_workspace(self, workspace_id: str, tenant_id: str) -> None:
         with self._lock:

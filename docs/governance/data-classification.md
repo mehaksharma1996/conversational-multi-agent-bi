@@ -57,5 +57,8 @@ C2 location above except process memory, so a backup is C2 and must be protected
   built-in off-host copy; an anchor proves where the retained chain starts, not what was archived (tracked in #18).
 - The Chroma index is unencrypted (ADR 0021). Uploaded files and `metadata.db` are plain files; `content.db`
   and `app.db` are encrypted only when a key is configured.
-- There is no user-facing retention inspection or workspace export in the API yet (tracked in #18).
+- Users can see how long data is kept (`retention_hours`, `expires_at`; shown in the UI footer) and download
+  everything the workspace holds as one ZIP (`GET /workspaces/{id}/export`, UI button "Export my data"). The
+  export is built in memory and capped by `MAX_WORKSPACE_EXPORT_BYTES`; indexed PDFs are not retained, so only
+  their names and counts are included. The download is audited as `workspace.exported` without content.
 - Redaction is regex-based best effort and does not apply to the typed question.
