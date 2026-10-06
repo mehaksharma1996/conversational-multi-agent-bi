@@ -291,6 +291,6 @@ jobs:
             --ignore-vuln PYSEC-2026-3814 \
             --ignore-vuln PYSEC-2026-3815
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
