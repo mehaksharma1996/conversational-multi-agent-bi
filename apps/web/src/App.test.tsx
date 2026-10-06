@@ -27,7 +27,7 @@ import {
   workspaceFixture,
 } from "./test/fixtures";
 
-vi.mock("react-plotly.js", () => ({ default: () => <div data-testid="plotly-chart" /> }));
+vi.mock("./components/PlotlyChart", () => ({ default: () => <div data-testid="plotly-chart" /> }));
 vi.mock("./api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api/client")>();
   return {

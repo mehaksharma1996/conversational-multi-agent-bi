@@ -4,7 +4,7 @@ import type { Config, Data, Layout } from "plotly.js";
 import type { Analysis } from "../api/client";
 import { StatusBanner } from "./StatusBanner";
 
-const Plot = lazy(() => import("react-plotly.js"));
+const Plot = lazy(() => import("./PlotlyChart"));
 
 interface AnalysisDashboardProps {
   analysis: Analysis;
