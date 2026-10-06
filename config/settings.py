@@ -65,6 +65,7 @@ class Settings:
     max_chat_dataframes_retained: int = 10
     audit_log_dir: Path | None = None
     sweep_orphaned_workspaces: bool = False
+    durable_metadata: bool = False
     api_auth_mode: str = "local"
     oidc_issuer_url: str | None = None
     oidc_audience: str | None = None
@@ -412,6 +413,7 @@ def get_settings() -> Settings:
         max_chat_dataframes_retained=_non_negative_int("MAX_CHAT_DATAFRAMES_RETAINED", 10),
         audit_log_dir=_optional_path("AUDIT_LOG_DIR"),
         sweep_orphaned_workspaces=_flag("SWEEP_ORPHANED_WORKSPACES"),
+        durable_metadata=_flag("DURABLE_METADATA"),
         api_auth_mode=os.getenv("API_AUTH_MODE", "local").strip().lower(),
         oidc_issuer_url=_optional_text("OIDC_ISSUER_URL"),
         oidc_audience=_optional_text("OIDC_AUDIENCE"),

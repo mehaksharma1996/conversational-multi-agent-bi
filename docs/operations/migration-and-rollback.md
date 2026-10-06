@@ -16,8 +16,8 @@ compatibility surface. The two surfaces do not share an active workspace.
 What carries over: source files the user retained, exported reports/results, configuration supplied
 through environment variables, the model cache, and the content-free audit chain. What does not:
 workspace IDs, uploads, profiles, confirmed mappings, analyses, chat history, consent, reports,
-exports, SQLite tables, or Chroma indexes. API metadata is process-local and a restart loses the
-workspace even though audit/model volumes persist (ADR 0010).
+exports, SQLite tables, or Chroma indexes. Workspaces in the React/Compose product keep their own
+durable records (ADR 0022), but nothing is shared with Streamlit.
 
 ## Run both surfaces side by side
 
@@ -30,10 +30,29 @@ Use React at `127.0.0.1:8080` and Streamlit at `127.0.0.1:8501`. They use distin
 Do not treat a result in one surface as proof that the other is operating on the same dataset.
 Streamlit remains for diagnosis and compatibility comparison, not for new product features.
 
+## Workspace metadata: schema upgrades and the rollback boundary
+
+Durable workspace metadata (ADR 0022) is a SQLite database at `/data/api/.metadata/metadata.db` with
+forward-only migrations recorded in `schema_migrations`. On startup the API applies any pending
+migrations, each in its own transaction (a failed one rolls back and startup stops).
+
+- **Before an upgrade that changes the schema** (the release notes or the `schema_version` in the
+  `service.started` telemetry will say so), take and verify a workspace backup:
+  `python -m scripts.workspace_backup backup ...` then `verify ...`
+  ([local-containers.md](local-containers.md#backup-and-restore-workspace-state)).
+- **Rolling back to a build with an older schema is refused.** That build stops at startup with
+  "metadata schema vN is newer than this build" and leaves the database untouched. There are no
+  down-migrations. To roll back across a schema change: stop the API, restore the pre-upgrade backup with
+  `--replace`, then start the older build. Changes made after the backup are lost.
+- A rollback across a release with no schema change needs nothing beyond the steps below.
+- An unreadable database is quarantined as `metadata.db.corrupt-<UTC stamp>` and the API starts empty; the
+  workspace directories are kept (the orphan sweep is skipped on that start). Restore the latest backup to
+  recover, or inspect the quarantined file.
+
 ## Roll back an upgrade
 
-Record the current and previous known-good SHAs before changing versions. Active API work will be
-lost when the API restarts.
+Record the current and previous known-good SHAs before changing versions. Workspaces, consent, and uploads
+persist across the restart; datasets, analyses, chats, and indexes (not yet durable) will be lost.
 
 ```powershell
 docker compose down

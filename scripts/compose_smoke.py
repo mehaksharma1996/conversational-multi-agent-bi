@@ -224,11 +224,13 @@ def run_compose_checks(client: Client, timeout: float, csv_path: Path) -> None:
     survivor, _ = client.json(
         "POST", "/api/v1/workspaces", headers={"Idempotency-Key": uuid.uuid4().hex}, expect=201
     )
-    confirmed_dataset(client, survivor["id"], csv_path)
-    on_disk = compose(
-        "exec", "-T", "api", "sh", "-c", "find /data/api -mindepth 2 -maxdepth 2 -name 'ws_*'"
-    ).stdout.split()
+    survivor_dataset = confirmed_dataset(client, survivor["id"], csv_path)
+    find_workspaces = "find /data/api -mindepth 2 -maxdepth 2 -name 'ws_*'"
+    on_disk = compose("exec", "-T", "api", "sh", "-c", find_workspaces).stdout.split()
     check(len(on_disk) == 1, "the live workspace has files on the data volume")
+    # A directory no metadata row owns, as left by a crash or a lost database.
+    orphan = "/data/api/" + "c" * 32 + "/ws_" + "d" * 32
+    compose("exec", "-T", "api", "mkdir", "-p", orphan)
     before = audit_state()
     records_before = sum(item["records"] for item in before["tenants"].values())
     check(before["ok"] and records_before > 0, f"audit chain intact ({records_before} record(s))")
@@ -236,12 +238,18 @@ def run_compose_checks(client: Client, timeout: float, csv_path: Path) -> None:
     compose("restart", "api")
     client.wait_ready(timeout)
     check(True, "API healthy again after restart")
-    status, _, _ = client.request("GET", f"/api/v1/workspaces/{survivor['id']}")
-    check(status == 404, "workspace metadata is process-local and not restored (documented)")
-    leftovers = compose(
-        "exec", "-T", "api", "sh", "-c", "find /data/api -mindepth 2 -maxdepth 2 -name 'ws_*'"
-    ).stdout.strip()
-    check(leftovers == "", "orphaned workspace directories were swept at startup")
+    # Durable metadata (ADR 0022): the workspace and its uploaded file are recovered.
+    restored, _ = client.json("GET", f"/api/v1/workspaces/{survivor['id']}", expect=200)
+    check(restored["id"] == survivor["id"], "workspace metadata survived the restart")
+    client.json(
+        "POST", f"/api/v1/tabular-uploads/{survivor_dataset['upload_id']}/dataset", {}, expect=201
+    )
+    check(True, "uploaded file recovered; a dataset can be rebuilt from it")
+    leftovers = compose("exec", "-T", "api", "sh", "-c", find_workspaces).stdout.split()
+    check(
+        len(leftovers) == 1 and leftovers[0].endswith(survivor["id"]),
+        "only the recovered workspace remains; the orphaned directory was swept at startup",
+    )
     after = audit_state()
     records_after = sum(item["records"] for item in after["tenants"].values())
     check(after["ok"] and records_after > records_before, "audit chain survived and continues")

@@ -39,9 +39,14 @@ implied by enabling SQLite encryption.
 Implemented: the single-node envelope is enforced operationally (one API container), the API
 fails closed when storage is not writable, readiness checks the storage and audit volumes,
 orphaned workspace directories are swept at startup, and audit backup/restore with hash-chain
-verification exists. **Not implemented:** durable resource metadata, schema/index version
+verification exists. **Not implemented (as of Phase 7):** durable resource metadata, schema/index version
 metadata, migrations, restart recovery of workspaces, and backup/restore of workspace state.
 The resulting waiver of "survives restart" is recorded in [ADR 0010](0010-local-container-release.md).
+
+**Update (2026-10-06):** [ADR 0022](0022-durable-workspace-metadata.md) delivers the first slice: a versioned
+metadata database with forward-only migrations, startup reconciliation, and verified workspace backup/restore
+for workspaces, consent, and uploads. Dataset, analysis, conversation, and index recovery follow in slices
+12b and 12c.
 
 ## Invariants
 

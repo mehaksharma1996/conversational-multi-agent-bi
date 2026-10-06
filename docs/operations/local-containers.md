@@ -68,14 +68,21 @@ embedding model download; it is covered by the API tests and evaluations.
 
 | Volume | Mounted at | Holds | Persists across restart | Back up? |
 |---|---|---|---|---|
-| `bi-data` | `/data` | Per-workspace SQLite and Chroma files | Files do, but records do not (see below) | No |
+| `bi-data` | `/data` | Workspace metadata database (`api/.metadata/`), uploaded files, per-workspace SQLite and Chroma files | Workspaces, consent, and uploaded files do; datasets, analyses, chats, and indexes do not yet (see below) | **Yes** ([workspace backup](#backup-and-restore-workspace-state)) |
 | `bi-audit` | `/audit` | Append-only audit log (`<tenant>.jsonl`) | Yes | **Yes** |
 | `bi-models` | `/models` | Hugging Face model cache | Yes | Optional |
 
-**What a restart does.** API workspace metadata is process-local. After `docker compose restart api`
-(or any crash), in-progress workspaces are gone: users start a new workspace and re-upload. On
-startup the API deletes workspace directories no live process owns, so no unreachable user data
-lingers. The audit log is unaffected. This is a documented waiver, not a bug.
+**What a restart does.** Compose sets `DURABLE_METADATA=true` ([ADR 0022](../adr/0022-durable-workspace-metadata.md)).
+After `docker compose restart api` (or a crash) the API reopens a versioned SQLite metadata database,
+migrates it forward, and restores workspaces, their consent state, hashed idempotency keys, and uploaded
+files (each verified by SHA-256 when read). Expired workspaces are removed through the audited path, rows
+whose files are missing are dropped, and directories no row owns are swept. A user can resume the
+workspace and rebuild a dataset from the recovered upload. **Not yet recovered** (tracked in issue #12,
+slices 12b and 12c): datasets, analyses, reports, conversations, exports, and document indexes; the user
+re-runs those steps. Startup refuses to run on a database written by a newer build, and quarantines an
+unreadable database (`metadata.db.corrupt-<UTC stamp>`) without sweeping the directories it can no longer
+account for. Local development without Compose keeps the old process-local behaviour unless
+`DURABLE_METADATA=true` is set.
 
 Other knobs (limits, retention, retrieval distance) are environment variables listed in
 `.env.example`; add any of them under `environment:` in a `compose.override.yaml`.
@@ -84,7 +91,7 @@ Other knobs (limits, retention, retrieval distance) are environment variables li
 
 ```powershell
 docker compose stop                # stop, keep everything
-docker compose restart api         # restart the API (workspaces are lost, audit is kept)
+docker compose restart api         # restart the API (workspaces and uploads recover; see above)
 docker compose down                # remove containers, keep volumes
 docker compose down -v             # remove containers AND all volumes: a full reset
 ```
@@ -128,6 +135,42 @@ volume contents, verifies every tenant's hash chain, and only then restarts the 
 verification fails, the API stays stopped so you can investigate; nothing is deleted from your
 `backups/` directory. Backups contain no user content (audit records are content-free) but do
 contain opaque tenant identifiers, so treat them as internal.
+
+## Backup and restore (workspace state)
+
+`scripts/workspace_backup.py` writes one `.tar.gz` holding a consistent copy of the metadata database,
+every file of every workspace it knows, and a manifest of SHA-256 digests. Stop the API first for a clean
+point-in-time image of workspace files (the database copy is consistent either way):
+
+```powershell
+docker compose stop api
+mkdir backups -Force
+docker compose run --rm --no-deps -v "${PWD}/backups:/backup" --entrypoint python api `
+  -m scripts.workspace_backup backup --storage-root /data/api --output /backup/workspaces.tar.gz
+docker compose run --rm --no-deps -v "${PWD}/backups:/backup" --entrypoint python api `
+  -m scripts.workspace_backup verify /backup/workspaces.tar.gz
+docker compose up -d --wait api
+```
+
+`verify` and `restore` check every digest, reject unsafe archive paths, run SQLite integrity checks on the
+metadata and on any Chroma index database, and confirm ownership: each file lives under the tenant its row
+names, each upload matches its recorded digest, and no file exists that metadata does not own. To restore:
+
+```powershell
+docker compose stop api
+docker compose run --rm --no-deps -v "${PWD}/backups:/backup" --entrypoint python api `
+  -m scripts.workspace_backup restore /backup/workspaces.tar.gz --storage-root /data/api --replace
+docker compose up -d --wait api
+```
+
+Restore refuses while the database is in use, verifies before changing anything, and never deletes the
+previous state: with `--replace` it is moved to `/data/api.pre-restore-<UTC stamp>` for you to remove once
+satisfied. Backups contain uploaded user data; protect them like the data itself.
+
+The backup, verification, tamper, ownership, and restore logic is covered by `tests/test_workspace_backup.py`.
+The `docker compose run` invocations above are **not** exercised by CI. The containers run as uid 10001, so on
+Linux the host `backups/` directory must be writable by that user (for example `chmod 777 backups`, then remove
+the archive's world access afterwards); Docker Desktop on Windows and macOS needs no change.
 
 ## Upgrade
 
@@ -195,7 +238,8 @@ emit the API's audit events. Its disposition is governed by [ADR 0009](../adr/00
 
 ## Known limitations
 
-- Workspace metadata is process-local (waiver above); run exactly one API container.
+- Only workspaces, consent, and uploads are durable so far (slice 12a); datasets, analyses, chats, and
+  indexes are still process-local (waiver in ADR 0010, narrowed by ADR 0022). Run exactly one API container.
 - No user authentication; loopback only.
 - No worker, telemetry profile, image scanning, or SBOM yet (see ADR 0010 follow-ups).
 - Compose and the smoke test were validated in CI on Linux; other Docker hosts (Docker Desktop on

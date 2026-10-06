@@ -89,8 +89,9 @@ services:
     image: conversational-bi/api:local
     environment:
       <<: *app-environment
-      # Workspace metadata is process-local, so after a restart no user can reach the
-      # previous workspace directories. Remove them at startup (single API process only).
+      # Workspaces, consent, and uploaded files survive a restart (ADR 0022). Directories that
+      # no metadata row owns are removed at startup (single API process only).
+      DURABLE_METADATA: "true"
       SWEEP_ORPHANED_WORKSPACES: "true"
     volumes:
       - bi-data:/data       # per-workspace SQLite/Chroma files (short-lived)
