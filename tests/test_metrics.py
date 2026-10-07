@@ -263,3 +263,80 @@ def test_job_transitions_become_content_free_telemetry_and_metrics() -> None:
     for event in events:
         assert SECRET_QUESTION not in json.dumps(event.as_dict(), default=str)
         assert event.attributes["job_operation"] == "test.run"
+
+
+def test_gauges_are_sampled_at_scrape_time_and_a_failing_probe_is_skipped() -> None:
+    registry = MetricsRegistry()
+    value = {"now": 1.0}
+    registry.register_gauge("bi_demo_level", "Demo level.", lambda: {(): value["now"]})
+    registry.register_gauge("bi_demo_split", "Demo split.", lambda: {(("state", "a"),): 2.0})
+
+    def broken() -> dict[tuple[tuple[str, str], ...], float]:
+        raise OSError("probe failed with /private/path")
+
+    registry.register_gauge("bi_demo_broken", "Broken probe.", broken)
+
+    first = registry.render()
+    value["now"] = 7.0
+    second = registry.render()
+
+    assert "# TYPE bi_demo_level gauge" in first and "bi_demo_level 1" in first
+    assert "bi_demo_level 7" in second
+    assert 'bi_demo_split{state="a"} 2' in second
+    assert "bi_demo_broken" not in second and "/private/path" not in second
+
+
+def test_gauge_registration_rejects_unsafe_or_duplicate_names() -> None:
+    registry = MetricsRegistry()
+    registry.register_gauge("bi_ok", "Fine.", lambda: {(): 0.0})
+
+    for bad in ("ok", "bi_Upper", 'bi_x{y="z"}', "bi_ok"):
+        try:
+            registry.register_gauge(bad, "Nope.", lambda: {(): 0.0})
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad} should have been rejected")
+
+
+def test_render_does_not_deadlock_when_a_gauge_reads_state_guarded_by_another_lock() -> None:
+    import threading
+
+    registry = MetricsRegistry()
+    telemetry = Telemetry(registry)
+    guard = threading.Lock()
+
+    def sample() -> dict[tuple[tuple[str, str], ...], float]:
+        with guard:
+            return {(): 1.0}
+
+    registry.register_gauge("bi_locked", "Needs another lock.", sample)
+
+    def emit_while_holding_the_other_lock() -> None:
+        with guard:
+            telemetry.emit("agent.answer", route="sql", outcome="success")
+
+    worker = threading.Thread(target=emit_while_holding_the_other_lock)
+    worker.start()
+    for _ in range(50):
+        registry.render()
+    worker.join(timeout=30)
+    assert not worker.is_alive()
+
+
+def test_enabled_endpoint_exposes_job_and_data_volume_gauges_with_fixed_labels() -> None:
+    client = _app("metrics_gauges", metrics_enabled=True)
+
+    text = client.get("/metrics").text
+
+    assert "# TYPE bi_jobs_queued gauge" in text and "bi_jobs_queued 0" in text
+    assert "bi_jobs_running 0" in text
+    assert "bi_jobs_capacity 10" in text
+    for state in ("free", "total", "used"):
+        assert f'bi_data_volume_bytes{{state="{state}"}}' in text
+    assert "data" not in re.sub(r"bi_data_volume_bytes|application data directory", "", text)
+
+
+def test_gauges_are_absent_when_metrics_are_disabled() -> None:
+    client = _app("metrics_gauges_off")
+
+    assert client.get("/metrics").status_code == 404

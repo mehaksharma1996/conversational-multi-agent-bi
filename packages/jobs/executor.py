@@ -67,6 +67,16 @@ class JobContext:
 Work = Callable[[JobContext], object]
 
 
+@dataclass(frozen=True)
+class JobExecutorStats:
+    """Admission counters: ``queued + running`` never exceeds ``capacity``."""
+
+    queued: int
+    running: int
+    capacity: int
+    workers: int
+
+
 class InProcessJobExecutor:
     def __init__(
         self,
@@ -88,6 +98,19 @@ class InProcessJobExecutor:
         # slot or future of a retry that was started a moment after it failed.
         self._futures: dict[str, tuple[int, Future[None]]] = {}
         self._active: dict[str, int] = {}
+        self._max_workers = max_workers
+        self._running = 0
+
+    def stats(self) -> JobExecutorStats:
+        """Point-in-time admission state for scrape-time gauges; carries no job identity."""
+        with self._lock:
+            active = len(self._active)
+            return JobExecutorStats(
+                queued=max(0, active - self._running),
+                running=self._running,
+                capacity=self._capacity,
+                workers=self._max_workers,
+            )
 
     def submit(
         self,
@@ -207,11 +230,15 @@ class InProcessJobExecutor:
                 del self._futures[job_id]
 
     def _run(self, job_id: str, tenant_id: str, attempt: int) -> None:
+        counted_running = False
         try:
             try:
                 running = self._store.transition(job_id, tenant_id, JobStatus.RUNNING)
             except (JobConflictError, JobNotFoundError):
                 return  # cancelled, expired, or purged while queued
+            with self._lock:
+                self._running += 1
+            counted_running = True
             self._emit(running)
             with self._lock:
                 work = self._work.get(job_id)
@@ -244,6 +271,9 @@ class InProcessJobExecutor:
                 self._finish(job_id, tenant_id, JobStatus.SUCCEEDED, started, result=result)
                 self._forget(job_id)
         finally:
+            if counted_running:
+                with self._lock:
+                    self._running -= 1
             self._release(job_id, attempt)
 
     def _finish(

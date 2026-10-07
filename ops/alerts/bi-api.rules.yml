@@ -1,0 +1,89 @@
+# Prometheus alerting rules for the API's /metrics endpoint (issue #15).
+#
+# These are examples for an operator-run Prometheus-compatible store; the repository ships no
+# alertmanager or receiver and no notification target. Windows are short and burn-rate based so a
+# page is actionable; the 28-day objectives they protect are in docs/operations/slos.md. Every metric
+# referenced here is a family MetricsRegistry can emit (tests/test_alert_rules.py enforces that).
+groups:
+  - name: bi-api
+    rules:
+      - alert: BiApiErrorRateHigh
+        expr: |
+          sum(rate(bi_http_requests_total{status_class="5xx"}[10m]))
+            / sum(rate(bi_http_requests_total[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: More than 5% of API requests are failing with 5xx.
+          runbook: docs/operations/incident-debugging.md
+
+      - alert: BiBoundedRequestLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(bi_event_duration_ms_bucket{event="analysis.run"}[15m]))) > 30000
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: p95 of analysis.run exceeds the 30 s bounded-request objective.
+          runbook: docs/operations/incident-debugging.md
+
+      - alert: BiModelCallFailuresHigh
+        expr: |
+          sum(rate(bi_llm_calls_total{outcome="failure"}[15m]))
+            / sum(rate(bi_llm_calls_total[15m])) > 0.05
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than 5% of model calls fail; check the provider and fallback configuration.
+          runbook: docs/operations/incident-debugging.md
+
+      - alert: BiJobFailuresHigh
+        expr: |
+          sum(rate(bi_jobs_total{status="failed"}[30m]))
+            / (sum(rate(bi_jobs_total{status="succeeded"}[30m]))
+               + sum(rate(bi_jobs_total{status="failed"}[30m]))) > 0.01
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than 1% of finished jobs fail (cancellations excluded).
+          runbook: docs/operations/incident-debugging.md
+
+      - alert: BiJobQueueSaturated
+        expr: bi_jobs_queued + bi_jobs_running >= bi_jobs_capacity
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Job admission is at capacity, so new jobs are being refused.
+          runbook: docs/operations/incident-debugging.md
+
+      - alert: BiDataVolumeNearlyFull
+        expr: |
+          bi_data_volume_bytes{state="free"} / bi_data_volume_bytes{state="total"} < 0.10
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: Less than 10% of the data volume is free; uploads and audit writes may fail.
+          runbook: docs/operations/incident-debugging.md
+
+      - alert: BiTelemetryAllowlistViolation
+        expr: increase(bi_dropped_attributes_total[15m]) > 0
+        labels:
+          severity: page
+        annotations:
+          summary: A code path tried to emit a non-allowlisted telemetry attribute.
+          runbook: docs/operations/slos.md
+
+      - alert: BiMetricsMissing
+        expr: absent(bi_jobs_capacity)
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The API metrics endpoint is not being scraped or METRICS_ENABLED is off.
+          runbook: docs/operations/slos.md

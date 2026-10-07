@@ -13,7 +13,9 @@ convert; no client library or vendor SDK is required.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
+from collections.abc import Callable, Mapping
 from threading import Lock
 
 from packages.observability.errors import ERROR_CATEGORIES
@@ -27,6 +29,8 @@ _JOB_STATUSES = {"queued", "running", "succeeded", "failed", "cancelled", "expir
 _ERROR_CATEGORIES = set(ERROR_CATEGORIES)
 
 Labels = tuple[tuple[str, str], ...]
+GaugeSampler = Callable[[], Mapping[Labels, float]]
+_GAUGE_NAME = re.compile(r"bi_[a-z0-9_]+")
 
 
 def _escape(value: str) -> str:
@@ -66,6 +70,20 @@ class MetricsRegistry:
         self._counters: dict[str, dict[Labels, float]] = defaultdict(lambda: defaultdict(float))
         self._histograms: dict[str, dict[Labels, list[float]]] = defaultdict(dict)
         self._help: dict[str, str] = {}
+        self._gauges: dict[str, tuple[str, GaugeSampler]] = {}
+
+    def register_gauge(self, name: str, help_text: str, sample: GaugeSampler) -> None:
+        """Expose a point-in-time value that is read at scrape time, not derived from events.
+
+        ``sample`` must return only fixed, code-defined label values (never user content or
+        identifiers). A sampler that raises is skipped so ``/metrics`` stays available.
+        """
+        if not _GAUGE_NAME.fullmatch(name):
+            raise ValueError("Gauge names must match bi_[a-z0-9_]+.")
+        with self._lock:
+            if name in self._gauges or name in self._counters or name in self._histograms:
+                raise ValueError(f"Metric {name} is already registered.")
+            self._gauges[name] = (help_text, sample)
 
     # --- TelemetrySink -----------------------------------------------------------------------
 
@@ -228,6 +246,20 @@ class MetricsRegistry:
     def render(self) -> str:
         """Prometheus text format 0.0.4."""
         lines: list[str] = []
+        # Samplers run outside the lock: they may take their own locks (the job executor emits
+        # events while holding one), and a nested acquire in the other order would deadlock.
+        with self._lock:
+            gauges = sorted(self._gauges.items())
+        sampled: list[tuple[str, str, Mapping[Labels, float]]] = []
+        for name, (help_text, sample) in gauges:
+            try:
+                sampled.append((name, help_text, dict(sample())))
+            except Exception:  # a failing probe must not take the whole scrape down
+                continue
+        for name, help_text, values in sampled:
+            lines += [f"# HELP {name} {help_text}", f"# TYPE {name} gauge"]
+            for labels, value in sorted(values.items()):
+                lines.append(f"{name}{_format_labels(labels)} {value:g}")
         with self._lock:
             for name in sorted(self._counters):
                 lines += [f"# HELP {name} {self._help[name]}", f"# TYPE {name} counter"]

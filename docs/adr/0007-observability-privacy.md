@@ -39,7 +39,8 @@ spans. A bounded request-context map correlates background job events after the 
 
 Automatic framework, database, and HTTP-client instrumentation is deliberately excluded: those integrations
 can collect URLs, statements, headers, exception messages, or other values outside the allowlist. Still open
-under issue #15 are a local telemetry Compose profile, queue/storage/resource gauges, and alert rules. See
+under issue #15 are a local telemetry Compose profile and browser-side trace propagation; job and data-volume
+gauges (sampled at scrape time with fixed labels) and example alert rules are in place. See
 [evaluation, governance, and observability](../architecture/evaluation-governance-observability.md).
 
 ## Invariants
