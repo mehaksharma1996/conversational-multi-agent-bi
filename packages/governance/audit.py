@@ -178,8 +178,20 @@ class AuditRecorder:
             # The operation already happened; surface the gap loudly instead of
             # turning a completed action into a misleading failure.
             LOGGER.error("audit_write_failed action=%s", action)
+            self._telemetry.emit(
+                "audit.write",
+                tenant_id=tenant_id,
+                operation=action,
+                outcome="failure",
+            )
             self._telemetry.emit("audit.write_failed", tenant_id=tenant_id, outcome="failure")
             return None
+        self._telemetry.emit(
+            "audit.write",
+            tenant_id=tenant_id,
+            operation=action,
+            outcome="success",
+        )
         return event
 
 

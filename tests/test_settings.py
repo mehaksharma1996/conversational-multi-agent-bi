@@ -122,6 +122,14 @@ def test_debug_log_raw_content_reads_true(monkeypatch) -> None:
     assert get_settings().debug_log_raw_content is True
 
 
+def test_otlp_trace_export_is_off_by_default_and_reads_an_explicit_endpoint(monkeypatch) -> None:
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+    assert get_settings().otlp_traces_endpoint is None
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://collector:4317")
+    assert get_settings().otlp_traces_endpoint == "http://collector:4317"
+
+
 def test_retrieval_max_distance_defaults_to_evaluated_threshold(monkeypatch) -> None:
     monkeypatch.delenv("RETRIEVAL_MAX_DISTANCE", raising=False)
 

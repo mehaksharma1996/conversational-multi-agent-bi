@@ -29,12 +29,18 @@ no hosted vendor is selected here.
 - Cardinality and sensitive-field reviews become part of telemetry changes.
 - Service-level indicators can be derived consistently across execution modes.
 
-## Implementation status (Phase 6)
+## Implementation status (2026-10-06)
 
-Implemented for the FastAPI service: request-ID propagation, allowlist-only structured telemetry
-(`packages/observability/`), separate append-only audit events (`packages/governance/`), and safe error categories.
-Not implemented: metrics, tracing, an OpenTelemetry exporter, job IDs, and a local telemetry profile.
-See [evaluation, governance, and observability](../architecture/evaluation-governance-observability.md).
+Implemented for the FastAPI service: request-ID propagation; allowlist-only structured telemetry and
+Prometheus-format metrics (`packages/observability/`); separate append-only audit events
+(`packages/governance/`); safe error categories; and opt-in OTLP/gRPC trace export. Manual tracing accepts
+W3C trace context, creates one API server root, and turns already-sanitized telemetry events into child
+spans. A bounded request-context map correlates background job events after the HTTP root ends.
+
+Automatic framework, database, and HTTP-client instrumentation is deliberately excluded: those integrations
+can collect URLs, statements, headers, exception messages, or other values outside the allowlist. Still open
+under issue #15 are a local telemetry Compose profile, queue/storage/resource gauges, and alert rules. See
+[evaluation, governance, and observability](../architecture/evaluation-governance-observability.md).
 
 ## Invariants
 

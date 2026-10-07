@@ -1,7 +1,8 @@
 # Incident and debugging guide
 
-Scope: the local FastAPI + React deployment. There is no hosted telemetry stack, so diagnosis uses the
-process log, the audit files, and the evaluation suite. See
+Scope: the local FastAPI + React deployment. No hosted telemetry stack is bundled, so diagnosis uses the
+process log, the audit files, the evaluation suite, and an operator-provided OTLP backend when trace export
+is enabled. See
 [audit-and-observability.md](../governance/audit-and-observability.md) for what each records.
 
 ## 1. Start from the request ID
@@ -28,6 +29,12 @@ Get-Content data\audit\<tenant-id>.jsonl | Select-String '"request_id": "<the id
 ```
 
 Tenant IDs are opaque hashes of the identity; in local development mode there is one fixed tenant.
+
+If `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is configured, query the trace backend for
+`bi.request_id = "<the id>"`. The API root and its sanitized request, orchestration, model, storage, audit,
+and background-job spans share a trace. Absence of a trace is not an application failure: export is optional
+and exporter failures never change request or job outcomes. Check collector reachability and the API process
+log; do not add URL credentials or enable automatic content-capturing instrumentation as a workaround.
 
 To see *which model step* was slow, failing, or expensive, filter the same request ID for `llm.call` lines: each one has the step
 (`llm_purpose`), `duration_ms`, token counts when the provider reports them, `llm_retries`, and `outcome`. `agent.answer` carries the totals
