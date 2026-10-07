@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, nullcontext
+from pathlib import Path
 from time import perf_counter
 
 from fastapi import FastAPI, Request
@@ -30,7 +32,7 @@ from config.settings import Settings, get_settings
 from packages.analytics import TabularApplicationService
 from packages.connectors import AuditSink
 from packages.governance import JsonlAuditSink, record_configuration
-from packages.jobs import InMemoryJobStore, InProcessJobExecutor, JobEvent
+from packages.jobs import InMemoryJobStore, InProcessJobExecutor, JobEvent, JobExecutorStats
 from packages.observability import (
     FanOutTelemetrySink,
     LoggingTelemetrySink,
@@ -41,6 +43,7 @@ from packages.observability import (
     configure_telemetry_logging,
     new_request_id,
 )
+from packages.observability.metrics import Labels
 from packages.retrieval import DocumentApplicationService
 from src.documents.embedding import SentenceTransformerEmbedder, TextEmbedder
 from src.documents.embedding_cache import EmbeddingVectorCache
@@ -154,6 +157,10 @@ def create_app(
     application.state.job_executor = job_executor or InProcessJobExecutor(
         InMemoryJobStore(), observer=_job_observer(observability)
     )
+    if metrics_registry is not None:
+        _register_runtime_gauges(
+            metrics_registry, application.state.job_executor, active_settings.app_data_dir
+        )
     application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(
         observability,
         application.state.approval_checkpoints,
@@ -291,6 +298,41 @@ def _build_login_service(
     if sessions is None or not isinstance(provider, IdTokenVerifier):
         raise ValueError("Browser sign-in requires the OIDC identity provider and session store.")
     return OidcLoginService(settings=settings, verifier=provider, sessions=sessions)
+
+
+def _register_runtime_gauges(
+    registry: MetricsRegistry, executor: InProcessJobExecutor, data_dir: Path
+) -> None:
+    """Scrape-time gauges: job admission state and data-volume usage (fixed labels, no content)."""
+
+    def jobs(pick: Callable[[JobExecutorStats], int]) -> Callable[[], dict[Labels, float]]:
+        return lambda: {(): float(pick(executor.stats()))}
+
+    registry.register_gauge(
+        "bi_jobs_queued", "Jobs admitted and waiting for a worker.", jobs(lambda s: s.queued)
+    )
+    registry.register_gauge(
+        "bi_jobs_running", "Jobs currently executing on a worker.", jobs(lambda s: s.running)
+    )
+    registry.register_gauge(
+        "bi_jobs_capacity",
+        "Maximum jobs admitted at once (workers plus queue); admission beyond this is refused.",
+        jobs(lambda s: s.capacity),
+    )
+
+    def volume() -> dict[Labels, float]:
+        usage = shutil.disk_usage(data_dir)
+        return {
+            (("state", "free"),): float(usage.free),
+            (("state", "total"),): float(usage.total),
+            (("state", "used"),): float(usage.used),
+        }
+
+    registry.register_gauge(
+        "bi_data_volume_bytes",
+        "Bytes on the volume that holds the application data directory, by state.",
+        volume,
+    )
 
 
 def _build_reranker(settings: Settings) -> Reranker | None:

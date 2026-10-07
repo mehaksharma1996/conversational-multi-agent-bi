@@ -47,6 +47,15 @@ parent, request/job correlation, default-off behavior, and adversarial content e
 | `bi_rate_limited_total` | counter | `operation` | Requests refused by a rate limit |
 | `bi_retrieval_rejected_total` | counter | none | Retrieval candidates rejected by the distance threshold |
 | `bi_dropped_attributes_total` | counter | none | Attributes the allowlist rejected; should stay at zero |
+| `bi_jobs_queued` | gauge | none | Jobs admitted and waiting for a worker (read at scrape time) |
+| `bi_jobs_running` | gauge | none | Jobs currently executing |
+| `bi_jobs_capacity` | gauge | none | Workers plus queue slots; `queued + running` at this value means new jobs are refused |
+| `bi_data_volume_bytes` | gauge | `state` (`free`, `total`, `used`) | Bytes on the volume holding `APP_DATA_DIR` |
+
+Gauges are sampled when `/metrics` is scraped, with fixed code-defined labels. A probe that fails (for example
+the data directory is unreadable) is omitted from that scrape instead of failing it. Process memory is not a
+gauge here: the API has no process-stats dependency, and memory limits and usage belong to the container
+runtime (for example cgroup or cAdvisor metrics), which also knows the limit being enforced.
 
 ## SLIs and objectives
 
@@ -106,7 +115,16 @@ attribute query for `bi.request_id = "<id>"` to find a trace from the ID shown i
 
 - **An optional Compose profile** that scrapes `/metrics` and demonstrates diagnosing injected failures.
   Requires a digest-pinned, non-root metrics image and loopback-only publishing.
-- **Job gauges**: transitions and outcomes are exported, but there is no queue-depth or in-flight gauge; a
-  gauge needs the executor to report its own state, which is a separate change.
-- **Storage and resource-limit gauges** (volume usage, memory): not derived from request events.
-- **Alerting rules.** The objectives above are written as queries, not as alerts.
+- **Browser-side spans**: the React client sends a random W3C `traceparent` on every API request
+  (`apps/web/src/api/traceparent.ts`; no `tracestate`, `baggage`, or user data), so the API trace is a child of that
+  ID. The browser exports no spans of its own, so the parent span ID has no matching span in a backend.
+- **Container memory and CPU limits**: left to the container runtime's own metrics (see the gauge note above).
+
+## Alerting rules
+
+[`ops/alerts/bi-api.rules.yml`](../../ops/alerts/bi-api.rules.yml) holds example Prometheus-format rules: 5xx
+rate, bounded-request latency, model-call failures, job failures, job-queue saturation, data-volume headroom,
+the allowlist canary, and missing metrics. They use short burn-rate windows rather than the 28-day objectives
+and name `severity: page` or `ticket`. The repository ships no Alertmanager or notification receiver; wiring
+those is deployment-specific. `tests/test_alert_rules.py` fails if a rule references a metric the API cannot
+expose, so a renamed family cannot silently disable an alert.

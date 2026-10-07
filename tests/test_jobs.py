@@ -199,6 +199,54 @@ def test_admission_is_bounded_and_concurrency_never_exceeds_workers(make) -> Non
     assert _submit(executor, lambda _context: None)[1], "capacity frees up after jobs finish"
 
 
+def test_stats_report_queued_running_and_capacity_and_return_to_idle(make) -> None:
+    _, executor = make(max_workers=1, max_queued=2)
+    started = threading.Event()
+    gate = threading.Event()
+
+    def blocker(_context: JobContext) -> None:
+        started.set()
+        gate.wait(WAIT)
+
+    assert (executor.stats().queued, executor.stats().running) == (0, 0)
+    first, _ = _submit(executor, blocker)
+    assert started.wait(WAIT)
+    second, _ = _submit(executor, lambda _context: None)
+
+    busy = executor.stats()
+    assert (busy.queued, busy.running, busy.capacity, busy.workers) == (1, 1, 3, 1)
+
+    gate.set()
+    executor.wait(first.id, TENANT, WAIT)
+    executor.wait(second.id, TENANT, WAIT)
+    idle = executor.stats()
+    assert (idle.queued, idle.running) == (0, 0)
+
+
+def test_stats_stay_consistent_when_a_queued_job_is_cancelled_or_a_job_fails(make) -> None:
+    _, executor = make(max_workers=1, max_queued=1)
+    started = threading.Event()
+    gate = threading.Event()
+
+    def failing(_context: JobContext) -> None:
+        started.set()
+        gate.wait(WAIT)
+        raise RuntimeError("private detail")
+
+    blocker, _ = _submit(executor, failing, max_attempts=1)
+    assert started.wait(WAIT)
+    queued, _ = _submit(executor, lambda _context: None)
+    executor.cancel(queued.id, TENANT)
+
+    gate.set()
+    executor.wait(blocker.id, TENANT, WAIT)
+    executor.wait(queued.id, TENANT, WAIT)
+
+    stats = executor.stats()
+    assert (stats.queued, stats.running) == (0, 0)
+    assert executor.get(blocker.id, TENANT).status is JobStatus.FAILED
+
+
 def test_cancelling_a_queued_job_prevents_it_from_ever_running(make) -> None:
     _, executor = make(max_workers=1, max_queued=1)
     gate = threading.Event()

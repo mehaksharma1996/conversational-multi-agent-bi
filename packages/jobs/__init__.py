@@ -12,7 +12,7 @@ from packages.jobs.contract import (
     JobRecord,
     JobStatus,
 )
-from packages.jobs.executor import InProcessJobExecutor, JobContext
+from packages.jobs.executor import InProcessJobExecutor, JobContext, JobExecutorStats
 from packages.jobs.store import InMemoryJobStore
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     "JobContext",
     "JobError",
     "JobEvent",
+    "JobExecutorStats",
     "JobNotFoundError",
     "JobQueueFullError",
     "JobRecord",
