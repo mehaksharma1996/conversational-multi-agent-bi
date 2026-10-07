@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from packages.evaluation.fakes import HashingEmbedder
+from packages.evaluation.fakes import HashingEmbedder, OverlapReranker
 from packages.evaluation.fixtures import FixtureSet
 from src.documents.chunker import chunk_document_pages
 from src.documents.retriever import DocumentRetriever
@@ -106,6 +106,16 @@ class EvaluationEnvironment:
             max_distance=hybrid.max_distance,
             default_top_k=hybrid.default_top_k,
             hybrid=False,
+        )
+
+    def reranked_retriever(self, name: str) -> DocumentRetriever:
+        """The production retriever plus the deterministic reranker (opt-in in production)."""
+        hybrid = self.retriever(name)
+        return DocumentRetriever(
+            hybrid.store,
+            max_distance=hybrid.max_distance,
+            default_top_k=hybrid.default_top_k,
+            reranker=OverlapReranker(),
         )
 
     def close(self) -> None:

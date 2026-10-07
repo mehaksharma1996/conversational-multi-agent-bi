@@ -35,9 +35,9 @@ code, an identifier, a rare word) was never retrieved when many other chunks res
 
 ## Deferred
 
-A cross-encoder reranker (needs a model download, image-size and `HF_HUB_OFFLINE` decisions), model-backed query
-rewriting (must be gated by `LOCAL_ONLY_MODE`, consent, and PII redaction), DOCX/HTML ingestion, OCR, and API exposure of
-filters. They are independent of this change and tracked on issue #26.
+Model-backed query rewriting (must be gated by `LOCAL_ONLY_MODE`, consent, and PII redaction), DOCX/HTML ingestion, OCR,
+and API exposure of filters. They are independent of this change and tracked on issue #26. The cross-encoder reranker
+was decided separately in [ADR 0023](0023-optional-local-reranker.md).
 
 ## Consequences
 

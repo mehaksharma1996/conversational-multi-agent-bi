@@ -9,10 +9,12 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Sequence
 from copy import deepcopy
 from hashlib import sha256
 from typing import Any
 
+from src.documents.lexical import query_terms, tokenize
 from src.documents.retriever import RetrievalResult, Retriever
 from src.llm.base import LLMClient, LLMGenerationError, LLMResponse
 
@@ -176,6 +178,22 @@ def _terms(text: str) -> list[str]:
             continue
         terms.append(raw[:-1] if raw.endswith("s") and len(raw) > 3 else raw)
     return terms
+
+
+class OverlapReranker:
+    """Deterministic stand-in cross-encoder: the share of distinctive question terms in a chunk.
+
+    It uses no labels, so it can regress; it proves the reranking *pipeline* (reordering, refusal
+    safety, metrics) offline and says nothing about a real cross-encoder's quality.
+    """
+
+    name = "term-overlap-v1"
+
+    def score(self, question: str, texts: Sequence[str]) -> list[float]:
+        wanted = set(query_terms(question))
+        if not wanted:
+            return [0.0] * len(texts)
+        return [len(wanted & set(tokenize(text))) / len(wanted) for text in texts]
 
 
 class RecordingRetriever:

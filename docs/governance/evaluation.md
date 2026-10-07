@@ -82,7 +82,13 @@ visible: on the committed fixtures hybrid retrieval has recall@k 1.0 and MRR 0.8
 `retrieval_metrics_min` (recall@k 1.0, MRR 0.5) fails the gate when a metric drops. These are *offline, hashing-embedder* figures; they say
 nothing about the real SentenceTransformer's behavior (see issue #14 for calibrated real-model evaluation).
 
-The scoring and fusion constants (`rrf_k`, BM25 `k1`/`b`, `min_term_coverage`, `max_rare_document_fraction`) are recorded under
+Every retrieval case is also run through a deterministic term-overlap stand-in for the optional cross-encoder reranker
+([ADR 0023](../adr/0023-optional-local-reranker.md)). Each case must satisfy `retrieval.rerank_no_regression` (same refusals and result count,
+recall and reciprocal rank no lower), and `aggregate.retrieval_metrics` adds `rerank_recall_at_k` and `rerank_mrr` (1.0 and 0.9 on the committed
+fixtures, against 1.0 and 0.8 without it), gated by the matching `retrieval_metrics_min` entries. The stand-in uses no labels and proves the pipeline,
+refusal safety, and metrics only; it says nothing about a real cross-encoder.
+
+The scoring and fusion constants (`rrf_k`, BM25 `k1`/`b`, `min_term_coverage`, `max_rare_document_fraction`, the reranker identity) are recorded under
 `retrieval_settings.hybrid` in the baseline, so changing any of them is a reviewed baseline change like a prompt edit.
 
 ## Hard failures versus thresholds

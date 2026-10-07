@@ -51,6 +51,13 @@ EXPECT_KEYS = {
     "trajectory",
 }
 RETRIEVAL_CASE_KEYS = {"id", "corpus", "question", "rationale", "k", "evidence", "expect"}
+RETRIEVAL_METRIC_NAMES = {
+    "recall_at_k",
+    "precision_at_k",
+    "mrr",
+    "rerank_recall_at_k",
+    "rerank_mrr",
+}
 RETRIEVAL_REQUIRED_KEYS = {"id", "corpus", "question", "rationale", "evidence", "expect"}
 APPROVAL_KEYS = {"decision", "sql"}
 SQL_EXPECT_KEYS = {
@@ -234,7 +241,7 @@ def _validate_thresholds(thresholds: dict[str, Any]) -> None:
         if route not in {"sql", "rag", "hybrid", "memory", "unsupported"} or int(budget) < 0:
             raise FixtureError(f"trajectory_max_model_calls has an invalid entry: {route}.")
     for metric, minimum in thresholds.get("retrieval_metrics_min", {}).items():
-        if metric not in {"recall_at_k", "precision_at_k", "mrr"} or not 0 < float(minimum) <= 1:
+        if metric not in RETRIEVAL_METRIC_NAMES or not 0 < float(minimum) <= 1:
             raise FixtureError(f"retrieval_metrics_min has an invalid entry: {metric}.")
     waivers = thresholds.get("waivers", {})
     for capability, minimum in thresholds["capability_min_pass_rate"].items():
