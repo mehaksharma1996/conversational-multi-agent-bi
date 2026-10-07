@@ -36,6 +36,7 @@ from packages.observability import (
     LoggingTelemetrySink,
     MetricsRegistry,
     TelemetrySink,
+    TraceManager,
     bind_request_id,
     configure_telemetry_logging,
     new_request_id,
@@ -60,6 +61,7 @@ def create_app(
     rate_limiter: InMemoryRateLimiter | None = None,
     embedding_cache: EmbeddingVectorCache | None = None,
     job_executor: InProcessJobExecutor | None = None,
+    trace_manager: TraceManager | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
@@ -110,15 +112,23 @@ def create_app(
     )
     if telemetry_sink is None:
         configure_telemetry_logging()
-    # Metrics are derived from the same allowlisted events as the logs and are served only when
-    # explicitly enabled; they carry no content, identity, or secrets
-    # (packages/observability/metrics.py).
+    # Metrics and traces are derived from the same allowlisted events as the logs. Tracing remains
+    # completely disabled unless an endpoint is configured (packages/observability/tracing.py).
     metrics_registry = MetricsRegistry() if active_settings.metrics_enabled else None
     application.state.metrics_registry = metrics_registry
+    active_trace_manager = trace_manager
+    if active_trace_manager is None and active_settings.otlp_traces_endpoint is not None:
+        active_trace_manager = TraceManager.from_otlp_endpoint(active_settings.otlp_traces_endpoint)
+    application.state.trace_manager = active_trace_manager
     base_sink = telemetry_sink or LoggingTelemetrySink()
+    telemetry_sinks = [base_sink]
+    if metrics_registry is not None:
+        telemetry_sinks.append(metrics_registry)
+    if active_trace_manager is not None:
+        telemetry_sinks.append(active_trace_manager.telemetry_sink)
     observability = ApiObservability.create(
         telemetry_sink=(
-            FanOutTelemetrySink([base_sink, metrics_registry]) if metrics_registry else base_sink
+            FanOutTelemetrySink(telemetry_sinks) if len(telemetry_sinks) > 1 else base_sink
         ),
         audit_sink=audit_sink
         or JsonlAuditSink(
@@ -175,23 +185,41 @@ def create_app(
         request.state.request_id = request_id
         started = perf_counter()
         status_code = 500
-        with bind_request_id(request_id):
+        observed = not request.url.path.startswith(("/health/", "/metrics"))
+        tracing = (
+            active_trace_manager.request_span(
+                method=request.method,
+                request_id=request_id,
+                propagation_headers=request.headers,
+            )
+            if active_trace_manager is not None and observed
+            else nullcontext(None)
+        )
+        with bind_request_id(request_id), tracing as request_span:
             try:
                 response = await call_next(request)
                 status_code = response.status_code
                 response.headers["X-Request-ID"] = request_id
                 return response
             finally:
-                if not request.url.path.startswith(("/health/", "/metrics")):
+                if observed:
                     route = request.scope.get("route")
+                    route_path = getattr(route, "path", "unmatched")
+                    error_code = getattr(request.state, "error_code", None)
                     observability.telemetry.emit(
                         "http.request",
                         http_method=request.method,
-                        http_route=getattr(route, "path", "unmatched"),
+                        http_route=route_path,
                         status_code=status_code,
                         duration_ms=(perf_counter() - started) * 1000,
-                        error_code=getattr(request.state, "error_code", None),
+                        error_code=error_code,
                     )
+                    if request_span is not None:
+                        request_span.finish(
+                            route=route_path,
+                            status_code=status_code,
+                            error_code=error_code,
+                        )
 
     install_exception_handlers(application)
 
@@ -297,6 +325,7 @@ def _record_configuration(settings: Settings, observability: ApiObservability) -
         "local_only_mode": settings.local_only_mode,
         "api_auth_mode": settings.api_auth_mode,
         "durable_metadata": settings.durable_metadata,
+        "trace_export_enabled": settings.otlp_traces_endpoint is not None,
         "session_retention_hours": settings.session_retention_hours,
         "sweep_orphaned_workspaces": settings.sweep_orphaned_workspaces,
         "hosted_recipients": "+".join(settings.hosted_recipients()),
@@ -372,6 +401,9 @@ def _stop(app: FastAPI) -> None:
     app.state.job_executor.shutdown()
     app.state.repository.close()
     app.state.observability.telemetry.emit("service.stopped")
+    trace_manager: TraceManager | None = app.state.trace_manager
+    if trace_manager is not None:
+        trace_manager.shutdown()
 
 
 def _workspace_lifecycle_listener(

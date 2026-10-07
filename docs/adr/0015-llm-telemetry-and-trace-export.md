@@ -1,4 +1,4 @@
-# ADR 0015: Content-free LLM call telemetry; no trace export yet
+# ADR 0015: Content-free LLM call telemetry and trace-export boundary
 
 - Status: Accepted
 - Date: 2026-10-05
@@ -26,12 +26,11 @@ Issue #25 also proposes optional OpenTelemetry export and a local Langfuse/Phoen
    produce `llm_estimated_cost_microusd` (an integer, because telemetry floats round to three decimals).
 5. **Per-answer totals** are collected in a per-question context and stored in `AnswerDiagnostics`, which
    telemetry, the provenance summary, and the evaluation harness already share.
-6. **No trace exporter and no Langfuse/Phoenix profile in this change.** The deployment gap this would fill is
-   the exporter delivered under issue #15; adding a second export path here would duplicate it. When #15 lands,
-   spans must be built from `LLMCallRecord` only (purpose, provider, model, duration, counts, outcome), with
-   any content-capture feature of the tracing tool disabled and that asserted by a test. A profile must stay
-   out of default `compose.yaml`, loopback-only, digest-pinned, and non-root. Content-bearing tracing for
-   local debugging would conflict with ADR 0007 and needs its own ADR.
+6. **Trace export is implemented once under issue #15, not in the LLM wrapper.** The trace sink receives the
+   already-sanitized `llm.call` event (purpose, provider, model, duration, counts, outcome) alongside other
+   telemetry events. It never reads `LLMCallRecord`, a prompt, or a completion. A future local profile must
+   stay out of the default Compose topology, loopback-only, digest-pinned, and non-root. Content-bearing
+   tracing for local debugging would conflict with ADR 0007 and needs its own ADR.
 
 ## Consequences
 
@@ -47,13 +46,28 @@ Issue #25 also proposes optional OpenTelemetry export and a local Langfuse/Phoen
 - Observation failures never change the outcome of a model call.
 - Every new telemetry attribute is added to `ALLOWED_ATTRIBUTES` with a declared shape.
 
-## Addendum (2026-10-06): metrics, not traces
+## Addendum (2026-10-06): metrics
 
-Issue #15 asks for vendor-neutral export. This ADR's deferral of trace export stands (spans need an SDK
-dependency, an image-size and license review, and their own privacy tests). What was added instead needs no
-dependency: `MetricsRegistry`, a `TelemetrySink` that derives counters and histograms from the same allowlisted
-events and serves them in Prometheus text format at `GET /metrics` when `METRICS_ENABLED=true`. Its labels are
+Issue #15 asks for vendor-neutral export. `MetricsRegistry`, a `TelemetrySink`, derives counters and
+histograms from the same allowlisted events and serves them in Prometheus text format at `GET /metrics` when
+`METRICS_ENABLED=true`. Its labels are
 allowlisted tokens only, enumerated labels accept known values only, and each label is capped at 64 distinct
 values, so it cannot become a side channel for content or identity. It is off by default, outside `/api`, and
 not proxied by the bundled web server. SLIs, objectives, and operator queries are in
-[slos.md](../operations/slos.md). Trace export remains open under #15.
+[slos.md](../operations/slos.md).
+
+## Addendum (2026-10-06): opt-in OTLP traces
+
+`TraceManager` owns a private OpenTelemetry `TracerProvider` and OTLP/gRPC `BatchSpanProcessor`; it never
+installs a global provider. Trace export is absent unless `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set. The
+endpoint must be a credential-free `http(s)` origin, and exporter shutdown uses a bounded flush. Manual
+instrumentation is the privacy control: an API root gets only method, route *template*, status, safe error
+code, and the opaque request ID; child spans come only from sanitized `TelemetryEvent` values. Exception
+recording is disabled. An incoming W3C `traceparent` supplies the parent without accepting `tracestate` or
+exporting request headers, and
+a bounded map retains the root `SpanContext` for background job events.
+
+The SDK and OTLP/gRPC exporter were already present in `requirements.lock` and the API image through
+ChromaDB, so making them direct application dependencies adds no package or image-size delta. They remain
+covered by the offline license policy and container Trivy/size gates. The optional collector/profile remains
+deferred under #15.

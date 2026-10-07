@@ -97,6 +97,25 @@ def test_sink_failure_is_reported_without_raising() -> None:
 
     assert recorder.record("workspace.created", tenant_id=TENANT_A) is None
     assert telemetry_sink.named("audit.write_failed")
+    failed = telemetry_sink.named("audit.write")
+    assert len(failed) == 1
+    assert failed[0].attributes == {"operation": "workspace.created", "outcome": "failure"}
+
+
+def test_successful_audit_write_emits_content_free_boundary_telemetry() -> None:
+    telemetry_sink = InMemoryTelemetrySink()
+    recorder = AuditRecorder(InMemoryAuditSink(), Telemetry(telemetry_sink))
+
+    recorder.record(
+        "workspace.created",
+        tenant_id=TENANT_A,
+        resource_id="ws_" + "0" * 32,
+        question="What did Jane Doe spend?",
+    )
+
+    (event,) = telemetry_sink.named("audit.write")
+    assert event.attributes == {"operation": "workspace.created", "outcome": "success"}
+    assert "Jane" not in json.dumps(event.as_dict())
 
 
 def test_jsonl_sink_isolates_tenants_and_chains_hashes() -> None:

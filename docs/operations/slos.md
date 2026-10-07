@@ -14,12 +14,22 @@ from [ADR 0007](../adr/0007-observability-privacy.md).
    **off by default**. Enable with `METRICS_ENABLED=true` (see `.env.example`). The path is outside `/api`, is
    not in the OpenAPI contract, and is not proxied by the bundled nginx image, so it is reachable only from
    wherever the API port itself is reachable. Expose it to your scraper and nobody else.
+3. **OpenTelemetry traces** over OTLP/gRPC, also derived from the allowlisted events and **off by default**.
+   Set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to a credential-free `http(s)` collector origin. The exporter
+   follows the standard OpenTelemetry Python SDK pattern of a private `TracerProvider` with a batched OTLP
+   exporter; see the [OpenTelemetry exporter guide](https://opentelemetry.io/docs/languages/python/exporters/).
 
 Metrics never contain questions, SQL, result rows, document text, prompts, file names, resource or tenant
 identifiers, request IDs, or secrets. Label values are limited to allowlisted tokens (event names, route
 *templates*, outcomes, safe error categories, answer routes, provider and model names, status classes),
 enumerated labels accept only their known values, and each label is capped at 64 distinct values (excess
 becomes `other`). `tests/test_metrics.py` proves each of these properties.
+
+Trace event spans contain the same sanitized attributes, plus opaque hashed tenant/reference IDs where
+applicable. API roots contain only method, route template, status, safe error code, and the server-generated
+request ID. No automatic framework/database instrumentation or exception recording is enabled. Endpoint URL
+credentials, paths, queries, and fragments are rejected at startup. `tests/test_tracing.py` checks the W3C
+parent, request/job correlation, default-off behavior, and adversarial content exclusion.
 
 ## Metric families
 
@@ -85,10 +95,15 @@ category) carries the `request_id` of the request that created it, so a slow or 
 same `jq` query as any other request. Job IDs appear in the job's HTTP representation but are deliberately not
 telemetry attributes or metric labels (they are unbounded identifiers).
 
+When tracing is enabled, an incoming W3C `traceparent` becomes the parent of the API server span;
+`tracestate` is deliberately ignored because it can carry vendor-defined text. Sanitized
+request, orchestration, provider, persistence, and audit events become child spans. The service retains at
+most 10,000 request-to-span contexts in memory so a background `job.transition` emitted after the HTTP span
+has ended remains in the same trace; job and workspace IDs are still not span attributes. Use the backend's
+attribute query for `bi.request_id = "<id>"` to find a trace from the ID shown in the UI.
+
 ## Not done yet (remaining in #15)
 
-- **Trace export** (OpenTelemetry spans, OTLP). Metrics and logs are covered; spans would need an SDK
-  dependency, an image-size and license review, and its own privacy tests. ADR 0015 records the deferral.
 - **An optional Compose profile** that scrapes `/metrics` and demonstrates diagnosing injected failures.
   Requires a digest-pinned, non-root metrics image and loopback-only publishing.
 - **Job gauges**: transitions and outcomes are exported, but there is no queue-depth or in-flight gauge; a

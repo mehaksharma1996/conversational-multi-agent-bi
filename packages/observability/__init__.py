@@ -22,6 +22,12 @@ from packages.observability.telemetry import (
     sanitize_attributes,
     tenant_reference,
 )
+from packages.observability.tracing import (
+    RequestSpan,
+    TraceManager,
+    TracingTelemetrySink,
+    validate_otlp_traces_endpoint,
+)
 
 __all__ = [
     "ALLOWED_ATTRIBUTES",
@@ -33,9 +39,12 @@ __all__ = [
     "MetricsRegistry",
     "NullTelemetrySink",
     "OperationTracker",
+    "RequestSpan",
     "Telemetry",
     "TelemetryEvent",
     "TelemetrySink",
+    "TraceManager",
+    "TracingTelemetrySink",
     "bind_request_id",
     "clean_attribute",
     "configure_telemetry_logging",
@@ -44,4 +53,5 @@ __all__ = [
     "new_request_id",
     "sanitize_attributes",
     "tenant_reference",
+    "validate_otlp_traces_endpoint",
 ]
