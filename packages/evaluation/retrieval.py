@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from packages.evaluation.environment import EvaluationEnvironment
+from packages.evaluation.fakes import OverlapReranker
 from packages.evaluation.fixtures import FixtureSet
 from packages.evaluation.models import CaseResult, Check
 from src.documents.lexical import (
@@ -39,6 +40,7 @@ def hybrid_settings() -> dict[str, Any]:
         "bm25_b": BM25_B,
         "min_term_coverage": MIN_TERM_COVERAGE,
         "max_rare_document_fraction": MAX_RARE_DOCUMENT_FRACTION,
+        "reranker": OverlapReranker.name,
     }
 
 
@@ -50,6 +52,7 @@ class RankedRun:
     reciprocal_rank: float
     returned: int
     lexical_only: int
+    reranked: int = 0
 
 
 def run_retrieval_cases(
@@ -60,17 +63,20 @@ def run_retrieval_cases(
     results: list[CaseResult] = []
     runs: list[RankedRun] = []
     control_runs: list[RankedRun] = []
+    reranked_runs: list[RankedRun] = []
     for case in fixtures.retrieval_cases if cases is None else cases:
         hybrid = environment.retriever(case["corpus"])
         dense = environment.dense_retriever(case["corpus"])
         k = int(case.get("k", fixtures.retrieval["top_k"]))
         run = _rank(hybrid, case, k)
         control = _rank(dense, case, k)
+        reranked = _rank(environment.reranked_retriever(case["corpus"]), case, k)
         if case["evidence"]:
             runs.append(run)
             control_runs.append(control)
-        results.append(_case_result(case, run, control))
-    return results, _metrics(runs, control_runs)
+            reranked_runs.append(reranked)
+        results.append(_case_result(case, run, control, reranked))
+    return results, _metrics(runs, control_runs, reranked_runs)
 
 
 def _rank(retriever: DocumentRetriever, case: dict[str, Any], k: int) -> RankedRun:
@@ -92,10 +98,13 @@ def _rank(retriever: DocumentRetriever, case: dict[str, Any], k: int) -> RankedR
         reciprocal_rank=(1.0 / first) if first else 0.0,
         returned=len(chunks),
         lexical_only=result.lexical_only_accepted,
+        reranked=result.reranked,
     )
 
 
-def _case_result(case: dict[str, Any], run: RankedRun, control: RankedRun) -> CaseResult:
+def _case_result(
+    case: dict[str, Any], run: RankedRun, control: RankedRun, reranked: RankedRun
+) -> CaseResult:
     expect = case["expect"]
     checks = [Check("crash.none", True)]
     if expect["hybrid"] == "hit":
@@ -119,6 +128,17 @@ def _case_result(case: dict[str, Any], run: RankedRun, control: RankedRun) -> Ca
             f"expected {expect['dense_control']}, observed {observed_control}",
         )
     )
+    checks.append(
+        Check(
+            "retrieval.rerank_no_regression",
+            reranked.refused == run.refused
+            and reranked.returned == run.returned
+            and reranked.recall >= run.recall
+            and reranked.reciprocal_rank >= run.reciprocal_rank,
+            f"mrr {run.reciprocal_rank:.2f} -> {reranked.reciprocal_rank:.2f}, "
+            f"returned {run.returned} -> {reranked.returned}",
+        )
+    )
     return CaseResult(
         id=case["id"],
         capability=CAPABILITY,
@@ -132,11 +152,15 @@ def _case_result(case: dict[str, Any], run: RankedRun, control: RankedRun) -> Ca
             "recall_at_k": run.recall if case["evidence"] else None,
             "reciprocal_rank": run.reciprocal_rank if case["evidence"] else None,
             "dense_control_recall_at_k": control.recall if case["evidence"] else None,
+            "rerank_reciprocal_rank": reranked.reciprocal_rank if case["evidence"] else None,
+            "retrieval_reranked": reranked.reranked,
         },
     )
 
 
-def _metrics(runs: list[RankedRun], control_runs: list[RankedRun]) -> dict[str, Any]:
+def _metrics(
+    runs: list[RankedRun], control_runs: list[RankedRun], reranked_runs: list[RankedRun]
+) -> dict[str, Any]:
     def mean(values: list[float]) -> float | None:
         return round(sum(values) / len(values), 4) if values else None
 
@@ -147,4 +171,6 @@ def _metrics(runs: list[RankedRun], control_runs: list[RankedRun]) -> dict[str, 
         "mrr": mean([run.reciprocal_rank for run in runs]),
         "dense_control_recall_at_k": mean([run.recall for run in control_runs]),
         "dense_control_mrr": mean([run.reciprocal_rank for run in control_runs]),
+        "rerank_recall_at_k": mean([run.recall for run in reranked_runs]),
+        "rerank_mrr": mean([run.reciprocal_rank for run in reranked_runs]),
     }

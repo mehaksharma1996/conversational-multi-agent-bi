@@ -29,6 +29,7 @@ React/FastAPI runtime became the primary local product.
 | [0020](0020-in-process-execution-and-job-contract.md) | In-process execution with a bounded job contract; worker deferred | Accepted |
 | [0021](0021-vector-store-encryption-waiver.md) | Vector-store encryption at rest waived until 2027-01-31, with compensating controls | Accepted (time-bounded waiver) |
 | [0022](0022-durable-workspace-metadata.md) | Durable workspace metadata with versioned migrations and recovery (slice 12a) | Accepted |
+| [0023](0023-optional-local-reranker.md) | Optional local cross-encoder reranker | Accepted |
 
 ## ADR lifecycle
 

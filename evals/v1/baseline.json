@@ -707,7 +707,8 @@
       "checks": {
         "crash.none": true,
         "retrieval.dense_control": true,
-        "retrieval.evidence_retrieved": true
+        "retrieval.evidence_retrieved": true,
+        "retrieval.rerank_no_regression": true
       },
       "passed": true
     },
@@ -716,7 +717,8 @@
       "checks": {
         "crash.none": true,
         "retrieval.dense_control": true,
-        "retrieval.evidence_retrieved": true
+        "retrieval.evidence_retrieved": true,
+        "retrieval.rerank_no_regression": true
       },
       "passed": true
     },
@@ -725,7 +727,8 @@
       "checks": {
         "crash.none": true,
         "retrieval.dense_control": true,
-        "retrieval.evidence_retrieved": true
+        "retrieval.evidence_retrieved": true,
+        "retrieval.rerank_no_regression": true
       },
       "passed": true
     },
@@ -734,7 +737,8 @@
       "checks": {
         "crash.none": true,
         "retrieval.dense_control": true,
-        "retrieval.off_topic_refused": true
+        "retrieval.off_topic_refused": true,
+        "retrieval.rerank_no_regression": true
       },
       "passed": true
     },
@@ -743,7 +747,8 @@
       "checks": {
         "crash.none": true,
         "retrieval.dense_control": true,
-        "retrieval.evidence_retrieved": true
+        "retrieval.evidence_retrieved": true,
+        "retrieval.rerank_no_regression": true
       },
       "passed": true
     },
@@ -752,7 +757,8 @@
       "checks": {
         "crash.none": true,
         "retrieval.dense_control": true,
-        "retrieval.evidence_retrieved": true
+        "retrieval.evidence_retrieved": true,
+        "retrieval.rerank_no_regression": true
       },
       "passed": true
     },
@@ -1112,6 +1118,7 @@
         "lexical": "bm25",
         "max_rare_document_fraction": 0.5,
         "min_term_coverage": 0.5,
+        "reranker": "term-overlap-v1",
         "rrf_k": 60
       },
       "max_distance": 0.9,

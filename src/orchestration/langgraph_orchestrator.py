@@ -768,6 +768,8 @@ def _document_diagnostics(result: RAGAnswer) -> AnswerDiagnostics:
         retrieval_duplicates_skipped=result.duplicates_skipped,
         retrieval_lexical_candidates=result.lexical_candidates,
         retrieval_lexical_only_accepted=result.lexical_only_accepted,
+        retrieval_reranked=result.reranked,
+        retrieval_rerank_failed=result.rerank_failed,
         source_count=len(result.retrieved_chunks),
         citation_count=citation_count,
         invalid_citation_count=len(result.invalid_citations),

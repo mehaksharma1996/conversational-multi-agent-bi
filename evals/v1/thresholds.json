@@ -17,7 +17,9 @@
   "waivers": {},
   "retrieval_metrics_min": {
     "recall_at_k": 1.0,
-    "mrr": 0.5
+    "mrr": 0.5,
+    "rerank_recall_at_k": 1.0,
+    "rerank_mrr": 0.5
   },
   "trajectory_max_model_calls": {
     "sql": 3,
