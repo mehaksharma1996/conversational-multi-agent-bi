@@ -11,6 +11,7 @@ from src.documents.chunker import chunk_document_pages
 from src.documents.embedding import TextEmbedder
 from src.documents.embedding_cache import CachingTextEmbedder, EmbeddingVectorCache
 from src.documents.pgvector_store import PgvectorDocumentStore
+from src.documents.reranker import Reranker
 from src.documents.retriever import DocumentRetriever
 from src.documents.vector_store import ChromaDocumentStore
 from src.ingestion.pdf_loader import count_pdf_pages, load_pdf_file
@@ -57,8 +58,10 @@ class DocumentApplicationService:
         embedder_factory: Callable[[str], TextEmbedder],
         embedding_cache: EmbeddingVectorCache | None = None,
         cache_observer: Callable[[str, int, int, int], None] | None = None,
+        reranker: Reranker | None = None,
     ) -> None:
         self._embedder_factory = embedder_factory
+        self._reranker = reranker
         self._embedding_cache = embedding_cache
         self._cache_observer = cache_observer
 
@@ -109,6 +112,7 @@ class DocumentApplicationService:
             max_distance=command.retrieval_max_distance,
             default_top_k=command.retrieval_top_k,
             hybrid=command.retrieval_hybrid,
+            reranker=self._reranker,
         )
         return DocumentIndexResult(
             filenames=tuple(document.filename for document, _ in unique_documents),
@@ -140,6 +144,7 @@ class DocumentApplicationService:
             max_distance=command.retrieval_max_distance,
             default_top_k=command.retrieval_top_k,
             hybrid=command.retrieval_hybrid,
+            reranker=self._reranker,
         )
 
     def _open_store(

@@ -47,6 +47,8 @@ class RAGAnswer:
     duplicates_skipped: int = 0
     lexical_candidates: int = 0
     lexical_only_accepted: int = 0
+    reranked: int = 0
+    rerank_failed: int = 0
 
 
 def answer_with_documents(
@@ -108,6 +110,8 @@ def answer_with_documents(
         duplicates_skipped=retrieval.duplicates_skipped,
         lexical_candidates=retrieval.lexical_candidates,
         lexical_only_accepted=retrieval.lexical_only_accepted,
+        reranked=retrieval.reranked,
+        rerank_failed=retrieval.rerank_failed,
     )
 
 

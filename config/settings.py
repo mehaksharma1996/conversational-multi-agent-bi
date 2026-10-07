@@ -56,6 +56,8 @@ class Settings:
     retrieval_top_k: int = 4
     retrieval_max_distance: float | None = DEFAULT_RETRIEVAL_MAX_DISTANCE
     retrieval_hybrid: bool = True
+    retrieval_reranker_model: str | None = None
+    retrieval_reranker_revision: str | None = None
     session_retention_hours: int = 24
     session_cleanup_interval_minutes: int = 15
     sqlite_encryption_key: bytes | None = None
@@ -405,6 +407,8 @@ def get_settings() -> Settings:
         retrieval_top_k=_positive_int("RETRIEVAL_TOP_K", 4),
         retrieval_hybrid=os.getenv("RETRIEVAL_HYBRID", "true").strip().lower()
         not in {"0", "false", "no", "off"},
+        retrieval_reranker_model=_optional_text("RETRIEVAL_RERANKER_MODEL"),
+        retrieval_reranker_revision=_optional_text("RETRIEVAL_RERANKER_REVISION"),
         retrieval_max_distance=_optional_float(
             "RETRIEVAL_MAX_DISTANCE", DEFAULT_RETRIEVAL_MAX_DISTANCE
         ),

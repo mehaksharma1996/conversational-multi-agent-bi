@@ -912,6 +912,8 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
         "retrieval_duplicates_skipped": diagnostics.retrieval_duplicates_skipped,
         "retrieval_lexical_candidates": diagnostics.retrieval_lexical_candidates,
         "retrieval_lexical_only_accepted": diagnostics.retrieval_lexical_only_accepted,
+        "retrieval_reranked": diagnostics.retrieval_reranked,
+        "retrieval_rerank_failed": diagnostics.retrieval_rerank_failed,
         "sql_row_count": diagnostics.sql_row_count,
         "sql_correction_attempted": diagnostics.sql_correction_attempted,
         "structured_output_repairs": diagnostics.structured_output_repairs,

@@ -47,6 +47,7 @@ from packages.observability.metrics import Labels
 from packages.retrieval import DocumentApplicationService
 from src.documents.embedding import SentenceTransformerEmbedder, TextEmbedder
 from src.documents.embedding_cache import EmbeddingVectorCache
+from src.documents.reranker import Reranker, SentenceTransformerReranker
 from src.llm.base import LLMClient
 from src.llm.factory import build_llm_client
 
@@ -65,6 +66,7 @@ def create_app(
     embedding_cache: EmbeddingVectorCache | None = None,
     job_executor: InProcessJobExecutor | None = None,
     trace_manager: TraceManager | None = None,
+    reranker: Reranker | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
@@ -171,6 +173,7 @@ def create_app(
     application.state.document_service = DocumentApplicationService(
         active_embedder_factory,
         application.state.embedding_cache,
+        reranker=reranker or _build_reranker(active_settings),
         cache_observer=lambda tenant_id, hits, misses, entries: observability.telemetry.emit(
             "embedding.cache",
             tenant_id=tenant_id,
@@ -329,6 +332,15 @@ def _register_runtime_gauges(
         "bi_data_volume_bytes",
         "Bytes on the volume that holds the application data directory, by state.",
         volume,
+    )
+
+
+def _build_reranker(settings: Settings) -> Reranker | None:
+    """Off unless a model is configured; construction validates pinning but loads nothing."""
+    if settings.retrieval_reranker_model is None:
+        return None
+    return SentenceTransformerReranker(
+        settings.retrieval_reranker_model, settings.retrieval_reranker_revision
     )
 
 

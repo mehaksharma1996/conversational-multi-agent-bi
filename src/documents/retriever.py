@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
+from src.documents.reranker import Reranker
 from src.documents.vector_store import ChromaDocumentStore, RetrievedChunk, metadata_matches
 
 if TYPE_CHECKING:
@@ -25,6 +26,8 @@ class RetrievalResult:
     duplicates_skipped: int = field(default=0)
     lexical_candidates: int = 0
     lexical_only_accepted: int = 0
+    reranked: int = 0
+    rerank_failed: int = 0
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ class DocumentRetriever:
         max_distance: float | None = None,
         default_top_k: int = 4,
         hybrid: bool = True,
+        reranker: Reranker | None = None,
     ) -> None:
         if default_top_k < 1:
             raise ValueError("default_top_k must be at least 1.")
@@ -74,6 +78,7 @@ class DocumentRetriever:
         self.max_distance = max_distance
         self.default_top_k = default_top_k
         self.hybrid = hybrid
+        self.reranker = reranker
 
     def retrieve(
         self,
@@ -125,6 +130,7 @@ class DocumentRetriever:
 
         lexical_hits = self._lexical_hits(question, pool, filters)
         ordered, dense_keys = _fuse(ranked_candidates, lexical_hits)
+        ordered, reranked, rerank_failed = self._rerank(question, ordered, pool)
 
         selected: list[RetrievedChunk] = []
         duplicates_skipped = 0
@@ -139,12 +145,15 @@ class DocumentRetriever:
 
         LOGGER.info(
             "retrieval_completed candidates_considered=%d candidates_rejected_by_distance=%d "
-            "duplicates_skipped=%d lexical_candidates=%d lexical_only_accepted=%d returned=%d",
+            "duplicates_skipped=%d lexical_candidates=%d lexical_only_accepted=%d "
+            "reranked=%d rerank_failed=%d returned=%d",
             candidates_considered,
             candidates_rejected_by_distance,
             duplicates_skipped,
             len(lexical_hits),
             lexical_only_accepted,
+            reranked,
+            rerank_failed,
             len(selected),
         )
         return RetrievalResult(
@@ -155,7 +164,31 @@ class DocumentRetriever:
             duplicates_skipped=duplicates_skipped,
             lexical_candidates=len(lexical_hits),
             lexical_only_accepted=lexical_only_accepted,
+            reranked=reranked,
+            rerank_failed=rerank_failed,
         )
+
+    def _rerank(
+        self, question: str, ordered: list[RetrievedChunk], pool: int
+    ) -> tuple[list[RetrievedChunk], int, int]:
+        """Reorder the leading ``pool`` admitted candidates; never add or drop any.
+
+        Returns ``(order, reranked_count, failed)``. A failure (offline model, missing weights, a
+        malformed score list) leaves the fused order untouched; only its class name is logged.
+        """
+        if self.reranker is None or len(ordered) < 2:
+            return ordered, 0, 0
+        head, tail = ordered[:pool], ordered[pool:]
+        try:
+            scores = self.reranker.score(question, [chunk.text for chunk in head])
+            if len(scores) != len(head):
+                raise ValueError("score count mismatch")
+        except Exception as exc:  # noqa: BLE001 - degrade to the fused order, never fail retrieval
+            LOGGER.warning("reranker_failed error=%s", type(exc).__name__)
+            return ordered, 0, 1
+        # sorted() is stable, so equal scores keep their fused order.
+        order = sorted(range(len(head)), key=lambda index: -scores[index])
+        return [head[index] for index in order] + tail, len(head), 0
 
     def _lexical_hits(
         self, question: str, pool: int, filters: RetrievalFilter | None
