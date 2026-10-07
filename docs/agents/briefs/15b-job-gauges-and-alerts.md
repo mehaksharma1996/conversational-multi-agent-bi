@@ -26,5 +26,5 @@ Process memory is deliberately not exported (no `psutil`; container runtimes own
 
 ## Remaining in #15
 
-Optional digest-pinned, non-root collector Compose profile and injected-failure drills; browser-side
-`traceparent` generation.
+Optional digest-pinned, non-root collector Compose profile and injected-failure drills (needs Docker to
+validate). The browser `traceparent` header was added in the same PR.

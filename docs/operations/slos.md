@@ -115,7 +115,9 @@ attribute query for `bi.request_id = "<id>"` to find a trace from the ID shown i
 
 - **An optional Compose profile** that scrapes `/metrics` and demonstrates diagnosing injected failures.
   Requires a digest-pinned, non-root metrics image and loopback-only publishing.
-- **Browser-side tracing**: the API accepts `traceparent`, but the React client does not create or send one.
+- **Browser-side spans**: the React client sends a random W3C `traceparent` on every API request
+  (`apps/web/src/api/traceparent.ts`; no `tracestate`, `baggage`, or user data), so the API trace is a child of that
+  ID. The browser exports no spans of its own, so the parent span ID has no matching span in a backend.
 - **Container memory and CPU limits**: left to the container runtime's own metrics (see the gauge note above).
 
 ## Alerting rules

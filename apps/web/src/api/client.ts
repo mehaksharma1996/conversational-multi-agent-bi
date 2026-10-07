@@ -1,6 +1,7 @@
 import createClient from "openapi-fetch";
 
 import type { components, paths } from "./schema";
+import { newTraceparent } from "./traceparent";
 
 const api = createClient<paths>({
   baseUrl: import.meta.env.VITE_API_BASE_URL ?? "",
@@ -24,6 +25,9 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 
 api.use({
   onRequest({ request }) {
+    if (!request.headers.has("traceparent")) {
+      request.headers.set("traceparent", newTraceparent());
+    }
     if (csrfToken !== null && !SAFE_METHODS.has(request.method.toUpperCase())) {
       request.headers.set(CSRF_HEADER, csrfToken);
     }

@@ -43,6 +43,23 @@ describe("API client session transport", () => {
     expect(sentHeaders(1).get("X-CSRF-Token")).toBe("token-1");
   });
 
+  it("sends a fresh, valid W3C traceparent and nothing else from the trace context", async () => {
+    await client.listWorkbookSheets("upload-1");
+    await client.createWorkspace("key-1").catch(() => undefined);
+
+    const [first, second] = [sentHeaders(0).get("traceparent"), sentHeaders(1).get("traceparent")];
+    for (const value of [first, second]) {
+      expect(value).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+      expect(value).not.toMatch(/^00-0{32}-/);
+      expect(value).not.toMatch(/-0{16}-01$/);
+    }
+    expect(first).not.toBe(second);
+    for (const index of [0, 1]) {
+      expect(sentHeaders(index).get("tracestate")).toBeNull();
+      expect(sentHeaders(index).get("baggage")).toBeNull();
+    }
+  });
+
   it("sends no CSRF header after the token is cleared", async () => {
     client.setCsrfToken("token-1");
     client.setCsrfToken(null);
