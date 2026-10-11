@@ -3,8 +3,30 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
 import { newTraceparent } from "./traceparent";
 
+// A request that never answers must end in a visible, recoverable error, not an endless spinner.
+// Model-backed questions and PDF indexing are the slowest operations the API performs.
+const REQUEST_TIMEOUT_MS = 120_000;
+
+async function timedFetch(request: Request): Promise<Response> {
+  try {
+    return await fetch(request, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  } catch (caught) {
+    if (caught instanceof DOMException && caught.name === "TimeoutError") {
+      throw new ApiClientError(
+        "The server took too long to respond. Your data is unchanged; try again.",
+        "timeout",
+      );
+    }
+    throw new ApiClientError(
+      "Could not reach the server. Check your connection and try again.",
+      "network_error",
+    );
+  }
+}
+
 const api = createClient<paths>({
   baseUrl: import.meta.env.VITE_API_BASE_URL ?? "",
+  fetch: timedFetch,
 });
 
 // Session transport (ADR 0013): the browser authenticates with an HttpOnly cookie it cannot read.
@@ -53,17 +75,30 @@ export type Report = components["schemas"]["ReportResponse"];
 export type Export = components["schemas"]["ExportResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 export type AuthConfig = components["schemas"]["AuthConfigResponse"];
+export type WorkspaceOverview = components["schemas"]["WorkspaceOverviewResponse"];
 export type BrowserSession = components["schemas"]["SessionResponse"];
 
 export class ApiClientError extends Error {
   readonly code: string;
   readonly requestId: string | null;
+  readonly status: number | null;
 
-  constructor(message: string, code = "request_failed", requestId: string | null = null) {
+  constructor(
+    message: string,
+    code = "request_failed",
+    requestId: string | null = null,
+    status: number | null = null,
+  ) {
     super(message);
     this.name = "ApiClientError";
     this.code = code;
     this.requestId = requestId;
+    this.status = status;
+  }
+
+  /** True for failures where repeating the same request can succeed. */
+  get retryable(): boolean {
+    return this.code === "network_error" || this.code === "timeout" || (this.status ?? 0) >= 500;
   }
 }
 
@@ -77,12 +112,14 @@ function unwrap<T>(data: T | undefined, error: unknown, response: Response): T {
       payload.error.message,
       payload.error.code,
       payload.error.request_id,
+      response.status,
     );
   }
   throw new ApiClientError(
     `The API request failed with status ${response.status}.`,
     "http_error",
     response.headers.get("X-Request-ID"),
+    response.status,
   );
 }
 
@@ -91,6 +128,68 @@ export async function createWorkspace(idempotencyKey: string): Promise<Workspace
     params: { header: { "Idempotency-Key": idempotencyKey } },
   });
   return unwrap(data, error, response);
+}
+
+/** Workspaces the signed-in caller owns, newest first. The server never lists another tenant's. */
+export async function listWorkspaces(): Promise<Workspace[]> {
+  const { data, error, response } = await api.GET("/api/v1/workspaces");
+  return unwrap(data, error, response).items;
+}
+
+export async function getWorkspaceOverview(workspaceId: string): Promise<WorkspaceOverview> {
+  const { data, error, response } = await api.GET("/api/v1/workspaces/{workspace_id}/overview", {
+    params: { path: { workspace_id: workspaceId } },
+  });
+  return unwrap(data, error, response);
+}
+
+export async function getDataset(datasetId: string): Promise<Dataset> {
+  const { data, error, response } = await api.GET("/api/v1/datasets/{dataset_id}", {
+    params: { path: { dataset_id: datasetId } },
+  });
+  return unwrap(data, error, response);
+}
+
+export async function getAnalysis(analysisId: string): Promise<Analysis> {
+  const { data, error, response } = await api.GET("/api/v1/analyses/{analysis_id}", {
+    params: { path: { analysis_id: analysisId } },
+  });
+  return unwrap(data, error, response);
+}
+
+export async function getDocumentCollection(collectionId: string): Promise<DocumentCollection> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/document-collections/{collection_id}",
+    { params: { path: { collection_id: collectionId } } },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function getConversation(conversationId: string): Promise<Conversation> {
+  const { data, error, response } = await api.GET("/api/v1/conversations/{conversation_id}", {
+    params: { path: { conversation_id: conversationId } },
+  });
+  return unwrap(data, error, response);
+}
+
+export async function listMessages(conversationId: string): Promise<Message[]> {
+  const messages: Message[] = [];
+  let cursor: string | undefined;
+  do {
+    const { data, error, response } = await api.GET(
+      "/api/v1/conversations/{conversation_id}/messages",
+      {
+        params: {
+          path: { conversation_id: conversationId },
+          query: { limit: 100, ...(cursor ? { cursor } : {}) },
+        },
+      },
+    );
+    const page = unwrap(data, error, response);
+    messages.push(...page.messages);
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+  return messages;
 }
 
 export async function uploadTabular(
@@ -232,12 +331,13 @@ export async function askQuestion(
 export async function decideSqlApproval(
   messageId: string,
   decision: "approve" | "reject",
+  sql: string | null = null,
 ): Promise<Message> {
   const { data, error, response } = await api.POST(
     "/api/v1/messages/{message_id}/approval",
     {
       params: { path: { message_id: messageId } },
-      body: { decision, sql: null },
+      body: { decision, sql },
     },
   );
   return unwrap(data, error, response);

@@ -1,0 +1,182 @@
+import type { ReactNode } from "react";
+
+import type { Message } from "../api/client";
+import { AnswerProvenance } from "./AnswerProvenance";
+import { ApprovalControls } from "./ApprovalControls";
+import { ResultTable } from "./ResultTable";
+import { parseSource, splitSqlAnswer } from "./evidence";
+
+interface MessageCardProps {
+  message: Message;
+  busy: boolean;
+  onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
+  onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
+}
+
+const STATUS_TEXT: Partial<Record<Message["status"], string>> = {
+  pending_approval: "Awaiting approval",
+  rejected: "Not executed",
+};
+
+/** Turns "Source 2" markers in an answer into links to the passage they cite. */
+function withCitationLinks(text: string, messageId: string, known: Set<number>): ReactNode[] {
+  return text.split(/(Source \d+)/g).map((part, index) => {
+    const match = /^Source (\d+)$/.exec(part);
+    if (match && known.has(Number(match[1]))) {
+      return (
+        <a key={index} className="citation-link" href={`#source-${messageId}-${match[1]}`}>
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
+export function MessageCard({ message, busy, onApproval, onExport }: MessageCardProps) {
+  const sources = message.sources.map((source) => parseSource(source.citation));
+  const known = new Set(
+    sources.flatMap((source) => (source.number === null ? [] : [source.number])),
+  );
+  const sqlAnswer =
+    message.sql && message.status === "complete" ? splitSqlAnswer(message.answer) : null;
+  const statusText = STATUS_TEXT[message.status];
+
+  return (
+    <div className="message-pair" data-message-id={message.id}>
+      <article className="chat-message chat-message--user">
+        <p className="message-label">You</p>
+        <p>{message.question}</p>
+      </article>
+      <article
+        className="chat-message chat-message--assistant"
+        aria-label={`Answer to: ${message.question}`}
+      >
+        <div className="message-meta">
+          <span>Workbench</span>
+          <span className="route-badge">{message.route} route</span>
+          {statusText ? (
+            <span className={`status-chip status-chip--${message.status}`}>{statusText}</span>
+          ) : null}
+        </div>
+
+        {message.status === "pending_approval" ? (
+          <p className="answer-text">
+            Review the proposed SQL before it can access the uploaded table.
+          </p>
+        ) : sqlAnswer ? (
+          <div className="answer-structured">
+            <p className="answer-text">{sqlAnswer.headline}</p>
+            {sqlAnswer.observations.length > 0 ? (
+              <>
+                <h4>Calculated from the result table</h4>
+                <ul className="observation-list">
+                  {sqlAnswer.observations.map((text) => (
+                    <li key={text}>{text}</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {sqlAnswer.limits.length > 0 ? (
+              <>
+                <h4>Limits of this answer</h4>
+                <ul className="limit-list">
+                  {sqlAnswer.limits.map((text) => (
+                    <li key={text}>{text}</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            <p className="field-hint">
+              These statements are computed by code from the rows below, not written by a model.
+              The API does not return cell-level references, so check them against the table.
+            </p>
+          </div>
+        ) : (
+          <p className="answer-text">{withCitationLinks(message.answer, message.id, known)}</p>
+        )}
+
+        <AnswerProvenance message={message} />
+
+        {message.sql ? (
+          <div className="sql-section">
+            <h4>Generated SQL</h4>
+            <pre className="sql-block" tabIndex={0}>
+              <code>{message.sql}</code>
+            </pre>
+          </div>
+        ) : null}
+
+        {message.status === "pending_approval" ? (
+          <ApprovalControls
+            key={message.id}
+            message={message}
+            busy={busy}
+            onApproval={onApproval}
+          />
+        ) : null}
+
+        {message.status === "complete" && message.rows && message.rows.length > 0 ? (
+          <>
+            <ResultTable rows={message.rows} />
+            <div className="button-row">
+              <button
+                className="button button--secondary"
+                type="button"
+                disabled={busy}
+                onClick={() => void onExport(message, "csv")}
+              >
+                Download CSV
+              </button>
+              <button
+                className="button button--secondary"
+                type="button"
+                disabled={busy}
+                onClick={() => void onExport(message, "xlsx")}
+              >
+                Download Excel
+              </button>
+            </div>
+          </>
+        ) : null}
+        {message.status === "complete" && message.rows && message.rows.length === 0 ? (
+          <p className="field-hint">The query returned no rows.</p>
+        ) : null}
+
+        {sources.length > 0 ? (
+          <details>
+            <summary>Retrieved document sources</summary>
+            <ul className="source-list">
+              {sources.map((source, index) => (
+                <li
+                  key={source.raw}
+                  id={source.number !== null ? `source-${message.id}-${source.number}` : undefined}
+                >
+                  <p className="source-heading">
+                    {source.filename ? (
+                      <>
+                        <strong>{source.filename}</strong>, page {source.page}
+                        {source.relevance ? ` · relevance ${source.relevance}` : ""}
+                        <span className="source-number">
+                          {" "}
+                          (Source {source.number ?? index + 1})
+                        </span>
+                      </>
+                    ) : (
+                      source.raw
+                    )}
+                  </p>
+                  {source.excerpt ? <blockquote>{source.excerpt}</blockquote> : null}
+                </li>
+              ))}
+            </ul>
+            <p className="field-hint">
+              Passage text is an excerpt (the first 240 characters, with personal data redacted).
+              Open the PDF page to read it in context.
+            </p>
+          </details>
+        ) : null}
+      </article>
+    </div>
+  );
+}

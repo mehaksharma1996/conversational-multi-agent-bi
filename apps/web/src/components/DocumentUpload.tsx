@@ -7,7 +7,7 @@ interface DocumentUploadProps {
   disabled: boolean;
   busy: boolean;
   collection: DocumentCollection | null;
-  onUpload: (files: File[]) => Promise<void>;
+  onUpload: (files: File[]) => Promise<unknown>;
 }
 
 export function DocumentUpload({

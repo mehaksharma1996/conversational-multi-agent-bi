@@ -12,7 +12,9 @@ import {
   createWorkspace,
   decideSqlApproval,
   downloadWorkspaceExport,
+  listMessages,
   listWorkbookSheets,
+  listWorkspaces,
   runAnalysis,
   uploadDocuments,
   uploadTabular,
@@ -36,6 +38,8 @@ vi.mock("./api/client", async (importOriginal) => {
     createWorkspace: vi.fn(),
     uploadTabular: vi.fn(),
     listWorkbookSheets: vi.fn(),
+    listWorkspaces: vi.fn(),
+    listMessages: vi.fn(),
     createDataset: vi.fn(),
     confirmSchema: vi.fn(),
     runAnalysis: vi.fn(),
@@ -50,6 +54,9 @@ vi.mock("./api/client", async (importOriginal) => {
 
 describe("tabular analysis journey", () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
+    vi.mocked(listWorkspaces).mockResolvedValue([]);
+    vi.mocked(listMessages).mockResolvedValue([]);
     vi.mocked(createWorkspace).mockResolvedValue(workspaceFixture);
     vi.mocked(uploadTabular).mockResolvedValue(uploadFixture);
     vi.mocked(listWorkbookSheets).mockResolvedValue([]);
@@ -151,7 +158,8 @@ describe("tabular analysis journey", () => {
     expect(screen.getByText("Request ID: req-fixture-0001")).toBeVisible();
     expect(screen.getByText(/Decision support only/)).toBeVisible();
     await user.click(screen.getByText("Retrieved document sources"));
-    expect(screen.getByText("Source 1 - policy.pdf, page 2")).toBeVisible();
+    expect(screen.getByText("policy.pdf")).toBeVisible();
+    expect(screen.getByText(/page 2/)).toBeVisible();
     expect(createConversation).toHaveBeenCalledWith("workspace-1", null, "documents-1");
     expect(askQuestion).toHaveBeenCalledWith("conversation-1", messageFixture.question, false);
   });
@@ -190,7 +198,7 @@ describe("tabular analysis journey", () => {
     );
     await user.click(screen.getByRole("button", { name: "Approve SQL" }));
 
-    expect(decideSqlApproval).toHaveBeenCalledWith("message-1", "approve");
+    expect(decideSqlApproval).toHaveBeenCalledWith("message-1", "approve", null);
     expect(await screen.findByText(messageFixture.answer)).toBeVisible();
   });
 });

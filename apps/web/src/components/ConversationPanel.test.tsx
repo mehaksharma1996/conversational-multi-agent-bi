@@ -24,7 +24,7 @@ describe("consent notice", () => {
   it("names every provider that will receive data", () => {
     renderPanel({ ...workspaceFixture, data_recipients: ["Gemini", "Anthropic"] });
 
-    expect(screen.getByRole("status")).toHaveTextContent("to Gemini and Anthropic");
+    expect(screen.getByText(/to Gemini and Anthropic/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "I understand, enable Gemini and Anthropic" }),
     ).toBeInTheDocument();
