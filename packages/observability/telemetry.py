@@ -74,6 +74,7 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "grounding_status": "token",
     "invalid_citation_count": "int",
     "unverified_quote_count": "int",
+    "uncited_claim_count": "int",
     "criteria_provenance": "token",
     "document_count": "int",
     "page_count": "int",

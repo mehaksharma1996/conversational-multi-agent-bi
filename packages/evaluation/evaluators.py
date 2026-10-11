@@ -285,6 +285,24 @@ def _grounding(spec: dict[str, Any], obs: Observation) -> list[Check]:
                 f"{spec['unverified_quotes']}",
             )
         )
+    if "uncited_claims" in spec:
+        checks.append(
+            Check(
+                "grounding.claims_cited",
+                diagnostics.uncited_claim_count == spec["uncited_claims"],
+                f"{diagnostics.uncited_claim_count} uncited, expected {spec['uncited_claims']}",
+            )
+        )
+    if "evidence_statuses" in spec:
+        expected_statuses = set(spec["evidence_statuses"])
+        observed_statuses = set(diagnostics.evidence_statuses)
+        checks.append(
+            Check(
+                "grounding.evidence_statuses",
+                expected_statuses <= observed_statuses,
+                f"expected {sorted(expected_statuses)}, observed {sorted(observed_statuses)}",
+            )
+        )
     if "warning_in_answer" in spec:
         surfaced = "grounding check" in obs.result.answer.lower()
         checks.append(

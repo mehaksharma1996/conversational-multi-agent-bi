@@ -108,6 +108,7 @@ AUDIT_ATTRIBUTES: dict[str, str] = {
     "has_sql": "bool",
     "sql_edited": "bool",
     "grounding_status": "token",
+    "uncited_claim_count": "int",
     "include_charts": "bool",
     "anomaly_features_count": "int",
     "dropped_attributes": "int",

@@ -191,7 +191,7 @@ def test_orchestrator_answers_document_question() -> None:
     assert result.route == "rag"
     assert "Escalate" in result.answer
     assert result.sources
-    assert "policy.pdf" in result.sources[0]
+    assert result.sources[0].startswith("Source 1 - policy.pdf")
 
 
 def test_orchestrator_coordinates_document_and_sql_steps() -> None:

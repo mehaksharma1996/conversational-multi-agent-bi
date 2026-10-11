@@ -320,6 +320,18 @@ class ProvenanceResponse(StrictModel):
     citation_count: int
     invalid_citation_count: int
     unverified_quote_count: int
+    uncited_claim_count: int
+    evidence_statuses: list[
+        Literal[
+            "VERIFIED_REFERENCE",
+            "INVALID_REFERENCE",
+            "QUOTE_MISMATCH",
+            "MISSING_EVIDENCE",
+            "UNVERIFIED_CLAIM",
+            "CONFLICTING_EVIDENCE",
+            "NOT_EVALUATED",
+        ]
+    ]
     criteria_provenance: Literal[
         "not_applicable",
         "traced",

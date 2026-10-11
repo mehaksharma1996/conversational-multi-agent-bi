@@ -35,6 +35,11 @@ export function groundingNote(message: Message): Note | null {
           `${provenance.unverified_quote_count} quotation(s) were not found word-for-word in the sources`,
         );
       }
+      if (provenance.uncited_claim_count > 0) {
+        parts.push(
+          `${provenance.uncited_claim_count} factual statement(s) do not include a valid source reference`,
+        );
+      }
       return {
         tone: "warning",
         text: `Grounding warning: ${parts.join("; ")}. Do not rely on this answer until you have checked the sources.`,
@@ -48,7 +53,7 @@ export function groundingNote(message: Message): Note | null {
     case "checked_no_issues":
       return {
         tone: "info",
-        text: "Citation and quotation checks found no problems. These checks confirm structure only; they do not prove the answer is correct.",
+        text: "Citation coverage and source-specific quotation checks found no structural problems. Semantic support is not automatically verified.",
       };
     default:
       return null;

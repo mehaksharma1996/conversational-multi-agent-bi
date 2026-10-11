@@ -164,7 +164,10 @@ def test_disabled_quote_verification_is_caught(fixtures: FixtureSet) -> None:
 def test_disabled_citation_validation_is_caught(fixtures: FixtureSet) -> None:
     import re
 
-    with patch("src.agents.rag_agent._CITATION_PATTERN", re.compile(r"NEVER-MATCHES")):
+    with (
+        patch("src.agents.rag_agent._CITATION_PATTERN", re.compile(r"NEVER-MATCHES")),
+        patch("src.agents.rag_agent._extract_claims", lambda *_args: []),
+    ):
         report = _only(
             fixtures, "rag-flags-invalid-citation-number", "rag-escalation-threshold-grounded"
         )

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
+from src.agents.rag_agent import EvidenceStatus
+
 RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported"]
 AnswerStatus = Literal["complete", "pending_approval", "rejected"]
 GroundingStatus = Literal["not_applicable", "checked_no_issues", "uncited", "warnings"]
@@ -42,6 +44,8 @@ class AnswerDiagnostics:
     citation_count: int = 0
     invalid_citation_count: int = 0
     unverified_quote_count: int = 0
+    uncited_claim_count: int = 0
+    evidence_statuses: tuple[EvidenceStatus, ...] = ()
     grounding_status: GroundingStatus = "not_applicable"
     criteria_keys: tuple[str, ...] = ()
     criteria_rejected_keys: int = 0

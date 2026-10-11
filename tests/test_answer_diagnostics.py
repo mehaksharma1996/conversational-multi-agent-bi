@@ -131,6 +131,21 @@ def test_grounding_status_distinguishes_clean_uncited_and_warned_answers(
     assert _document_diagnostics(answer).grounding_status == expected
 
 
+def test_diagnostics_report_partial_claim_coverage_without_content() -> None:
+    answer = answer_with_documents(
+        "What is the policy?",
+        _Retriever([_chunk("Escalate transactions over 500 dollars. Managers review weekly.")]),
+        _SequenceLLM(["Escalate over 500. Managers review weekly. Source 1"]),
+    )
+
+    diagnostics = _document_diagnostics(answer)
+
+    assert diagnostics.grounding_status == "warnings"
+    assert diagnostics.uncited_claim_count == 1
+    assert "UNVERIFIED_CLAIM" in diagnostics.evidence_statuses
+    assert "NOT_EVALUATED" in diagnostics.evidence_statuses
+
+
 def test_criteria_rejection_stats_count_keys_and_values() -> None:
     raw = {"thresholds": [500, 600], "categories": ["made-up"], "instructions": "do bad things"}
     sanitized = {"thresholds": [500, 600]}

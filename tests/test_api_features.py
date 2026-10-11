@@ -197,6 +197,9 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     assert rag_message.status_code == 201
     assert rag_message.json()["route"] == "rag"
     assert rag_message.json()["sources"]
+    assert rag_message.json()["sources"][0]["citation"].startswith("Source 1 - ")
+    assert rag_message.json()["provenance"]["uncited_claim_count"] >= 0
+    assert "NOT_EVALUATED" in rag_message.json()["provenance"]["evidence_statuses"]
 
     hybrid_message = client.post(
         f"/api/v1/conversations/{conversation_id}/messages",

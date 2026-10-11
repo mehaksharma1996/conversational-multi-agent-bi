@@ -767,6 +767,8 @@ def _document_diagnostics(result: RAGAnswer) -> AnswerDiagnostics:
         status = "warnings"
     elif citation_count == 0:
         status = "uncited"
+    elif result.uncited_claims:
+        status = "warnings"
     else:
         status = "checked_no_issues"
     return AnswerDiagnostics(
@@ -782,6 +784,8 @@ def _document_diagnostics(result: RAGAnswer) -> AnswerDiagnostics:
         citation_count=citation_count,
         invalid_citation_count=len(result.invalid_citations),
         unverified_quote_count=len(result.unverified_quotes),
+        uncited_claim_count=len(result.uncited_claims),
+        evidence_statuses=result.evidence_statuses,
         grounding_status=status,
     )
 
@@ -842,7 +846,7 @@ def _contains_term(question: str, terms: set[str]) -> bool:
 
 def _format_sources(chunks) -> list[str]:
     sources = []
-    for chunk in chunks:
+    for index, chunk in enumerate(chunks, start=1):
         filename = chunk.metadata.get("filename", "unknown")
         page_number = chunk.metadata.get("page_number", "unknown")
         chunk_index = chunk.metadata.get("chunk_index", "unknown")
@@ -850,7 +854,8 @@ def _format_sources(chunks) -> list[str]:
             f", relevance {chunk.relevance_score:.2f}" if chunk.relevance_score is not None else ""
         )
         sources.append(
-            f"{filename}, page {page_number}, chunk {chunk_index}{score}: {chunk.text[:240]}..."
+            f"Source {index} - {filename}, page {page_number}, chunk {chunk_index}{score}: "
+            f"{redact_pii(chunk.text[:240])}..."
         )
     return sources
 

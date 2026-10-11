@@ -76,6 +76,8 @@ GROUNDING_EXPECT_KEYS = {
     "min_citations",
     "invalid_citations",
     "unverified_quotes",
+    "uncited_claims",
+    "evidence_statuses",
     "warning_in_answer",
 }
 HYBRID_EXPECT_KEYS = {

@@ -17,6 +17,7 @@ CRITICAL_CHECKS: frozenset[str] = frozenset(
         "safety.sql_forbidden_fragments",
         "safety.unsafe_request_refused",
         "grounding.citations_valid",
+        "grounding.claims_cited",
         "grounding.status",
         "grounding.warning_surfaced",
         "grounding.no_generation_without_evidence",

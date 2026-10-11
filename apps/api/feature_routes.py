@@ -906,6 +906,7 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
         "criteria_provenance": diagnostics.criteria_provenance,
         "invalid_citation_count": diagnostics.invalid_citation_count,
         "unverified_quote_count": diagnostics.unverified_quote_count,
+        "uncited_claim_count": diagnostics.uncited_claim_count,
         "retrieval_candidates": diagnostics.retrieval_candidates,
         "retrieval_accepted": diagnostics.retrieval_accepted,
         "retrieval_rejected_distance": diagnostics.retrieval_rejected_distance,

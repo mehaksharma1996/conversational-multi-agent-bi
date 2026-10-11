@@ -1262,6 +1262,8 @@ export interface components {
              * @enum {string}
              */
             criteria_provenance: "not_applicable" | "traced" | "unreferenced" | "no_structured_criteria" | "excerpt_fallback";
+            /** Evidence Statuses */
+            evidence_statuses: ("VERIFIED_REFERENCE" | "INVALID_REFERENCE" | "QUOTE_MISMATCH" | "MISSING_EVIDENCE" | "UNVERIFIED_CLAIM" | "CONFLICTING_EVIDENCE" | "NOT_EVALUATED")[];
             /**
              * Grounding Status
              * @enum {string}
@@ -1273,6 +1275,8 @@ export interface components {
             invalid_citation_count: number;
             /** Source Count */
             source_count: number;
+            /** Uncited Claim Count */
+            uncited_claim_count: number;
             /** Unverified Quote Count */
             unverified_quote_count: number;
         };

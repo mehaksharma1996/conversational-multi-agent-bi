@@ -3,7 +3,7 @@
   "aggregate": {
     "by_capability": {
       "document_rag": {
-        "cases": 7,
+        "cases": 9,
         "pass_rate": 1.0
       },
       "failure_recovery": {
@@ -51,7 +51,7 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 73
+    "cases": 75
   },
   "baseline_version": 1,
   "cases": {
@@ -551,6 +551,36 @@
       "checks": {
         "crash.none": true,
         "grounding.citations_valid": true,
+        "grounding.status": true,
+        "grounding.warning_surfaced": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "rag-flags-partially-uncited-answer": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.claims_cited": true,
+        "grounding.evidence_statuses": true,
+        "grounding.status": true,
+        "grounding.warning_surfaced": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "rag-flags-quote-attributed-to-wrong-source": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.evidence_statuses": true,
+        "grounding.quotes_supported": true,
         "grounding.status": true,
         "grounding.warning_surfaced": true,
         "outcome.expected": true,

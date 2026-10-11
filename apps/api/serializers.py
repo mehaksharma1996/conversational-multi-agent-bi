@@ -264,6 +264,8 @@ def message_response(record: MessageRecord) -> MessageResponse:
             citation_count=record.diagnostics.citation_count,
             invalid_citation_count=record.diagnostics.invalid_citation_count,
             unverified_quote_count=record.diagnostics.unverified_quote_count,
+            uncited_claim_count=record.diagnostics.uncited_claim_count,
+            evidence_statuses=list(record.diagnostics.evidence_statuses),
             criteria_provenance=record.diagnostics.criteria_provenance,
             hybrid_fell_back_to_documents=record.diagnostics.hybrid_fell_back_to_documents,
         ),

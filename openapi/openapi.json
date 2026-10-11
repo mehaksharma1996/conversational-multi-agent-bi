@@ -1638,6 +1638,22 @@
             "title": "Criteria Provenance",
             "type": "string"
           },
+          "evidence_statuses": {
+            "items": {
+              "enum": [
+                "VERIFIED_REFERENCE",
+                "INVALID_REFERENCE",
+                "QUOTE_MISMATCH",
+                "MISSING_EVIDENCE",
+                "UNVERIFIED_CLAIM",
+                "CONFLICTING_EVIDENCE",
+                "NOT_EVALUATED"
+              ],
+              "type": "string"
+            },
+            "title": "Evidence Statuses",
+            "type": "array"
+          },
           "grounding_status": {
             "enum": [
               "not_applicable",
@@ -1660,6 +1676,10 @@
             "title": "Source Count",
             "type": "integer"
           },
+          "uncited_claim_count": {
+            "title": "Uncited Claim Count",
+            "type": "integer"
+          },
           "unverified_quote_count": {
             "title": "Unverified Quote Count",
             "type": "integer"
@@ -1671,6 +1691,8 @@
           "citation_count",
           "invalid_citation_count",
           "unverified_quote_count",
+          "uncited_claim_count",
+          "evidence_statuses",
           "criteria_provenance",
           "hybrid_fell_back_to_documents"
         ],

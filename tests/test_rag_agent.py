@@ -139,7 +139,7 @@ def test_verified_quote_produces_no_warning() -> None:
         question="What is the refund policy?",
         retriever=_SingleChunkRetriever("Refunds require manager approval within 30 days."),
         llm_client=_FixedTextLLM(
-            'The policy states "Refunds require manager approval within 30 days."'
+            'The policy states "Refunds require manager approval within 30 days." Source 1'
         ),
     )
 
@@ -156,3 +156,88 @@ def test_unverified_quote_is_flagged() -> None:
 
     assert len(answer.unverified_quotes) == 1
     assert "Grounding check" in answer.answer
+
+
+class _MultiChunkRetriever:
+    def __init__(self, texts: list[str]) -> None:
+        self._texts = texts
+
+    def retrieve(self, question: str, top_k: int = 4) -> RetrievalResult:
+        return RetrievalResult(
+            question=question,
+            chunks=[
+                RetrievedChunk(
+                    text=text,
+                    metadata={
+                        "filename": "policy.pdf",
+                        "page_number": index,
+                        "chunk_index": index - 1,
+                    },
+                    distance=0.1,
+                    relevance_score=0.9,
+                )
+                for index, text in enumerate(self._texts, start=1)
+            ],
+            candidates_considered=len(self._texts),
+        )
+
+
+def test_quote_must_be_supported_by_the_source_it_is_attributed_to() -> None:
+    answer = answer_with_documents(
+        question="What is the refund policy?",
+        retriever=_MultiChunkRetriever(
+            [
+                "Refunds require manager approval within 30 days.",
+                "Chargebacks require finance approval.",
+            ]
+        ),
+        llm_client=_FixedTextLLM(
+            'The policy states "Refunds require manager approval within 30 days." Source 2'
+        ),
+    )
+
+    assert answer.cited_source_numbers == [2]
+    assert answer.unverified_quotes == ["Refunds require manager approval within 30 days."]
+    assert "Grounding check" in answer.answer
+
+
+def test_each_factual_statement_requires_a_local_citation() -> None:
+    answer = answer_with_documents(
+        question="Summarize the policy.",
+        retriever=_SingleChunkRetriever(
+            "Refunds require manager approval. Returns require a receipt."
+        ),
+        llm_client=_FixedTextLLM(
+            "Refunds require manager approval. Returns require a receipt. Source 1"
+        ),
+    )
+
+    assert answer.cited_source_numbers == [1]
+    assert answer.uncited_claims == ["Refunds require manager approval."]
+    assert "1 factual statement(s) did not include a valid source reference" in answer.answer
+
+
+def test_quote_validation_uses_the_redacted_context_seen_by_the_model() -> None:
+    answer = answer_with_documents(
+        question="Who approved this?",
+        retriever=_SingleChunkRetriever("Approved by jane.doe@example.com for the finance team."),
+        llm_client=_FixedTextLLM(
+            'The record says "Approved by [REDACTED_EMAIL] for the finance team." Source 1'
+        ),
+    )
+
+    assert answer.unverified_quotes == []
+    assert "jane.doe@example.com" not in answer.answer
+
+
+def test_raw_sensitive_quote_does_not_validate_against_redacted_model_context() -> None:
+    answer = answer_with_documents(
+        question="Who approved this?",
+        retriever=_SingleChunkRetriever("Approved by jane.doe@example.com for the finance team."),
+        llm_client=_FixedTextLLM(
+            'The record says "Approved by jane.doe@example.com for the finance team." Source 1'
+        ),
+    )
+
+    assert len(answer.unverified_quotes) == 1
+    assert "jane.doe@example.com" not in answer.answer.split("Grounding check:", 1)[-1]
