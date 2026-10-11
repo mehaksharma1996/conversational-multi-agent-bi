@@ -17,11 +17,11 @@
       "id": "hybrid-criteria-extraction",
       "target": "src.orchestration.langgraph_orchestrator:QuestionOrchestrator._extract_hybrid_criteria",
       "purpose": "Extracts allowlisted structured criteria from document excerpts.",
-      "sha256": "0b9fae3c93a91daf81fc419d60777c2bc4a39b17221ea7c84bf957c383b2c55e",
-      "version": 1,
-      "changed": "2026-10-06",
-      "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
-      "approved_by": "repository maintainers",
+      "sha256": "f68f5b2de751ba88cec5189869ceb5fb0e5bc5e2ce42079bfa8342a1e55e0525",
+      "version": 2,
+      "changed": "2026-10-11",
+      "reason": "Batch 2 adds source-specific structured predicates so hybrid SQL can verify fields, operators, values, units, null handling, and joins before execution.",
+      "approved_by": "user-approved Batch 2 engineering direction; pending maintainer review",
       "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
     },
     {

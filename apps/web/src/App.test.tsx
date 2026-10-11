@@ -151,7 +151,7 @@ describe("tabular analysis journey", () => {
     expect(screen.getByText("Request ID: req-fixture-0001")).toBeVisible();
     expect(screen.getByText(/Decision support only/)).toBeVisible();
     await user.click(screen.getByText("Retrieved document sources"));
-    expect(screen.getByText("policy.pdf, page 2")).toBeVisible();
+    expect(screen.getByText("Source 1 - policy.pdf, page 2")).toBeVisible();
     expect(createConversation).toHaveBeenCalledWith("workspace-1", null, "documents-1");
     expect(askQuestion).toHaveBeenCalledWith("conversation-1", messageFixture.question, false);
   });
