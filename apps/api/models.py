@@ -78,6 +78,24 @@ class WorkspaceResponse(StrictModel):
     created_at: datetime
 
 
+class WorkspaceListResponse(StrictModel):
+    items: list[WorkspaceResponse]
+
+
+class WorkspaceOverviewResponse(StrictModel):
+    """Identifiers that let a client rebuild its view of one workspace after a reload.
+
+    Every identifier is the newest resource of its kind inside the workspace and is
+    resolved through the same tenant-scoped lookups as the resource's own endpoint.
+    """
+
+    workspace: WorkspaceResponse
+    dataset_id: str | None
+    analysis_id: str | None
+    document_collection_id: str | None
+    conversation_id: str | None
+
+
 class ConsentUpdateRequest(StrictModel):
     accepted: Literal[True]
     notice_version: str = Field(default="2026-09", min_length=1, max_length=32)
@@ -308,6 +326,22 @@ class SourceResponse(StrictModel):
     citation: str
 
 
+class ExecutionSummaryResponse(StrictModel):
+    """Content-free counts describing what the workflow did for one answer.
+
+    Every value comes from the diagnostics the orchestrator already records; there is
+    no per-step trace, timestamp, prompt, or model output behind it.
+    """
+
+    sql_row_count: int | None
+    sql_execution_ms: int | None
+    sql_correction_attempted: bool
+    retrieval_candidates: int | None
+    retrieval_accepted: int | None
+    llm_calls: int
+    llm_fallbacks: int
+
+
 class ProvenanceResponse(StrictModel):
     """Content-free description of how an answer was checked.
 
@@ -349,6 +383,7 @@ class ProvenanceResponse(StrictModel):
         "excerpt_fallback",
     ]
     hybrid_fell_back_to_documents: bool
+    execution: ExecutionSummaryResponse
 
 
 class MessageResponse(StrictModel):

@@ -459,7 +459,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Workspaces
+         * @description Lists the caller's own active workspaces, newest first, so a reloaded client can rediscover its work. Other tenants' workspaces are never listed, and listing does not extend retention.
+         */
+        get: operations["list_workspaces_api_v1_workspaces_get"];
         put?: never;
         /**
          * Create Workspace
@@ -579,6 +583,26 @@ export interface paths {
          *     transfer; it does not delete the resource or cancel report generation. The `GET` is safe to retry.
          */
         get: operations["export_workspace_api_v1_workspaces__workspace_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Overview
+         * @description Returns the identifiers of the newest dataset, analysis, document collection, and conversation in one workspace. A workspace owned by another tenant is indistinguishable from a missing one.
+         */
+        get: operations["get_workspace_overview_api_v1_workspaces__workspace_id__overview_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1059,6 +1083,29 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
         };
+        /**
+         * ExecutionSummaryResponse
+         * @description Content-free counts describing what the workflow did for one answer.
+         *
+         *     Every value comes from the diagnostics the orchestrator already records; there is
+         *     no per-step trace, timestamp, prompt, or model output behind it.
+         */
+        ExecutionSummaryResponse: {
+            /** Llm Calls */
+            llm_calls: number;
+            /** Llm Fallbacks */
+            llm_fallbacks: number;
+            /** Retrieval Accepted */
+            retrieval_accepted: number | null;
+            /** Retrieval Candidates */
+            retrieval_candidates: number | null;
+            /** Sql Correction Attempted */
+            sql_correction_attempted: boolean;
+            /** Sql Execution Ms */
+            sql_execution_ms: number | null;
+            /** Sql Row Count */
+            sql_row_count: number | null;
+        };
         /** ExportCreateRequest */
         ExportCreateRequest: {
             /**
@@ -1264,6 +1311,7 @@ export interface components {
             criteria_provenance: "not_applicable" | "traced" | "unreferenced" | "no_structured_criteria" | "excerpt_fallback";
             /** Evidence Statuses */
             evidence_statuses: ("VERIFIED_REFERENCE" | "INVALID_REFERENCE" | "QUOTE_MISMATCH" | "MISSING_EVIDENCE" | "UNVERIFIED_CLAIM" | "CONFLICTING_EVIDENCE" | "NOT_EVALUATED")[];
+            execution: components["schemas"]["ExecutionSummaryResponse"];
             /**
              * Grounding Status
              * @enum {string}
@@ -1418,6 +1466,29 @@ export interface components {
             sheets: string[];
             /** Upload Id */
             upload_id: string;
+        };
+        /** WorkspaceListResponse */
+        WorkspaceListResponse: {
+            /** Items */
+            items: components["schemas"]["WorkspaceResponse"][];
+        };
+        /**
+         * WorkspaceOverviewResponse
+         * @description Identifiers that let a client rebuild its view of one workspace after a reload.
+         *
+         *     Every identifier is the newest resource of its kind inside the workspace and is
+         *     resolved through the same tenant-scoped lookups as the resource's own endpoint.
+         */
+        WorkspaceOverviewResponse: {
+            /** Analysis Id */
+            analysis_id: string | null;
+            /** Conversation Id */
+            conversation_id: string | null;
+            /** Dataset Id */
+            dataset_id: string | null;
+            /** Document Collection Id */
+            document_collection_id: string | null;
+            workspace: components["schemas"]["WorkspaceResponse"];
         };
         /** WorkspaceResponse */
         WorkspaceResponse: {
@@ -3768,6 +3839,107 @@ export interface operations {
             };
         };
     };
+    list_workspaces_api_v1_workspaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceListResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     create_workspace_api_v1_workspaces_post: {
         parameters: {
             query?: never;
@@ -4423,6 +4595,109 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                     "application/zip": string;
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_workspace_overview_api_v1_workspaces__workspace_id__overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceOverviewResponse"];
                 };
             };
             /** @description Authentication required */

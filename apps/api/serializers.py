@@ -20,6 +20,7 @@ from apps.api.models import (
     DataProfileResponse,
     DatasetResponse,
     DocumentCollectionResponse,
+    ExecutionSummaryResponse,
     ExportResponse,
     FieldMappingResponse,
     JobResponse,
@@ -31,6 +32,8 @@ from apps.api.models import (
     SchemaMappingResponse,
     SourceResponse,
     TabularUploadResponse,
+    WorkspaceListResponse,
+    WorkspaceOverviewResponse,
     WorkspaceResponse,
 )
 from apps.api.repository import (
@@ -42,6 +45,7 @@ from apps.api.repository import (
     MessageRecord,
     ReportRecord,
     TabularUploadRecord,
+    WorkspaceOverview,
     WorkspaceRecord,
 )
 from packages.jobs import JobRecord
@@ -62,6 +66,28 @@ def workspace_response(record: WorkspaceRecord, retention_hours: int) -> Workspa
         consent_accepted=record.consent_accepted_at is not None,
         data_recipients=list(record.data_recipients),
         created_at=record.created_at,
+    )
+
+
+def workspace_list_response(
+    records: list[WorkspaceRecord], retention_hours: int
+) -> WorkspaceListResponse:
+    return WorkspaceListResponse(
+        items=[workspace_response(record, retention_hours) for record in records]
+    )
+
+
+def workspace_overview_response(
+    overview: WorkspaceOverview, retention_hours: int
+) -> WorkspaceOverviewResponse:
+    return WorkspaceOverviewResponse(
+        workspace=workspace_response(overview.workspace, retention_hours),
+        dataset_id=overview.dataset.id if overview.dataset else None,
+        analysis_id=overview.analysis.id if overview.analysis else None,
+        document_collection_id=(
+            overview.document_collection.id if overview.document_collection else None
+        ),
+        conversation_id=overview.conversation.id if overview.conversation else None,
     )
 
 
@@ -271,6 +297,19 @@ def message_response(record: MessageRecord) -> MessageResponse:
             policy_issue_count=record.diagnostics.policy_issue_count,
             criteria_provenance=record.diagnostics.criteria_provenance,
             hybrid_fell_back_to_documents=record.diagnostics.hybrid_fell_back_to_documents,
+            execution=ExecutionSummaryResponse(
+                sql_row_count=record.diagnostics.sql_row_count,
+                sql_execution_ms=(
+                    round(record.diagnostics.sql_execution_seconds * 1000)
+                    if record.diagnostics.sql_execution_seconds is not None
+                    else None
+                ),
+                sql_correction_attempted=record.diagnostics.sql_correction_attempted,
+                retrieval_candidates=record.diagnostics.retrieval_candidates,
+                retrieval_accepted=record.diagnostics.retrieval_accepted,
+                llm_calls=record.diagnostics.llm_calls,
+                llm_fallbacks=record.diagnostics.llm_fallbacks,
+            ),
         ),
         request_id=record.request_id,
         created_at=record.created_at,

@@ -1120,6 +1120,79 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "ExecutionSummaryResponse": {
+        "additionalProperties": false,
+        "description": "Content-free counts describing what the workflow did for one answer.\n\nEvery value comes from the diagnostics the orchestrator already records; there is\nno per-step trace, timestamp, prompt, or model output behind it.",
+        "properties": {
+          "llm_calls": {
+            "title": "Llm Calls",
+            "type": "integer"
+          },
+          "llm_fallbacks": {
+            "title": "Llm Fallbacks",
+            "type": "integer"
+          },
+          "retrieval_accepted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval Accepted"
+          },
+          "retrieval_candidates": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval Candidates"
+          },
+          "sql_correction_attempted": {
+            "title": "Sql Correction Attempted",
+            "type": "boolean"
+          },
+          "sql_execution_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Execution Ms"
+          },
+          "sql_row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Row Count"
+          }
+        },
+        "required": [
+          "sql_row_count",
+          "sql_execution_ms",
+          "sql_correction_attempted",
+          "retrieval_candidates",
+          "retrieval_accepted",
+          "llm_calls",
+          "llm_fallbacks"
+        ],
+        "title": "ExecutionSummaryResponse",
+        "type": "object"
+      },
       "ExportCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1654,6 +1727,9 @@
             "title": "Evidence Statuses",
             "type": "array"
           },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionSummaryResponse"
+          },
           "grounding_status": {
             "enum": [
               "not_applicable",
@@ -1716,7 +1792,8 @@
           "policy_predicate_count",
           "policy_issue_count",
           "criteria_provenance",
-          "hybrid_fell_back_to_documents"
+          "hybrid_fell_back_to_documents",
+          "execution"
         ],
         "title": "ProvenanceResponse",
         "type": "object"
@@ -2074,6 +2151,85 @@
           "sheets"
         ],
         "title": "WorkbookSheetsResponse",
+        "type": "object"
+      },
+      "WorkspaceListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "WorkspaceListResponse",
+        "type": "object"
+      },
+      "WorkspaceOverviewResponse": {
+        "additionalProperties": false,
+        "description": "Identifiers that let a client rebuild its view of one workspace after a reload.\n\nEvery identifier is the newest resource of its kind inside the workspace and is\nresolved through the same tenant-scoped lookups as the resource's own endpoint.",
+        "properties": {
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
+          "document_collection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Collection Id"
+          },
+          "workspace": {
+            "$ref": "#/components/schemas/WorkspaceResponse"
+          }
+        },
+        "required": [
+          "workspace",
+          "dataset_id",
+          "analysis_id",
+          "document_collection_id",
+          "conversation_id"
+        ],
+        "title": "WorkspaceOverviewResponse",
         "type": "object"
       },
       "WorkspaceResponse": {
@@ -5199,6 +5355,124 @@
       }
     },
     "/api/v1/workspaces": {
+      "get": {
+        "description": "Lists the caller's own active workspaces, newest first, so a reloaded client can rediscover its work. Other tenants' workspaces are never listed, and listing does not extend retention.",
+        "operationId": "list_workspaces_api_v1_workspaces_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "List Workspaces",
+        "tags": [
+          "workspaces"
+        ]
+      },
       "post": {
         "description": "Creates a workspace. `Idempotency-Key` is optional and scoped to the authenticated tenant.\nThe same key replays the original workspace and returns `201`; because this operation has no client\nrepresentation, a same-key payload conflict cannot occur. The mapping is retained until the\nworkspace expires or is deleted. It survives a process restart when the deployment enables durable\nmetadata (the Compose topology does) and is otherwise lost on process restart. After a client\ntimeout, retry is safe only with the same key. Without a key, retry may create another workspace.",
         "operationId": "create_workspace_api_v1_workspaces_post",
@@ -6168,6 +6442,137 @@
           }
         ],
         "summary": "Export Workspace",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/overview": {
+      "get": {
+        "description": "Returns the identifiers of the newest dataset, analysis, document collection, and conversation in one workspace. A workspace owned by another tenant is indistinguishable from a missing one.",
+        "operationId": "get_workspace_overview_api_v1_workspaces__workspace_id__overview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Workspace Overview",
         "tags": [
           "workspaces"
         ]
