@@ -585,7 +585,11 @@ Return matching or highest-priority rows identifiable from the table columns.
         dataframe = state["dataframe"]
         return {
             **state,
-            "answer": summarize_sql_result(dataframe),
+            "answer": summarize_sql_result(
+                dataframe,
+                question=state.get("question", ""),
+                sql=state.get("sql", ""),
+            ),
             "status": "complete",
             "diagnostics": AnswerDiagnostics(
                 sql_execution_seconds=state.get("sql_execution_seconds", 0.0),
@@ -606,9 +610,13 @@ Return matching or highest-priority rows identifiable from the table columns.
             else ("traced" if references_criteria else "unreferenced")
         )
         answer = (
-            "Coordinated document guidance with the uploaded table and returned "
-            f"{len(dataframe):,} candidate row(s). Review the source excerpts and generated SQL "
-            "before acting on the result."
+            "Applied the extracted document guidance to the uploaded table.\n\n"
+            + summarize_sql_result(
+                dataframe,
+                question=state.get("question", ""),
+                sql=sql,
+            )
+            + "\n\nReview the source excerpts and generated SQL before acting on the result."
         )
         if not references_criteria:
             answer += (

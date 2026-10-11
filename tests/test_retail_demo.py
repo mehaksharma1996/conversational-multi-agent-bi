@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
@@ -13,11 +14,24 @@ from scripts.generate_retail_demo import (
     build_rows,
     generate_assets,
 )
+from src.agents.sql_agent import answer_with_sql, summarize_sql_result
 from src.ingestion.pdf_loader import load_pdf_file
 from src.ingestion.tabular_loader import load_tabular_file
+from src.llm.base import LLMResponse
+from src.storage.sqlite_store import SQLiteStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_DIR = REPO_ROOT / "sample_data"
+
+
+@dataclass
+class _FixedSQLClient:
+    text: str
+    provider: str = "test"
+    model: str = "fixed-sql"
+
+    def generate(self, prompt: str) -> LLMResponse:
+        return LLMResponse(text=self.text, model=self.model, provider=self.provider)
 
 
 def _committed_rows() -> list[dict[str, str]]:
@@ -128,3 +142,37 @@ def test_generator_returns_fresh_deterministic_rows() -> None:
 
     assert first == second
     assert first is not second
+
+
+def test_retail_ground_truth_flows_through_guarded_sql_and_insights(tmp_path: Path) -> None:
+    with (SAMPLE_DIR / "retail_operations.csv").open("rb") as stream:
+        loaded = load_tabular_file(stream, "retail_operations.csv")
+    expected = json.loads(
+        (SAMPLE_DIR / "retail_operations_ground_truth.json").read_text(encoding="utf-8")
+    )
+    expected_answer = next(
+        item["answer"] for item in expected["questions"] if item["id"] == "top-region-revenue"
+    )
+    stored_table = SQLiteStore(tmp_path / "retail-demo.sqlite3").save_dataframe(loaded.dataframe)
+    sql = (
+        'SELECT "region", ROUND(SUM("revenue"), 2) AS "total_revenue" '
+        'FROM "uploaded_data" GROUP BY "region" '
+        'ORDER BY "total_revenue" DESC, "region" ASC'
+    )
+
+    query_result = answer_with_sql(
+        "Which region had the highest total revenue?",
+        stored_table,
+        _FixedSQLClient(sql),
+    )
+    summary = summarize_sql_result(
+        query_result.result,
+        question="Which region had the highest total revenue?",
+        sql=query_result.sql,
+    )
+
+    top_row = query_result.result.iloc[0]
+    assert top_row["region"] == expected_answer["region"]
+    assert Decimal(str(top_row["total_revenue"])) == Decimal(expected_answer["total_revenue"])
+    assert "highest for region=West at 533,933.01" in summary
+    assert "No currency or unit was inferred for total_revenue" in summary

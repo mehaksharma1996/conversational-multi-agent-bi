@@ -34,10 +34,17 @@ python -m uvicorn apps.api.main:app --port 8000          # terminal 1
 cd apps/web; npm ci; npm run dev                         # terminal 2 -> http://localhost:5173
 ```
 
-Upload [`sample_data/transactions.csv`](sample_data/transactions.csv), confirm the schema, run the
-analysis, and ask *"What limitations or unavailable analysis apply here?"*. Add `GEMINI_API_KEY`
-(and drop `LOCAL_ONLY_MODE`) to unlock SQL, document, and hybrid questions, or use
-[Docker Compose](docs/operations/local-containers.md) (`docker compose up -d --build --wait`).
+Upload [`sample_data/retail_operations.csv`](sample_data/retail_operations.csv), confirm the schema,
+and run the analysis. The deterministic 2,400-row scenario spans 18 months, four regions, five
+categories, three channels, policy-defined review cases, anomalies, and intentional nulls. Its exact
+answers are versioned in
+[`retail_operations_ground_truth.json`](sample_data/retail_operations_ground_truth.json).
+
+Add [`retail_operations_policy.pdf`](sample_data/retail_operations_policy.pdf), configure a provider,
+and drop `LOCAL_ONLY_MODE` to try guarded SQL, document, and hybrid questions. The full scenario and
+regeneration command are documented in [`sample_data/README.md`](sample_data/README.md). You can also
+use [Docker Compose](docs/operations/local-containers.md)
+(`docker compose up -d --build --wait`).
 
 For the supervised path, upload
 [`sample_data/labelled_transactions.csv`](sample_data/labelled_transactions.csv) and confirm
@@ -51,7 +58,10 @@ and a ranked human-review queue; it has no relationship to real people or events
   deadline. A model that obeys a poisoned document still cannot run a destructive query.
 - **Answers carry their evidence.** Each reply shows its route (SQL, document RAG, hybrid, or
   memory), the generated SQL, retrieved sources, citation and quote checks, and a request ID.
-- **Safety is tested, not asserted.** An offline evaluation suite runs 45 cases through the real
+- **SQL insights are calculated, not invented.** Comparisons, rankings, and time changes are derived
+  from executed result rows with explicit null, precision, unit, and causality limitations. See the
+  [decision and tradeoffs](docs/architecture/grounded-sql-insights.md).
+- **Safety is tested, not asserted.** An offline evaluation suite runs 73 cases through the real
   guards with hard-fail safety gates and a committed baseline, and negative controls prove each
   check can fail.
 - **Privacy by construction.** Telemetry and audit logs are allowlist-only (no questions, SQL,

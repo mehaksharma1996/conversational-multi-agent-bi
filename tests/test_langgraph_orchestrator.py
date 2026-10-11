@@ -175,6 +175,8 @@ def test_orchestrator_answers_sql_question() -> None:
     assert result.sql is not None
     assert result.dataframe is not None
     assert result.dataframe["merchant"].tolist() == ["A", "B"]
+    assert "Key observations:" in result.answer
+    assert "All comparable returned values for total_amount are 30." in result.answer
 
 
 def test_orchestrator_answers_document_question() -> None:
