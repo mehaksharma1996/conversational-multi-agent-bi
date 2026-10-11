@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
-import { workspaceFixture } from "./fixtures";
+import { fulfillWorkspaces, workspaceFixture } from "./fixtures";
 import { expect, test } from "./test";
 
 const unauthenticated = {
@@ -52,9 +52,7 @@ test("signed-out visitors see only a sign-in screen with no accessibility violat
 
 test("signing out sends the CSRF token and returns to the sign-in screen", async ({ page }) => {
   await routeOidc(page, { signedIn: true });
-  await page.route("**/api/v1/workspaces", (route) =>
-    route.fulfill({ status: 201, json: workspaceFixture }),
-  );
+  await page.route("**/api/v1/workspaces", (route) => fulfillWorkspaces(route));
   let logoutHeaders: Record<string, string> = {};
   await page.route("**/api/v1/auth/logout", (route) => {
     logoutHeaders = route.request().headers();

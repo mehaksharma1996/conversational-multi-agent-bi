@@ -69,7 +69,7 @@ export function MessageCard({ message, busy, onApproval, onExport }: MessageCard
             <p className="answer-text">{sqlAnswer.headline}</p>
             {sqlAnswer.observations.length > 0 ? (
               <>
-                <h4>Calculated from the result table</h4>
+                <h3>Calculated from the result table</h3>
                 <ul className="observation-list">
                   {sqlAnswer.observations.map((text) => (
                     <li key={text}>{text}</li>
@@ -79,7 +79,7 @@ export function MessageCard({ message, busy, onApproval, onExport }: MessageCard
             ) : null}
             {sqlAnswer.limits.length > 0 ? (
               <>
-                <h4>Limits of this answer</h4>
+                <h3>Limits of this answer</h3>
                 <ul className="limit-list">
                   {sqlAnswer.limits.map((text) => (
                     <li key={text}>{text}</li>
@@ -100,7 +100,7 @@ export function MessageCard({ message, busy, onApproval, onExport }: MessageCard
 
         {message.sql ? (
           <div className="sql-section">
-            <h4>Generated SQL</h4>
+            <h3>Generated SQL</h3>
             <pre className="sql-block" tabIndex={0}>
               <code>{message.sql}</code>
             </pre>

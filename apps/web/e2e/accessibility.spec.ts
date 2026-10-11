@@ -5,6 +5,7 @@ import {
   analysisFixture,
   conversationFixture,
   documentCollectionFixture,
+  fulfillWorkspaces,
   messageFixture,
   readyDatasetFixture,
   reviewDatasetFixture,
@@ -21,9 +22,7 @@ async function expectNoAxeViolations(page: Page, excludePlotly = false) {
 }
 
 async function routeWorkspace(page: Page, workspace = workspaceFixture) {
-  await page.route("**/api/v1/workspaces", (route) =>
-    route.fulfill({ status: 201, json: workspace }),
-  );
+  await page.route("**/api/v1/workspaces", (route) => fulfillWorkspaces(route, workspace));
 }
 
 async function routeTabularJourney(page: Page, includeChart = false) {
@@ -34,7 +33,9 @@ async function routeTabularJourney(page: Page, includeChart = false) {
       await route.fallback();
       return;
     }
-    if (request.method() === "POST" && path === "/api/v1/workspaces") {
+    if (request.method() === "GET" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 200, json: { items: [] } });
+    } else if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: workspaceFixture });
     } else if (request.method() === "POST" && path.endsWith("/tabular-uploads")) {
       await route.fulfill({ status: 201, json: uploadFixture });
@@ -113,7 +114,9 @@ test("axe baseline: chat answer and provenance warning", async ({ page }) => {
       await route.fallback();
       return;
     }
-    if (request.method() === "POST" && path === "/api/v1/workspaces") {
+    if (request.method() === "GET" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 200, json: { items: [] } });
+    } else if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: { ...workspaceFixture, consent_accepted: true } });
     } else if (request.method() === "POST" && path.endsWith("/document-collections")) {
       await route.fulfill({ status: 201, json: documentCollectionFixture });
@@ -155,7 +158,9 @@ test("axe baseline: pending SQL approval controls", async ({ page }) => {
       await route.fallback();
       return;
     }
-    if (request.method() === "POST" && path === "/api/v1/workspaces") {
+    if (request.method() === "GET" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 200, json: { items: [] } });
+    } else if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: { ...workspaceFixture, consent_accepted: true } });
     } else if (request.method() === "POST" && path.endsWith("/document-collections")) {
       await route.fulfill({ status: 201, json: documentCollectionFixture });
@@ -204,6 +209,7 @@ test("axe baseline: error banner", async ({ page }) => {
 test("keyboard-only journey reaches content in order with visible focus and no trap", async ({ page }) => {
   await routeWorkspace(page);
   await page.goto("/");
+  await expect(page.getByText("Local workspace ready")).toBeVisible();
 
   await page.keyboard.press("Tab");
   const skipLink = page.getByRole("link", { name: "Skip to main content" });
@@ -212,8 +218,15 @@ test("keyboard-only journey reaches content in order with visible focus and no t
   await page.keyboard.press("Enter");
   await expect(page.locator("#main-content")).toBeFocused();
 
+  // The guided demo is the first thing in the page, then its two links, then the upload form.
   await page.keyboard.press("Tab");
+  const demoButton = page.getByRole("button", { name: "Load demo data and policy" });
+  await expect(demoButton).toBeFocused();
+  await expect(demoButton).toHaveCSS("outline-width", "3px");
   const fileInput = page.getByLabel("CSV or Excel file");
+  for (let step = 0; step < 6 && !(await fileInput.evaluate((el) => el === document.activeElement)); step += 1) {
+    await page.keyboard.press("Tab");
+  }
   await expect(fileInput).toBeFocused();
   await expect(fileInput).toHaveCSS("outline-width", "3px");
 

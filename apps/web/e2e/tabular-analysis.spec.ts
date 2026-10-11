@@ -19,6 +19,10 @@ test("analyst reviews the schema before running deterministic analysis", async (
       return;
     }
 
+    if (request.method() === "GET" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 200, json: { items: [] } });
+      return;
+    }
     if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: workspaceFixture });
       return;
@@ -76,6 +80,10 @@ test("analyst indexes a PDF and receives a consented cited answer", async ({ pag
       return;
     }
 
+    if (request.method() === "GET" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 200, json: { items: [] } });
+      return;
+    }
     if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: workspaceFixture });
       return;
@@ -123,7 +131,7 @@ test("analyst indexes a PDF and receives a consented cited answer", async ({ pag
   await page.getByRole("button", { name: "Ask workbench" }).click();
 
   await expect(page.getByText(messageFixture.answer)).toBeVisible();
-  await expect(page.getByText("rag route")).toBeVisible();
+  await expect(page.getByText("rag route", { exact: true })).toBeVisible();
   await page.getByText("Retrieved document sources").click();
   await expect(page.getByText("policy.pdf, page 2")).toBeVisible();
 });

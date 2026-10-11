@@ -420,9 +420,6 @@ export default function App() {
 
   return (
     <>
-      <a className="skip-link" href="#main-content">
-        Skip to main content
-      </a>
       <header className="site-header">
         <a className="brand" href="#main-content">
           <span className="brand-mark" aria-hidden="true" />

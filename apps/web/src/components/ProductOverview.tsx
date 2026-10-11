@@ -7,7 +7,7 @@ export function ProductOverview() {
   return (
     <section className="hero" aria-labelledby="page-title">
       <p className="eyebrow">Review-first analytics</p>
-      <h1 id="page-title">Ask business questions of your own data, with the evidence in view.</h1>
+      <h1 id="page-title">Ask your own data direct questions, with the evidence in view.</h1>
       <p className="hero-lede">
         Upload a table and policy PDFs, then ask questions about both. Numbers come from
         validated read-only SQL and deterministic analysis, and every answer shows the query,
