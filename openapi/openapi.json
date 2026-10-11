@@ -1672,6 +1672,25 @@
             "title": "Invalid Citation Count",
             "type": "integer"
           },
+          "policy_issue_count": {
+            "title": "Policy Issue Count",
+            "type": "integer"
+          },
+          "policy_predicate_count": {
+            "title": "Policy Predicate Count",
+            "type": "integer"
+          },
+          "policy_sql_status": {
+            "enum": [
+              "not_applicable",
+              "structurally_verified",
+              "mismatch",
+              "conflicting_evidence",
+              "not_evaluated"
+            ],
+            "title": "Policy Sql Status",
+            "type": "string"
+          },
           "source_count": {
             "title": "Source Count",
             "type": "integer"
@@ -1693,6 +1712,9 @@
           "unverified_quote_count",
           "uncited_claim_count",
           "evidence_statuses",
+          "policy_sql_status",
+          "policy_predicate_count",
+          "policy_issue_count",
           "criteria_provenance",
           "hybrid_fell_back_to_documents"
         ],

@@ -180,7 +180,7 @@ def test_disabled_citation_validation_is_caught(fixtures: FixtureSet) -> None:
 def test_disabled_criteria_sanitization_is_caught(fixtures: FixtureSet) -> None:
     with patch(
         "src.orchestration.langgraph_orchestrator._sanitize_hybrid_criteria",
-        lambda criteria, excerpts: criteria,
+        lambda criteria, excerpts, **_kwargs: criteria,
     ):
         report = _only(
             fixtures,

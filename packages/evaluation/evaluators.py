@@ -320,6 +320,30 @@ def _hybrid(spec: dict[str, Any], obs: Observation) -> list[Check]:
         return [Check("hybrid.criteria_keys", False, "no answer was produced")]
     diagnostics = obs.result.diagnostics
     checks: list[Check] = []
+    if "policy_sql_status" in spec:
+        checks.append(
+            Check(
+                "hybrid.policy_sql_status",
+                diagnostics.policy_sql_status == spec["policy_sql_status"],
+                f"expected {spec['policy_sql_status']}, observed {diagnostics.policy_sql_status}",
+            )
+        )
+    if "min_policy_predicates" in spec:
+        checks.append(
+            Check(
+                "hybrid.policy_predicates",
+                diagnostics.policy_predicate_count >= spec["min_policy_predicates"],
+                f"{diagnostics.policy_predicate_count} policy predicate(s)",
+            )
+        )
+    if "min_policy_issues" in spec:
+        checks.append(
+            Check(
+                "hybrid.policy_issues",
+                diagnostics.policy_issue_count >= spec["min_policy_issues"],
+                f"{diagnostics.policy_issue_count} policy issue(s)",
+            )
+        )
     if "criteria_keys" in spec:
         observed = sorted(diagnostics.criteria_keys)
         checks.append(

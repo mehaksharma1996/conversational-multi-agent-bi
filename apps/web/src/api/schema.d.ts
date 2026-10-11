@@ -1273,6 +1273,15 @@ export interface components {
             hybrid_fell_back_to_documents: boolean;
             /** Invalid Citation Count */
             invalid_citation_count: number;
+            /** Policy Issue Count */
+            policy_issue_count: number;
+            /** Policy Predicate Count */
+            policy_predicate_count: number;
+            /**
+             * Policy Sql Status
+             * @enum {string}
+             */
+            policy_sql_status: "not_applicable" | "structurally_verified" | "mismatch" | "conflicting_evidence" | "not_evaluated";
             /** Source Count */
             source_count: number;
             /** Uncited Claim Count */

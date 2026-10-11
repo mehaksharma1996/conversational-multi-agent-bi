@@ -11,7 +11,7 @@
         "pass_rate": 1.0
       },
       "hybrid": {
-        "cases": 13,
+        "cases": 16,
         "pass_rate": 1.0
       },
       "mcp_tool_safety": {
@@ -51,10 +51,27 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 75
+    "cases": 78
   },
   "baseline_version": 1,
   "cases": {
+    "hybrid-conflicting-policy-evidence-falls-back": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "grounding.evidence_statuses": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "hybrid-extra-key-criteria-rejected": {
       "capability": "hybrid",
       "checks": {
@@ -238,6 +255,24 @@
       },
       "passed": true
     },
+    "hybrid-structured-policy-predicate-verifies-sql": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.provenance": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.required_fragments": true,
+        "sql.row_count": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "hybrid-unparseable-criteria-fall-back-to-excerpts": {
       "capability": "hybrid",
       "checks": {
@@ -278,6 +313,23 @@
         "route.expected": true,
         "safety.dataset_intact": true,
         "safety.sql_valid_read_only": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-wrong-threshold-operator-falls-back-before-execution": {
+      "capability": "hybrid",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
         "trajectory.no_unnecessary_calls": true,
         "trajectory.within_call_budget": true
       },
@@ -1125,14 +1177,14 @@
     }
   },
   "metadata": {
-    "dataset_revision": "2026-10-06.2",
+    "dataset_revision": "2026-10-11.1",
     "dataset_version": "v1",
     "embedding": {
       "evaluation_embedder": "hashing-bow-1024-v1"
     },
     "evaluator_version": "1.1.0",
     "prompt_fingerprints": {
-      "criteria_extraction": "fae37233e5c53ffa",
+      "criteria_extraction": "4f4c0434fffff3a7",
       "rag_answer": "435edac981b875f4",
       "route_classification": "ee43d21646bb69a3",
       "sql_correction": "c6b5b17508cb7692",

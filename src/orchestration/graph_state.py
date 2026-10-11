@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 from src.agents.rag_agent import EvidenceStatus
+from src.orchestration.policy_grounding import PolicySQLStatus
 
 RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported"]
 AnswerStatus = Literal["complete", "pending_approval", "rejected"]
@@ -51,6 +52,9 @@ class AnswerDiagnostics:
     criteria_rejected_keys: int = 0
     criteria_dropped_values: int = 0
     criteria_provenance: CriteriaProvenance = "not_applicable"
+    policy_sql_status: PolicySQLStatus = "not_applicable"
+    policy_predicate_count: int = 0
+    policy_issue_count: int = 0
     hybrid_fell_back_to_documents: bool = False
     structured_output_repairs: int = 0
     structured_output_failures: int = 0
@@ -91,3 +95,5 @@ class QuestionGraphState(TypedDict, total=False):
     approval_decision: Literal["approve", "reject"]
     approval_sql: str | None
     sql_terminal_failure: bool
+    policy_sql_status: PolicySQLStatus
+    policy_sql_issues: tuple[str, ...]

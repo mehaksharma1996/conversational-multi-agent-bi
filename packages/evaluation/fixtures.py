@@ -87,6 +87,9 @@ HYBRID_EXPECT_KEYS = {
     "provenance",
     "fell_back_to_documents",
     "forbidden_sql_prompt_fragments",
+    "policy_sql_status",
+    "min_policy_predicates",
+    "min_policy_issues",
 }
 PROMPT_EXPECT_KEYS = {"must_not_contain", "must_contain"}
 LLM_CALL_KEYS = {"max", "exact"}

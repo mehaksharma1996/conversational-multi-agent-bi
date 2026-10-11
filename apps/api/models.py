@@ -332,6 +332,15 @@ class ProvenanceResponse(StrictModel):
             "NOT_EVALUATED",
         ]
     ]
+    policy_sql_status: Literal[
+        "not_applicable",
+        "structurally_verified",
+        "mismatch",
+        "conflicting_evidence",
+        "not_evaluated",
+    ]
+    policy_predicate_count: int
+    policy_issue_count: int
     criteria_provenance: Literal[
         "not_applicable",
         "traced",

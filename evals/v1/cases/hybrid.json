@@ -587,5 +587,131 @@
       "approval_interrupt": true
     },
     "deterministic_only": true
+  },
+  {
+    "id": "hybrid-structured-policy-predicate-verifies-sql",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "A source-attributed field, exclusive operator, value, currency unit, and null behavior are structurally matched before SQL execution.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500 ORDER BY \"amount\" DESC"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "hybrid",
+      "hybrid": {
+        "policy_sql_status": "structurally_verified",
+        "min_policy_predicates": 1,
+        "provenance": "traced"
+      },
+      "sql": {
+        "required_fragments": ["amount\" > 500"],
+        "row_count": 4
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-wrong-threshold-operator-falls-back-before-execution",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "A read-only query using an inclusive operator must not execute when the retrieved policy says the threshold is exclusive.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" >= 500"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "answer_contains": ["could not safely translate"],
+      "hybrid": {
+        "policy_sql_status": "mismatch",
+        "min_policy_predicates": 1,
+        "min_policy_issues": 1,
+        "fell_back_to_documents": true
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-conflicting-policy-evidence-falls-back",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the conflicting policy amount rules?",
+    "rationale": "Contradictory source-attributed operators for the same field and value are not silently resolved or executed.",
+    "context": {"dataset": "transactions", "corpus": "conflicting_policy"},
+    "script": {
+      "rag_answer": "The policy contains conflicting amount rules. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          },
+          {
+            "field": "amount",
+            "operator": "lte",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "any"
+      },
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "hybrid": {
+        "policy_sql_status": "conflicting_evidence",
+        "min_policy_predicates": 2,
+        "min_policy_issues": 1,
+        "fell_back_to_documents": true
+      },
+      "grounding": {
+        "evidence_statuses": ["CONFLICTING_EVIDENCE", "NOT_EVALUATED"]
+      }
+    },
+    "deterministic_only": true
   }
 ]

@@ -48,6 +48,40 @@ class FakeRetriever:
         )
 
 
+class PolicyRetriever:
+    def retrieve(self, question: str, top_k: int = 4) -> RetrievalResult:
+        return RetrievalResult(
+            question=question,
+            chunks=[
+                RetrievedChunk(
+                    text="Transactions with amount over 20 dollars require review.",
+                    metadata={"filename": "policy.pdf", "page_number": 1, "chunk_index": 0},
+                    distance=0.1,
+                )
+            ],
+            candidates_considered=1,
+        )
+
+
+class PolicyHybridLLM(FakeLLM):
+    def __init__(self, sql: str) -> None:
+        super().__init__(text="unused")
+        self.sql = sql
+
+    def generate(self, prompt: str) -> LLMResponse:
+        if "careful document analyst" in prompt:
+            text = "Transactions with amount over 20 dollars require review. Source 1"
+        elif "Extract business criteria" in prompt:
+            text = (
+                '{"predicates":[{"field":"amount","operator":"gt","value":20,'
+                '"unit":"currency","source":1,"null_behavior":"exclude"}],'
+                '"predicate_join":"all"}'
+            )
+        else:
+            text = self.sql
+        return LLMResponse(text=text, model=self.model, provider=self.provider)
+
+
 def _stored_table():
     database_path = isolated_database_path("orchestrator")
     dataframe = pd.DataFrame(
@@ -309,6 +343,73 @@ def test_hybrid_approval_interrupts_then_executes_after_approval() -> None:
     assert pending.dataframe is None
     assert completed.status == "complete"
     assert completed.dataframe is not None
+
+
+def test_structured_policy_predicate_must_match_sql_before_execution(monkeypatch) -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM(
+            'SELECT merchant, amount FROM uploaded_data WHERE "amount" >= 20'
+        ),
+        stored_table=_stored_table(),
+        document_retriever=PolicyRetriever(),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "execute_sql",
+        lambda *args, **kwargs: pytest.fail("policy-mismatched SQL was executed"),
+    )
+
+    result = orchestrator.answer("Which transactions violate the uploaded policy?")
+
+    assert result.route == "rag"
+    assert result.diagnostics.policy_sql_status == "mismatch"
+    assert result.diagnostics.hybrid_fell_back_to_documents is True
+    assert "could not safely translate" in result.answer
+
+
+def test_structured_policy_predicate_is_linked_to_executed_rows_and_insight() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM(
+            'SELECT merchant, amount FROM uploaded_data WHERE "amount" > 20 ORDER BY amount DESC'
+        ),
+        stored_table=_stored_table(),
+        document_retriever=PolicyRetriever(),
+    )
+
+    result = orchestrator.answer("Which transactions violate the uploaded policy?")
+
+    assert result.route == "hybrid"
+    assert result.dataframe is not None
+    assert result.dataframe["amount"].tolist() == [30.0]
+    assert result.diagnostics.policy_sql_status == "structurally_verified"
+    assert result.diagnostics.policy_predicate_count == 1
+    assert "Policy-to-SQL structural check matched" in result.answer
+    assert "Key observations:" in result.answer
+
+
+def test_structured_policy_check_precedes_approval_and_survives_resume() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM(
+            'SELECT merchant, amount FROM uploaded_data WHERE "amount" > 20 ORDER BY amount DESC'
+        ),
+        stored_table=_stored_table(),
+        document_retriever=PolicyRetriever(),
+    )
+
+    pending = orchestrator.answer(
+        "Which transactions violate the uploaded policy?",
+        require_sql_approval=True,
+        thread_id="structured-policy-approval",
+    )
+    completed = orchestrator.resume_approval(
+        "structured-policy-approval",
+        decision="approve",
+    )
+
+    assert pending.status == "pending_approval"
+    assert pending.diagnostics.policy_sql_status == "structurally_verified"
+    assert completed.status == "complete"
+    assert completed.diagnostics.policy_sql_status == "structurally_verified"
 
 
 def test_hybrid_approval_rejection_never_executes(monkeypatch) -> None:

@@ -15,9 +15,12 @@ from scripts.generate_retail_demo import (
     generate_assets,
 )
 from src.agents.sql_agent import answer_with_sql, summarize_sql_result
+from src.documents.retriever import RetrievalResult
+from src.documents.vector_store import RetrievedChunk
 from src.ingestion.pdf_loader import load_pdf_file
 from src.ingestion.tabular_loader import load_tabular_file
 from src.llm.base import LLMResponse
+from src.orchestration.langgraph_orchestrator import QuestionOrchestrator
 from src.storage.sqlite_store import SQLiteStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -176,3 +179,113 @@ def test_retail_ground_truth_flows_through_guarded_sql_and_insights(tmp_path: Pa
     assert Decimal(str(top_row["total_revenue"])) == Decimal(expected_answer["total_revenue"])
     assert "highest for region=West at 533,933.01" in summary
     assert "No currency or unit was inferred for total_revenue" in summary
+
+
+class _RetailPolicyRetriever:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def retrieve(self, question: str, top_k: int = 4) -> RetrievalResult:
+        return RetrievalResult(
+            question=question,
+            chunks=[
+                RetrievedChunk(
+                    text=self.text,
+                    metadata={
+                        "filename": "retail_operations_policy.pdf",
+                        "page_number": 1,
+                        "chunk_index": 0,
+                    },
+                    distance=0.1,
+                    relevance_score=0.9,
+                )
+            ],
+            candidates_considered=1,
+        )
+
+
+class _RetailHybridClient:
+    provider = "test"
+    model = "retail-hybrid"
+
+    def generate(self, prompt: str) -> LLMResponse:
+        if "careful document analyst" in prompt:
+            text = (
+                "The policy defines three review rules and treats blank days as unknown. Source 1"
+            )
+        elif "Extract business criteria" in prompt:
+            text = json.dumps(
+                {
+                    "predicates": [
+                        {
+                            "field": "discount_rate",
+                            "operator": "gte",
+                            "value": 0.3,
+                            "unit": "decimal_fraction",
+                            "source": 1,
+                            "null_behavior": "unknown",
+                        },
+                        {
+                            "field": "gross_margin_rate",
+                            "operator": "lt",
+                            "value": 0.1,
+                            "unit": "decimal_fraction",
+                            "source": 1,
+                            "null_behavior": "unknown",
+                        },
+                        {
+                            "field": "fulfillment_days",
+                            "operator": "gte",
+                            "value": 10,
+                            "unit": "days",
+                            "source": 1,
+                            "null_behavior": "unknown",
+                        },
+                    ],
+                    "predicate_join": "any",
+                }
+            )
+        else:
+            text = (
+                'SELECT COUNT(*) AS "review_transaction_count" FROM "uploaded_data" '
+                'WHERE "discount_rate" >= 0.30 OR "gross_margin_rate" < 0.10 '
+                'OR "fulfillment_days" >= 10'
+            )
+        return LLMResponse(text=text, model=self.model, provider=self.provider)
+
+
+def test_retail_policy_predicates_drive_verified_sql_and_grounded_insight(
+    tmp_path: Path,
+) -> None:
+    with (SAMPLE_DIR / "retail_operations.csv").open("rb") as stream:
+        loaded = load_tabular_file(stream, "retail_operations.csv")
+    with (SAMPLE_DIR / "retail_operations_policy.pdf").open("rb") as stream:
+        policy = load_pdf_file(stream, "retail_operations_policy.pdf")
+    truth = json.loads(
+        (SAMPLE_DIR / "retail_operations_ground_truth.json").read_text(encoding="utf-8")
+    )
+    expected = next(
+        item["answer"]["review_transaction_count"]
+        for item in truth["questions"]
+        if item["id"] == "policy-review-count"
+    )
+    table = SQLiteStore(tmp_path / "retail-hybrid.sqlite3").save_dataframe(loaded.dataframe)
+    orchestrator = QuestionOrchestrator(
+        llm_client=_RetailHybridClient(),
+        stored_table=table,
+        document_retriever=_RetailPolicyRetriever(policy.text),
+    )
+
+    result = orchestrator.answer(
+        "According to the uploaded policy document, how many transactions meet a review rule?"
+    )
+
+    assert result.route == "hybrid"
+    assert result.dataframe is not None
+    assert int(result.dataframe.iloc[0]["review_transaction_count"]) == expected
+    assert result.diagnostics.policy_sql_status == "structurally_verified"
+    assert result.diagnostics.policy_predicate_count == 3
+    assert "review_transaction_count=45" in result.answer
+    assert result.sources and result.sources[0].startswith(
+        "Source 1 - retail_operations_policy.pdf"
+    )
