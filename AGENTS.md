@@ -4,10 +4,18 @@
 
 - Use the account-level five-hour **Usage remaining** percentage as the control signal. The weekly
   percentage does not trigger this guardrail unless the user explicitly says otherwise.
-- Check the five-hour percentage before starting material issue work and again after substantial
-  implementation or verification milestones. Use an available first-party usage-status capability.
-  If the percentage cannot be read programmatically, tell the user and ask for the current five-hour
-  percentage before starting or continuing substantial changes.
+- Agents cannot read the usage meter, so the user supplies the figure. Do not attempt to look it up
+  and do not treat its absence as an error or a reason to refuse the task.
+- Ask the user for the current five-hour **Usage remaining** percentage, and wait for the answer,
+  before committing to the next part of the work: before starting material issue work, after each
+  substantial implementation or verification milestone, and before beginning each subsequent
+  phase or subtask of a multi-part task. Ask in one short line, for example: "Five-hour usage
+  remaining? (I'll continue normally above 15%.)"
+- If the user states the percentage in their prompt, use it for the current checkpoint instead of
+  asking again. A stated percentage applies only to that checkpoint; ask again at the next one.
+- If no answer is available (for example, a non-interactive run), finish the current atomic
+  operation, commit the work completed so far, and report that the next part is waiting on the
+  percentage rather than guessing a value.
 - Above 15% remaining, work normally.
 - At or below 15% remaining, do not start a new issue or substantial subtask. Finish the current
   atomic operation and prepare to wrap up.
