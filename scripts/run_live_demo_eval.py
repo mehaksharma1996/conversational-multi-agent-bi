@@ -26,13 +26,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from packages.evaluation.live_demo import (
-    LiveBudget,
-    LiveBudgetError,
-    RunInputs,
-    plan,
-    run_live_demo_eval,
-)
+from packages.evaluation.live_demo import LiveBudget, LiveBudgetError, plan
+from scripts.live_demo_runner import RunInputs, run_live_demo_eval
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = ROOT / "evals" / "live" / "v1" / "cases.json"

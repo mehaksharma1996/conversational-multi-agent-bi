@@ -20,14 +20,13 @@ from packages.evaluation.live_demo import (
     LiveBudget,
     LiveBudgetError,
     LiveBudgetExceeded,
-    RunInputs,
     evaluate_message,
     load_cases,
     load_oracle,
     reference_rows,
-    run_live_demo_eval,
 )
 from scripts import run_live_demo_eval as cli
+from scripts.live_demo_runner import RunInputs, run_live_demo_eval
 from src.llm.base import LLMGenerationError, LLMResponse
 from src.llm.gemini_client import GeminiClient
 from src.llm.observability import ObservedLLMClient, report_usage
