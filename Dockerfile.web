@@ -23,7 +23,10 @@ COPY apps/web/ ./
 RUN npm run build
 
 # ---------------------------------------------------------------------------------
-FROM nginxinc/nginx-unprivileged:1.30-alpine@sha256:15c994d10d6d78658721c3bcafff14cb281fba2a4bdf9d5ba92c416a472516e3 AS runtime
+# The -slim variant is the same nginx without the optional dynamic modules (image-filter, xslt,
+# geoip, njs). This site serves static files and proxies the API, so it needs none of them, and
+# dropping them removes libgd/libtiff/libxslt (CVE-2026-4775 came in through libtiff).
+FROM nginxinc/nginx-unprivileged:1.30-alpine-slim@sha256:3af0c10d960cc2502427fe1219c52989d309e7d65596869c60a34fd2fa2406f0 AS runtime
 
 COPY --from=build /web/dist /usr/share/nginx/html
 COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf
