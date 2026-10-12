@@ -142,7 +142,7 @@ export function SchemaReview({ dataset, busy, onConfirm }: SchemaReviewProps) {
 
       <details className="profile-table-wrap">
         <summary>Inspect column profile</summary>
-        <div className="table-scroll">
+        <div className="table-scroll" role="region" tabIndex={0} aria-label="Column profile">
           <table>
             <thead>
               <tr>

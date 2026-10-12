@@ -140,10 +140,11 @@ export function ConversationPanel({
             both.
           </p>
         ) : null}
-        {messages.map((message) => (
+        {messages.map((message, index) => (
           <MessageCard
             key={message.id}
             message={message}
+            position={index + 1}
             busy={busy}
             onApproval={onApproval}
             onExport={onExport}

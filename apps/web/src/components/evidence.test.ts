@@ -42,6 +42,8 @@ describe("splitSqlAnswer", () => {
 
   it("separates the headline, calculated observations, and limits", () => {
     expect(splitSqlAnswer(rendered)).toEqual({
+      preface: [],
+      notes: [],
       headline: "The query returned 4 rows across 2 columns.",
       observations: ["region=West has the highest total_revenue at 533933.01."],
       limits: ["No currency or unit was inferred for total_revenue."],
@@ -50,9 +52,31 @@ describe("splitSqlAnswer", () => {
 
   it("recognises the empty-result sentence", () => {
     expect(splitSqlAnswer("The query ran successfully but returned no matching rows.")).toEqual({
+      preface: [],
+      notes: [],
       headline: "The query ran successfully but returned no matching rows.",
       observations: [],
       limits: [],
+    });
+  });
+
+  it("keeps the sentences a hybrid answer adds before and after the insight block", () => {
+    const hybrid = [
+      "Applied the extracted document guidance to the uploaded table.",
+      "The query returned 1 row across 1 column.\nKey observations:\n- Metric result: transaction_count=13.",
+      "Review the source excerpts and generated SQL before acting on the result.",
+      "Policy-to-SQL structural check matched the field. This does not prove the policy is complete.",
+    ].join("\n\n");
+
+    expect(splitSqlAnswer(hybrid)).toEqual({
+      preface: ["Applied the extracted document guidance to the uploaded table."],
+      headline: "The query returned 1 row across 1 column.",
+      observations: ["Metric result: transaction_count=13."],
+      limits: [],
+      notes: [
+        "Review the source excerpts and generated SQL before acting on the result.",
+        "Policy-to-SQL structural check matched the field. This does not prove the policy is complete.",
+      ],
     });
   });
 

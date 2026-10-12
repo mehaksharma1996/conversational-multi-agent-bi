@@ -1,6 +1,13 @@
 import { createDistServer } from "./server";
+import { startStack, stopStack } from "./real/stack";
 
 export default async function globalSetup() {
+  // Local real stack: the production API with a scripted provider, plus the built web bundle.
+  if (process.env.E2E_REAL_STACK === "scripted") {
+    await startStack();
+    return () => stopStack();
+  }
+
   // Target an already-running deployment (for example the nginx image) instead.
   if (process.env.E2E_BASE_URL) return;
 

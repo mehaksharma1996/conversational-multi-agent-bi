@@ -437,7 +437,7 @@ export default function App() {
             {workspace
               ? "Local workspace ready"
               : task === "workspace"
-                ? "Starting workspace…"
+                ? "Restoring or starting workspace…"
                 : "Workspace unavailable"}
           </div>
           <button

@@ -224,7 +224,8 @@ test("keyboard-only journey reaches content in order with visible focus and no t
   await expect(demoButton).toBeFocused();
   await expect(demoButton).toHaveCSS("outline-width", "3px");
   const fileInput = page.getByLabel("CSV or Excel file");
-  for (let step = 0; step < 6 && !(await fileInput.evaluate((el) => el === document.activeElement)); step += 1) {
+  const focusedCsvInput = page.locator('input[accept=".csv,.xls,.xlsx"]:focus');
+  for (let step = 0; step < 6 && (await focusedCsvInput.count()) === 0; step += 1) {
     await page.keyboard.press("Tab");
   }
   await expect(fileInput).toBeFocused();

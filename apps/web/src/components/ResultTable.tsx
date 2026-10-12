@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 
 const PREVIEW_ROWS = 25;
 
@@ -24,9 +24,15 @@ function displayValue(value: unknown): string {
  * The exact rows the query returned. Large results show a preview first so the page stays
  * responsive; the full set is one button away and in the CSV and Excel exports.
  */
-export function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
+export function ResultTable({
+  rows,
+  label,
+}: {
+  rows: Record<string, unknown>[];
+  /** Distinguishes this table from the others on the page for assistive technology. */
+  label: string;
+}) {
   const [showAll, setShowAll] = useState(false);
-  const captionId = useId();
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   const visible = showAll ? rows : rows.slice(0, PREVIEW_ROWS);
   const numeric = new Set(
@@ -39,11 +45,11 @@ export function ResultTable({ rows }: { rows: Record<string, unknown>[] }) {
       <div
         className="table-scroll"
         role="region"
-        aria-labelledby={captionId}
+        aria-label={label}
         tabIndex={0}
       >
         <table>
-          <caption id={captionId}>
+          <caption>
             Query result: {rows.length.toLocaleString()} row{rows.length === 1 ? "" : "s"}
             {rows.length > visible.length ? ` (showing the first ${visible.length})` : ""}
           </caption>

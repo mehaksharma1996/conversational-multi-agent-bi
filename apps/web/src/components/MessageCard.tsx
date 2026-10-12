@@ -8,6 +8,8 @@ import { parseSource, splitSqlAnswer } from "./evidence";
 
 interface MessageCardProps {
   message: Message;
+  /** 1-based position in the conversation; makes each result table's accessible name unique. */
+  position: number;
   busy: boolean;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
   onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
@@ -33,7 +35,7 @@ function withCitationLinks(text: string, messageId: string, known: Set<number>):
   });
 }
 
-export function MessageCard({ message, busy, onApproval, onExport }: MessageCardProps) {
+export function MessageCard({ message, position, busy, onApproval, onExport }: MessageCardProps) {
   const sources = message.sources.map((source) => parseSource(source.citation));
   const known = new Set(
     sources.flatMap((source) => (source.number === null ? [] : [source.number])),
@@ -66,6 +68,11 @@ export function MessageCard({ message, busy, onApproval, onExport }: MessageCard
           </p>
         ) : sqlAnswer ? (
           <div className="answer-structured">
+            {sqlAnswer.preface.map((text) => (
+              <p key={text} className="answer-text">
+                {text}
+              </p>
+            ))}
             <p className="answer-text">{sqlAnswer.headline}</p>
             {sqlAnswer.observations.length > 0 ? (
               <>
@@ -87,6 +94,11 @@ export function MessageCard({ message, busy, onApproval, onExport }: MessageCard
                 </ul>
               </>
             ) : null}
+            {sqlAnswer.notes.map((text) => (
+              <p key={text} className="answer-note">
+                {text}
+              </p>
+            ))}
             <p className="field-hint">
               These statements are computed by code from the rows below, not written by a model.
               The API does not return cell-level references, so check them against the table.
@@ -118,7 +130,10 @@ export function MessageCard({ message, busy, onApproval, onExport }: MessageCard
 
         {message.status === "complete" && message.rows && message.rows.length > 0 ? (
           <>
-            <ResultTable rows={message.rows} />
+            <ResultTable
+              rows={message.rows}
+              label={`Query result for answer ${position}`}
+            />
             <div className="button-row">
               <button
                 className="button button--secondary"

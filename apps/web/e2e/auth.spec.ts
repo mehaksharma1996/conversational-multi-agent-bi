@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
-import { fulfillWorkspaces, workspaceFixture } from "./fixtures";
+import { fulfillWorkspaces } from "./fixtures";
 import { expect, test } from "./test";
 
 const unauthenticated = {

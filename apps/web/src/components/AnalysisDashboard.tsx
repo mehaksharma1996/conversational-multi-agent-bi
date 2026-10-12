@@ -41,7 +41,7 @@ function RecordsTable({ caption, records }: { caption: string; records: Record<s
   if (records.length === 0 || columns.length === 0) return null;
 
   return (
-    <div className="table-scroll">
+    <div className="table-scroll" role="region" tabIndex={0} aria-label={caption}>
       <table>
         <caption>{caption}</caption>
         <thead>

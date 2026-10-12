@@ -37,7 +37,8 @@ export function DemoGuide({
     {
       label: "Confirm the schema mapping",
       done: dataConfirmed,
-      hint: "Review the suggested column mapping; nothing is queried until you confirm.",
+      hint:
+        "Revenue, date, and region are mapped sensibly. The suggested customer ID (customer_segment) and label (status) are not meaningful for this table and no sample question uses them; set them to Not mapped if you prefer. Nothing is queried until you confirm.",
     },
     {
       label: "Run the deterministic analysis (optional)",

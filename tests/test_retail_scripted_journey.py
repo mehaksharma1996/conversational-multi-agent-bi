@@ -181,3 +181,14 @@ def test_an_approved_query_runs_and_an_unsafe_edit_is_refused(client: TestClient
     assert approved.status_code == 200
     assert approved.json()["status"] == "complete"
     assert approved.json()["rows"] == [{"transaction_count": 13}]
+
+
+def test_earlier_questions_in_the_conversation_do_not_change_the_current_answer(
+    client: TestClient,
+) -> None:
+    ids = _journey(client)
+    _ask(client, ids["conversation"], retail_app.TOTAL)
+
+    second = _ask(client, ids["conversation"], retail_app.REGION)
+
+    assert second["rows"][0]["region"] == "West"

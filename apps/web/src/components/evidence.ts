@@ -47,16 +47,22 @@ export function parseSource(citation: string): ParsedSource {
  * format is shown unchanged, so a format change degrades to plain text rather than losing content.
  */
 export interface SqlAnswerParts {
+  /** Sentences the workflow adds before the insight block (hybrid answers). */
+  preface: string[];
   headline: string;
   observations: string[];
   limits: string[];
+  /** Sentences the workflow adds after it (review reminder, policy-check statement). */
+  notes: string[];
 }
 
-export function splitSqlAnswer(answer: string): SqlAnswerParts | null {
-  const lines = answer.split("\n").map((line) => line.trimEnd());
+function parseInsightBlock(
+  block: string,
+): { headline: string; observations: string[]; limits: string[] } | null {
+  const lines = block.split("\n").map((line) => line.trimEnd());
   const first = lines[0] ?? "";
   if (!/^The query (returned|ran successfully)/.test(first)) return null;
-  const parts: SqlAnswerParts = { headline: first, observations: [], limits: [] };
+  const parts = { headline: first, observations: [] as string[], limits: [] as string[] };
   let section: "observations" | "limits" | null = null;
   for (const line of lines.slice(1)) {
     if (line === "Key observations:") section = "observations";
@@ -65,6 +71,21 @@ export function splitSqlAnswer(answer: string): SqlAnswerParts | null {
     else if (line.trim() !== "") return null; // unknown structure: do not guess
   }
   return parts;
+}
+
+export function splitSqlAnswer(answer: string): SqlAnswerParts | null {
+  const paragraphs = answer.split(/\n{2,}/).map((paragraph) => paragraph.trim());
+  const index = paragraphs.findIndex((paragraph) =>
+    /^The query (returned|ran successfully)/.test(paragraph),
+  );
+  if (index < 0) return null;
+  const insight = parseInsightBlock(paragraphs[index] ?? "");
+  if (!insight) return null;
+  return {
+    preface: paragraphs.slice(0, index).filter(Boolean),
+    ...insight,
+    notes: paragraphs.slice(index + 1).filter(Boolean),
+  };
 }
 
 export type EvidenceStatus = Message["provenance"]["evidence_statuses"][number];

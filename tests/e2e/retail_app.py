@@ -22,7 +22,7 @@ from fastapi import FastAPI
 
 from apps.api.main import create_app
 from config.settings import Settings
-from src.llm.base import LLMResponse
+from src.llm.base import LLMGenerationError, LLMResponse
 
 PROVIDER = "scripted-retail-demo"
 MODEL = "scripted-retail-demo-v1"
@@ -38,6 +38,12 @@ FULFILLMENT = "How many transactions meet the policy fulfillment escalation rule
 REVIEW = "How many transactions meet at least one documented review rule?"
 
 HYBRID_QUESTIONS = (FULFILLMENT, REVIEW)
+
+# Not sample questions: they exist so browser tests can exercise a large result, an empty result,
+# and a provider failure. They are never offered in the UI.
+LARGE = "Show every transaction."
+EMPTY = "Show transactions in the Moon region."
+FAIL = "Trigger a provider failure."
 
 # Table is queried as "uploaded_data"; column names are those of retail_operations.csv.
 SQL_BY_QUESTION: dict[str, str] = {
@@ -73,6 +79,11 @@ SQL_BY_QUESTION: dict[str, str] = {
         'SELECT COUNT(*) AS "review_transaction_count" FROM "uploaded_data" '
         'WHERE "discount_rate" >= 0.30 OR "gross_margin_rate" < 0.10 OR "fulfillment_days" >= 10'
     ),
+    LARGE: (
+        'SELECT "transaction_id", "region", "category", "revenue" FROM "uploaded_data" '
+        'ORDER BY "transaction_id"'
+    ),
+    EMPTY: ('SELECT "transaction_id", "revenue" FROM "uploaded_data" WHERE "region" = \'Moon\''),
 }
 
 # field, operator, value, unit, a phrase that identifies the policy sentence it comes from.
@@ -92,10 +103,19 @@ QUOTE_BY_QUESTION = {
 }
 
 
+_QUESTION_LINE = re.compile(r"^Question:[ \t]*\n?([^\n]+)", re.MULTILINE)
+
+
+def _current_question(prompt: str) -> str | None:
+    """The question being answered, not earlier ones quoted as conversation context."""
+    matches = _QUESTION_LINE.findall(prompt)
+    return matches[-1].strip() if matches else None
+
+
 def _question_in(prompt: str) -> str | None:
-    return next(
-        (question for question in SQL_BY_QUESTION | QUOTE_BY_QUESTION if question in prompt), None
-    )
+    current = _current_question(prompt)
+    known = SQL_BY_QUESTION | QUOTE_BY_QUESTION
+    return current if current in known else None
 
 
 def _squash(text: str) -> str:
@@ -116,6 +136,8 @@ class ScriptedRetailLLM:
 
     def generate(self, prompt: str) -> LLMResponse:
         question = _question_in(prompt)
+        if _current_question(prompt) == FAIL:
+            raise LLMGenerationError("The scripted provider failed on purpose.")
         if "Classify a business-intelligence question" in prompt:
             if question in HYBRID_QUESTIONS:
                 route = "hybrid"
