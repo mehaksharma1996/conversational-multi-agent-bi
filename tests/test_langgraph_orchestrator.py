@@ -487,6 +487,93 @@ def test_approval_edit_that_adds_an_unjustified_filter_is_refused(monkeypatch) -
     assert completed.diagnostics.policy_unjustified_predicate_count == 1
 
 
+def _regional_table():
+    return SQLiteStore(isolated_database_path("regional-filter")).save_dataframe(
+        pd.DataFrame(
+            {
+                "region": ["West", "East", "West", "East"],
+                "amount": [30.0, 40.0, 10.0, 50.0],
+            }
+        )
+    )
+
+
+def test_group_comparison_does_not_authorize_a_model_generated_region_filter(
+    monkeypatch,
+) -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM(
+            'SELECT COUNT(*) AS n FROM uploaded_data WHERE "amount" > 20 AND "region" = \'West\''
+        ),
+        stored_table=_regional_table(),
+        document_retriever=PolicyRetriever(),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "execute_sql",
+        lambda *args, **kwargs: pytest.fail("incidentally-filtered SQL was executed"),
+    )
+
+    result = orchestrator.answer(
+        "Why does the uploaded policy classify West-region transactions differently "
+        "from East-region transactions?"
+    )
+
+    assert result.route == "rag"
+    assert result.dataframe is None
+    assert result.diagnostics.policy_sql_status == "mismatch"
+    assert result.diagnostics.policy_unjustified_predicate_count == 1
+
+
+def test_explicit_region_filter_is_executed_with_the_policy_predicate() -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM(
+            "SELECT region, amount FROM uploaded_data "
+            'WHERE "amount" > 20 AND "region" = \'West\' ORDER BY amount DESC'
+        ),
+        stored_table=_regional_table(),
+        document_retriever=PolicyRetriever(),
+    )
+
+    result = orchestrator.answer("Show West-region transactions that violate the uploaded policy.")
+
+    assert result.diagnostics.policy_sql_status == "structurally_verified"
+    assert result.dataframe is not None
+    assert result.dataframe["amount"].tolist() == [30.0]
+
+
+def test_approval_edit_cannot_add_a_filter_the_question_only_mentions_in_passing(
+    monkeypatch,
+) -> None:
+    question = (
+        "Which transactions violate the uploaded policy? The region column lists West and East."
+    )
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM('SELECT region, amount FROM uploaded_data WHERE "amount" > 20'),
+        stored_table=_regional_table(),
+        document_retriever=PolicyRetriever(),
+    )
+    pending = orchestrator.answer(
+        question, require_sql_approval=True, thread_id="incidental-edit-test"
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "execute_sql",
+        lambda *args, **kwargs: pytest.fail("incidentally-filtered edit was executed"),
+    )
+
+    completed = orchestrator.resume_approval(
+        "incidental-edit-test",
+        decision="approve",
+        sql='SELECT region, amount FROM uploaded_data WHERE "amount" > 20 AND "region" = \'West\'',
+    )
+
+    assert pending.status == "pending_approval"
+    assert completed.route == "rag"
+    assert completed.dataframe is None
+    assert completed.diagnostics.policy_unjustified_predicate_count == 1
+
+
 def test_hybrid_approval_rejection_never_executes(monkeypatch) -> None:
     orchestrator = QuestionOrchestrator(
         llm_client=FakeLLM(text="SELECT merchant, amount FROM uploaded_data"),

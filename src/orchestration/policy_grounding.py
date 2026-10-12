@@ -492,39 +492,219 @@ def _from_authorized(predicate: AuthorizedSQLPredicate) -> _SQLPredicate:
 
 
 def _question_authorizes(predicate: _SQLPredicate, question: str) -> bool:
-    normalized = " ".join(question.casefold().split())
-    field_phrase = predicate.field.replace("_", " ")
-    if re.search(rf"(?<!\w){re.escape(field_phrase)}(?!\w)", normalized) is None:
+    """Return True only when the question states this exact field, operator and value filter.
+
+    The match is deliberately narrow: the field, an operator phrase and the value must be
+    adjacent in the question (``amount greater than 500``, ``region West``, ``West region``).
+    Anything the bounded patterns cannot place is refused, so the caller falls back safely:
+
+    * comparisons between groups (``versus``, ``compare``, ``differently``), or the same field
+      named more than once for an equality filter;
+    * questions asking whether a filter is justified or should apply;
+    * negation before the filter, which only authorizes ``!=`` for an equality phrase;
+    * operator words that belong to another field or a different value.
+    """
+    text = _normalize_question(question)
+    field = _normalize_question(predicate.field)
+    field_pattern = rf"(?<!\w){re.escape(field)}(?!\w)"
+    if not field or re.search(field_pattern, text) is None:
         return False
+    if _COMPARISON_CUE.search(text):
+        return False
+
     if predicate.operator in {"is_null", "is_not_null"}:
-        cues = (
-            ("unknown", "missing", "blank", "null", "empty")
-            if predicate.operator == "is_null"
-            else ("known", "present", "not null", "non-null", "not blank", "not missing")
-        )
-        return any(cue in normalized for cue in cues)
-    if predicate.value is None or not _question_contains_value(normalized, predicate.value):
+        patterns = _NULL_PATTERNS if predicate.operator == "is_null" else _NOT_NULL_PATTERNS
+        spans = [
+            span for pattern in patterns for span in _pattern_spans(pattern, text, field, None)
+        ]
+        return _spans_are_clear(spans, text)
+
+    if predicate.value is None:
         return False
-    if predicate.operator == "=":
-        return True
-    operator_name = next(
-        name for name, symbol in _OPERATOR_SYMBOLS.items() if symbol == predicate.operator
-    )
-    return any(cue in normalized for cue in _OPERATOR_EVIDENCE[operator_name])
+    if predicate.operator in {"=", "!="}:
+        if len(re.findall(field_pattern, text)) > 1:
+            return False
+        spans = _equality_spans(text, field, predicate.value)
+        if not spans or not _spans_are_clear(spans, text, allow_negation=True):
+            return False
+        polarity = {negated or _negated_before(text, start) for start, _, negated in spans}
+        return polarity == {predicate.operator == "!="}
+
+    forms = _ORDERING_PATTERNS.get(predicate.operator)
+    if forms is None:
+        return False
+    spans = [span for form in forms for span in _pattern_spans(form, text, field, predicate.value)]
+    return _spans_are_clear(spans, text)
 
 
-def _question_contains_value(question: str, value: str | Decimal | bool) -> bool:
+def _normalize_question(text: str) -> str:
+    """Casefold and tokenize so hyphens, underscores, quotes and operator symbols are uniform."""
+    normalized = text.casefold()
+    for symbol, replacement in (("≥", ">="), ("≤", "<="), ("≠", "!=")):
+        normalized = normalized.replace(symbol, replacement)
+    normalized = re.sub(r"n['’]t\b", " not", normalized)
+    normalized = re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", normalized)
+    normalized = re.sub(r"(?<=\w)[-_](?=\w)", " ", normalized)
+    normalized = re.sub(r"[\"'`’?!;()\[\]]", " ", normalized)
+    normalized = re.sub(r"(>=|<=|!=|<>|==|=|>|<|:|\$)", r" \1 ", normalized)
+    return " ".join(normalized.split())
+
+
+def _value_pattern(value: str | Decimal | bool | None) -> str:
     if isinstance(value, Decimal):
-        for token in re.findall(r"-?\d+(?:\.\d+)?", question):
+        return rf"(?:\$\s+)?{_NUMBER}"
+    if isinstance(value, bool):
+        return rf"(?<!\w){str(value).casefold()}(?!\w)"
+    if value is None:
+        return ""
+    normalized = _normalize_question(value)
+    return rf"(?<!\w){re.escape(normalized)}(?!\w)" if normalized else r"(?!)"
+
+
+def _pattern_spans(
+    template: str,
+    text: str,
+    field: str,
+    value: str | Decimal | bool | None,
+) -> list[tuple[int, int, bool]]:
+    """Spans of ``template`` with ``<F>``/``<V>`` filled in; numbers must equal ``value``."""
+    pattern = template.replace("<F>", rf"(?<!\w){re.escape(field)}(?!\w)").replace(
+        "<V>", _value_pattern(value)
+    )
+    spans: list[tuple[int, int, bool]] = []
+    for match in re.finditer(pattern, text):
+        if isinstance(value, Decimal):
             try:
-                if Decimal(token) == value:
-                    return True
+                if Decimal(match.group("num")) != value:
+                    continue
             except InvalidOperation:
                 continue
+        spans.append((match.start(), match.end(), False))
+    return spans
+
+
+def _equality_spans(
+    text: str, field: str, value: str | Decimal | bool
+) -> list[tuple[int, int, bool]]:
+    spans = [
+        span
+        for template in _EQUALITY_PATTERNS
+        for span in _pattern_spans(template, text, field, value)
+    ]
+    if isinstance(value, Decimal):
+        # "amount 500 or more" is an ordering filter, not equality.
+        spans = [span for span in spans if _OPEN_ENDED_AFTER.match(text, span[1]) is None]
+    spans.extend(
+        (start, end, True)
+        for template in _INEQUALITY_PATTERNS
+        for start, end, _ in _pattern_spans(template, text, field, value)
+    )
+    if isinstance(value, str):
+        spans.extend(_pattern_spans(_VALUE_THEN_FIELD, text, field, value))
+    return sorted(set(spans))
+
+
+def _negated_before(text: str, start: int) -> bool:
+    return _NEGATION_BEFORE.search(text[:start]) is not None
+
+
+def _spans_are_clear(
+    spans: list[tuple[int, int, bool]], text: str, *, allow_negation: bool = False
+) -> bool:
+    """True when at least one span exists and none is negated or framed as a question."""
+    if not spans:
         return False
-    if isinstance(value, bool):
-        return re.search(rf"(?<!\w){str(value).casefold()}(?!\w)", question) is not None
-    return re.search(rf"(?<!\w){re.escape(value.casefold())}(?!\w)", question) is not None
+    for start, end, _ in spans:
+        if _WHETHER_CUE.search(text[max(0, start - _CUE_WINDOW) : end + _CUE_WINDOW]):
+            return False
+        if not allow_negation and _negated_before(text, start):
+            return False
+    return True
+
+
+_NUMBER = r"(?<![\d.])(?P<num>-?\d+(?:\.\d+)?)(?!\d|\.\d)"
+_IS = r"(?:(?:is|are|was|were|be|being)\s+)"
+_EQUALS = r"(?:(?:is|are|was|were|be|being|equals?|equal to|==|=|:|of|exactly|set to)\s+){0,3}"
+_NOT_EQUAL = (
+    rf"{_IS}?(?:not equal to|not equal|not|!=|<>|other than|except|excluding|excluded|"
+    r"besides|apart from|aside from)\s+(?:to\s+)?"
+)
+_NEGATION_WORDS = (
+    r"(?:not|never|no|without|exclud(?:e|es|ed|ing)|except(?:ing)?|unless|other than|"
+    r"outside(?: of)?|besides|apart from|aside from|ignor(?:e|es|ing)|skip(?:ping)?|"
+    r"drop(?:ping)?|remov(?:e|es|ing))"
+)
+_NEGATION_BEFORE = re.compile(rf"(?<!\w){_NEGATION_WORDS}\s+(?:\w+\s+){{0,3}}$")
+_OPEN_ENDED_AFTER = re.compile(
+    r"\s+(?:or|and)\s+(?:more|less|greater|higher|lower|fewer|above|below|over|under|up|down)\b"
+)
+_EQUALITY_PATTERNS = (rf"<F>\s+{_EQUALS}<V>(?!\w)",)
+_INEQUALITY_PATTERNS = (rf"<F>\s+{_NOT_EQUAL}<V>(?!\w)",)
+_VALUE_THEN_FIELD = r"<V>\s+<F>"
+
+_ORDERING_WORDS = {
+    "gt": (
+        r"(?:>|greater than|more than|higher than|larger than|bigger than|above|over|"
+        r"exceeding|exceeds?|in excess of|beyond)"
+    ),
+    "gte": (
+        r"(?:>=|greater than or equal to|more than or equal to|higher than or equal to|"
+        r"at least|no less than|not less than|no fewer than|not fewer than|minimum(?: of)?)"
+    ),
+    "lt": r"(?:<|less than|lower than|smaller than|fewer than|below|under|beneath)",
+    "lte": (
+        r"(?:<=|less than or equal to|lower than or equal to|at most|no more than|"
+        r"not more than|up to|maximum(?: of)?)"
+    ),
+}
+_ORDERING_POSTFIX = {
+    "gte": r"(?:or|and)\s+(?:more|greater|higher|above|over|up)\b",
+    "lte": r"(?:or|and)\s+(?:less|lower|fewer|below|under|down)\b",
+}
+_ORDERING_CONNECTOR = r"(?:(?:is|are|was|were|be|being|of)\s+){0,2}"
+_ORDERING_SYMBOLS = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+
+
+def _ordering_patterns(name: str) -> tuple[str, ...]:
+    words = _ORDERING_WORDS[name]
+    patterns = (
+        # field [is] <operator phrase> value
+        rf"<F>\s+{_ORDERING_CONNECTOR}{words}\s+<V>",
+        # <operator phrase> value field, e.g. "over 10 fulfillment days"
+        rf"(?<!\w){words}\s+<V>\s+<F>",
+    )
+    if name in _ORDERING_POSTFIX:
+        # field [is] value or more
+        return (*patterns, rf"<F>\s+{_ORDERING_CONNECTOR}<V>\s+{_ORDERING_POSTFIX[name]}")
+    return patterns
+
+
+_ORDERING_PATTERNS = {
+    symbol: _ordering_patterns(name) for name, symbol in _ORDERING_SYMBOLS.items()
+}
+_NULL_ARTICLE = r"(?:(?:a|an|the|any)\s+)?"
+_NULL_PATTERNS = (
+    r"<F>\s+(?:(?:is|are|was|were)\s+)?(?:null|missing|blank|empty|unknown)(?!\w)",
+    rf"(?<!\w)(?:null|missing|blank|empty|unknown|without|lacking|no)\s+{_NULL_ARTICLE}<F>",
+)
+_NOT_NULL_PATTERNS = (
+    r"<F>\s+(?:(?:is|are|was|were)\s+)?(?:not\s+(?:null|blank|missing|empty|unknown)|"
+    r"known|present|populated|recorded|provided|non null|non blank|non empty)(?!\w)",
+    rf"(?<!\w)(?:known|present|populated|recorded|provided|non null|non blank|non empty|"
+    rf"(?:not|no|non)\s+(?:null|blank|missing|empty|unknown))\s+{_NULL_ARTICLE}<F>",
+)
+_COMPARISON_CUE = re.compile(
+    r"(?<!\w)(?:compare[sd]?|comparing|comparison|versus|vs|differently|differs?|differed|"
+    r"difference|differences|distinguish\w*|relative to)(?!\w)"
+)
+_WHETHER_CUE = re.compile(
+    r"(?<!\w)(?:whether|justif\w*|appropriate|legitimate|warranted|ought|"
+    r"should\s+(?:we|i|you|the|this|that|it)|"
+    r"should\s+\w+\s+(?:\w+\s+)?(?:filter|restrict|limit|exclude|include|apply|narrow)\w*|"
+    r"is it\s+(?:ok|okay|right|correct|fair|reasonable|necessary|needed|valid)|"
+    r"do we need|need to\s+(?:filter|restrict|limit|exclude|apply))(?!\w)"
+)
+_CUE_WINDOW = 50
 
 
 def _canonical_value(value: object) -> str | Decimal | bool:
