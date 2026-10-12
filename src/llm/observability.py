@@ -91,6 +91,23 @@ class _UsageSlot:
 
 _SLOT: ContextVar[_UsageSlot | None] = ContextVar("llm_usage_slot", default=None)
 
+UsageTap = Callable[[int | None, int | None], None]
+_USAGE_TAP: ContextVar[UsageTap | None] = ContextVar("llm_usage_tap", default=None)
+
+
+@contextmanager
+def tap_usage(tap: UsageTap) -> Iterator[None]:
+    """Receive (prompt_tokens, output_tokens) from provider clients for calls made in the block.
+
+    This lets a caller that sits *inside* the app's observing wrapper (for example a local spend
+    limiter) see token counts without replacing that wrapper's own accounting.
+    """
+    token = _USAGE_TAP.set(tap)
+    try:
+        yield
+    finally:
+        _USAGE_TAP.reset(token)
+
 
 def report_usage(
     *,
@@ -99,6 +116,9 @@ def report_usage(
     retries: int = 0,
 ) -> None:
     """Called by a provider client while a call is in flight; a no-op when nothing observes it."""
+    tap = _USAGE_TAP.get()
+    if tap is not None:
+        tap(_count(prompt_tokens), _count(output_tokens))
     slot = _SLOT.get()
     if slot is None:
         return
