@@ -35,7 +35,7 @@
         "pass_rate": 1.0
       },
       "routing": {
-        "cases": 9,
+        "cases": 12,
         "pass_rate": 1.0
       },
       "tenant_isolation": {
@@ -51,7 +51,7 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 78
+    "cases": 81
   },
   "baseline_version": 1,
   "cases": {
@@ -872,6 +872,19 @@
       },
       "passed": true
     },
+    "routing-low-confidence-reconsideration-keeps-first-route": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "routing-malformed-classification-is-ignored": {
       "capability": "routing",
       "checks": {
@@ -933,6 +946,32 @@
         "crash.none": true,
         "outcome.expected": true,
         "route.expected": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "routing-reconsideration-keeps-a-consistent-model-route": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "routing-sql-route-for-document-criterion-is-reconsidered": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
         "trajectory.no_unnecessary_calls": true,
         "trajectory.within_call_budget": true
       },
@@ -1186,7 +1225,7 @@
     "prompt_fingerprints": {
       "criteria_extraction": "4f4c0434fffff3a7",
       "rag_answer": "435edac981b875f4",
-      "route_classification": "ee43d21646bb69a3",
+      "route_classification": "f3aa4e2baee9ca4e",
       "sql_correction": "c6b5b17508cb7692",
       "sql_generation": "3c8d96d61c21bbd8"
     },

@@ -5,12 +5,12 @@
     {
       "id": "route-classification",
       "target": "src.orchestration.langgraph_orchestrator:QuestionOrchestrator._classify_route",
-      "purpose": "Classifies a question into memory, sql, rag, hybrid, or unsupported.",
-      "sha256": "58878f9e39743ed500b9a945c5360eb2e444b55690b0b9a075cca863dd5ace15",
-      "version": 1,
-      "changed": "2026-10-06",
-      "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
-      "approved_by": "repository maintainers",
+      "purpose": "Classifies a question into memory, sql, rag, hybrid, or unsupported, with one bounded reconsideration when the route contradicts what the question depends on.",
+      "sha256": "a74c199acf07991aa8b5b7eccdc1e492acf51d5606db716c9b3ed5c790744bc6",
+      "version": 2,
+      "changed": "2026-10-12",
+      "reason": "Free-tier live smoke run routed a count over a document-defined escalation rule to sql (bare one-line route definitions; the model substituted a similar-named status column for the documented criteria). v2 defines routes by where the answer's information lives, adds decision rules and general-pattern examples, passes the last two prior questions as context only, and reconsiders an sql or rag route once when the question names a document-defined criterion or aggregates rows.",
+      "approved_by": "user-directed Batch 4 routing fix; pending maintainer review",
       "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
     },
     {

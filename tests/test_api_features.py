@@ -44,9 +44,12 @@ class FakeLLM:
 
     def generate(self, prompt: str) -> LLMResponse:
         if "Classify a business-intelligence question" in prompt:
-            if "Which uploaded transactions" in prompt:
+            # Classify on the question line only: the prompt also carries instructions,
+            # examples, and prior questions as context.
+            question = prompt.split("\nQuestion: ", 1)[-1].split("\n", 1)[0]
+            if "Which uploaded transactions" in question:
                 text = '{"route":"hybrid","confidence":1}'
-            elif "policy" in prompt.lower():
+            elif "policy" in question.lower():
                 text = '{"route":"rag","confidence":1}'
             else:
                 text = '{"route":"sql","confidence":1}'
