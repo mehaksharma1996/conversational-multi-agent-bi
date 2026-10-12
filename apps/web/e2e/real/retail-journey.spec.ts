@@ -276,16 +276,28 @@ test("rejecting a pending approval never executes the SQL", async ({ page }) => 
 test("an edited query is revalidated: a policy-consistent edit runs; a deviating or unsafe one does not", async ({ page }) => {
   await open(page);
 
-  // Narrowing the query while keeping the policy threshold is allowed and runs.
+  // An edit that keeps the policy predicate and adds no condition is allowed and runs.
   await ask(page, FULFILLMENT, { approval: true });
   let card = latest(page);
   await card.getByRole("button", { name: "Edit SQL" }).click();
   const editor = card.getByLabel("Edit SQL");
-  await editor.fill(`${await editor.inputValue()} AND "region" = 'West'`);
+  await editor.fill((await editor.inputValue()).replace('AS "transaction_count"', 'AS "escalated_count"'));
   await card.getByRole("button", { name: "Run edited SQL" }).click();
-  await expect(card.locator(".sql-block code")).toContainText("'West'");
+  await expect(card.locator(".sql-block code")).toContainText('AS "escalated_count"');
   await expect(card.getByRole("region", { name: /Query result/ })).toBeVisible();
   await expect(card).toContainText("structural match");
+
+  // An added filter the question never asked for has no authority, so it is refused even though the
+  // policy predicate is still present; the system falls back to the document answer.
+  await ask(page, FULFILLMENT, { approval: true });
+  card = latest(page);
+  await card.getByRole("button", { name: "Edit SQL" }).click();
+  const extra = card.getByLabel("Edit SQL");
+  await extra.fill(`${await extra.inputValue()} AND "region" = 'West'`);
+  await card.getByRole("button", { name: "Run edited SQL" }).click();
+  await expect(card.getByRole("button", { name: "Run edited SQL" })).toHaveCount(0);
+  await expect(card).toContainText("could not be safely turned into a table query");
+  await expect(card.getByRole("region", { name: /Query result/ })).toHaveCount(0);
 
   // Changing the policy's own threshold means the SQL no longer applies the document's rule: the
   // system falls back to the document answer instead of presenting rows as policy results.
