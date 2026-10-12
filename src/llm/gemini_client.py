@@ -97,9 +97,12 @@ class GeminiClient:
                     if self.max_output_tokens is not None:
                         kwargs["config"]["max_output_tokens"] = self.max_output_tokens
                     if schema_model is not None:
+                        # `response_schema` makes the SDK emit snake_case `additional_properties`
+                        # for `extra="forbid"` models, which the API rejects with a 400. The JSON
+                        # Schema field is sent as-is and keeps `additionalProperties: false`.
                         kwargs["config"].update(
                             response_mime_type="application/json",
-                            response_schema=schema_model,
+                            response_json_schema=schema_model.model_json_schema(),
                         )
                 response = self._get_client().models.generate_content(**kwargs)
                 break
