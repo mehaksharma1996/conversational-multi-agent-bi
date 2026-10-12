@@ -1179,6 +1179,14 @@
               }
             ],
             "title": "Sql Row Count"
+          },
+          "structured_output_failures": {
+            "title": "Structured Output Failures",
+            "type": "integer"
+          },
+          "structured_output_repairs": {
+            "title": "Structured Output Repairs",
+            "type": "integer"
           }
         },
         "required": [
@@ -1188,7 +1196,9 @@
           "retrieval_candidates",
           "retrieval_accepted",
           "llm_calls",
-          "llm_fallbacks"
+          "llm_fallbacks",
+          "structured_output_repairs",
+          "structured_output_failures"
         ],
         "title": "ExecutionSummaryResponse",
         "type": "object"
@@ -1711,6 +1721,10 @@
             "title": "Criteria Provenance",
             "type": "string"
           },
+          "deterministic_route_fallback": {
+            "title": "Deterministic Route Fallback",
+            "type": "boolean"
+          },
           "evidence_statuses": {
             "items": {
               "enum": [
@@ -1730,6 +1744,35 @@
           "execution": {
             "$ref": "#/components/schemas/ExecutionSummaryResponse"
           },
+          "final_route": {
+            "anyOf": [
+              {
+                "enum": [
+                  "memory",
+                  "sql",
+                  "rag",
+                  "hybrid",
+                  "unsupported"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Route"
+          },
+          "final_route_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Route Confidence"
+          },
           "grounding_status": {
             "enum": [
               "not_applicable",
@@ -1744,8 +1787,41 @@
             "title": "Hybrid Fell Back To Documents",
             "type": "boolean"
           },
+          "initial_model_route": {
+            "anyOf": [
+              {
+                "enum": [
+                  "memory",
+                  "sql",
+                  "rag",
+                  "hybrid",
+                  "unsupported"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Model Route"
+          },
+          "initial_route_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Route Confidence"
+          },
           "invalid_citation_count": {
             "title": "Invalid Citation Count",
+            "type": "integer"
+          },
+          "policy_business_predicate_count": {
+            "title": "Policy Business Predicate Count",
             "type": "integer"
           },
           "policy_issue_count": {
@@ -1762,10 +1838,19 @@
               "structurally_verified",
               "mismatch",
               "conflicting_evidence",
+              "unverified",
               "not_evaluated"
             ],
             "title": "Policy Sql Status",
             "type": "string"
+          },
+          "policy_unjustified_predicate_count": {
+            "title": "Policy Unjustified Predicate Count",
+            "type": "integer"
+          },
+          "route_reconsideration_triggered": {
+            "title": "Route Reconsideration Triggered",
+            "type": "boolean"
           },
           "source_count": {
             "title": "Source Count",
@@ -1782,6 +1867,12 @@
         },
         "required": [
           "grounding_status",
+          "initial_model_route",
+          "initial_route_confidence",
+          "route_reconsideration_triggered",
+          "final_route",
+          "final_route_confidence",
+          "deterministic_route_fallback",
           "source_count",
           "citation_count",
           "invalid_citation_count",
@@ -1790,6 +1881,8 @@
           "evidence_statuses",
           "policy_sql_status",
           "policy_predicate_count",
+          "policy_business_predicate_count",
+          "policy_unjustified_predicate_count",
           "policy_issue_count",
           "criteria_provenance",
           "hybrid_fell_back_to_documents",

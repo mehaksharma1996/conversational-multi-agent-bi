@@ -320,6 +320,27 @@ def test_reconsidered_hybrid_still_verifies_policy_predicates_against_sql() -> N
     assert result.diagnostics.policy_sql_status == "structurally_verified"
     assert result.dataframe is not None
     assert int(result.dataframe["n"].iloc[0]) == 1
+    assert result.diagnostics.initial_model_route == "sql"
+    assert result.diagnostics.initial_route_confidence == 0.9
+    assert result.diagnostics.route_reconsideration_triggered is True
+    assert result.diagnostics.final_route == "hybrid"
+    assert result.diagnostics.final_route_confidence == 0.9
+    assert result.diagnostics.deterministic_route_fallback is False
+
+
+def test_low_confidence_model_route_records_deterministic_fallback() -> None:
+    orchestrator = _orchestrator(ScriptedRoutingLLM([_route("sql", 0.4)]))
+
+    state = orchestrator._route_node({"question": "How many transactions meet the policy rule?"})
+
+    diagnostics = state["diagnostics"]
+    assert state["route"] == "hybrid"
+    assert diagnostics.initial_model_route == "sql"
+    assert diagnostics.initial_route_confidence == 0.4
+    assert diagnostics.route_reconsideration_triggered is False
+    assert diagnostics.final_route == "hybrid"
+    assert diagnostics.final_route_confidence is None
+    assert diagnostics.deterministic_route_fallback is True
 
 
 def test_reconsidered_hybrid_rejects_sql_that_ignores_the_policy_predicate() -> None:

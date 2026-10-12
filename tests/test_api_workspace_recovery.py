@@ -96,6 +96,8 @@ def test_message_provenance_exposes_a_content_free_execution_summary() -> None:
         "sql_correction_attempted",
         "retrieval_candidates",
         "retrieval_accepted",
+        "structured_output_repairs",
+        "structured_output_failures",
         "llm_calls",
         "llm_fallbacks",
     }

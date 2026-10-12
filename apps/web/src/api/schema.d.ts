@@ -1105,6 +1105,10 @@ export interface components {
             sql_execution_ms: number | null;
             /** Sql Row Count */
             sql_row_count: number | null;
+            /** Structured Output Failures */
+            structured_output_failures: number;
+            /** Structured Output Repairs */
+            structured_output_repairs: number;
         };
         /** ExportCreateRequest */
         ExportCreateRequest: {
@@ -1309,9 +1313,15 @@ export interface components {
              * @enum {string}
              */
             criteria_provenance: "not_applicable" | "traced" | "unreferenced" | "no_structured_criteria" | "excerpt_fallback";
+            /** Deterministic Route Fallback */
+            deterministic_route_fallback: boolean;
             /** Evidence Statuses */
             evidence_statuses: ("VERIFIED_REFERENCE" | "INVALID_REFERENCE" | "QUOTE_MISMATCH" | "MISSING_EVIDENCE" | "UNVERIFIED_CLAIM" | "CONFLICTING_EVIDENCE" | "NOT_EVALUATED")[];
             execution: components["schemas"]["ExecutionSummaryResponse"];
+            /** Final Route */
+            final_route: ("memory" | "sql" | "rag" | "hybrid" | "unsupported") | null;
+            /** Final Route Confidence */
+            final_route_confidence: number | null;
             /**
              * Grounding Status
              * @enum {string}
@@ -1319,8 +1329,14 @@ export interface components {
             grounding_status: "not_applicable" | "checked_no_issues" | "uncited" | "warnings";
             /** Hybrid Fell Back To Documents */
             hybrid_fell_back_to_documents: boolean;
+            /** Initial Model Route */
+            initial_model_route: ("memory" | "sql" | "rag" | "hybrid" | "unsupported") | null;
+            /** Initial Route Confidence */
+            initial_route_confidence: number | null;
             /** Invalid Citation Count */
             invalid_citation_count: number;
+            /** Policy Business Predicate Count */
+            policy_business_predicate_count: number;
             /** Policy Issue Count */
             policy_issue_count: number;
             /** Policy Predicate Count */
@@ -1329,7 +1345,11 @@ export interface components {
              * Policy Sql Status
              * @enum {string}
              */
-            policy_sql_status: "not_applicable" | "structurally_verified" | "mismatch" | "conflicting_evidence" | "not_evaluated";
+            policy_sql_status: "not_applicable" | "structurally_verified" | "mismatch" | "conflicting_evidence" | "unverified" | "not_evaluated";
+            /** Policy Unjustified Predicate Count */
+            policy_unjustified_predicate_count: number;
+            /** Route Reconsideration Triggered */
+            route_reconsideration_triggered: boolean;
             /** Source Count */
             source_count: number;
             /** Uncited Claim Count */

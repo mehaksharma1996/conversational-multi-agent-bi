@@ -11,7 +11,7 @@
         "pass_rate": 1.0
       },
       "hybrid": {
-        "cases": 16,
+        "cases": 20,
         "pass_rate": 1.0
       },
       "mcp_tool_safety": {
@@ -51,10 +51,27 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 81
+    "cases": 85
   },
   "baseline_version": 1,
   "cases": {
+    "hybrid-approval-edit-extra-predicate-is-refused": {
+      "capability": "hybrid",
+      "checks": {
+        "approval.interrupted": true,
+        "approval.status": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.unjustified_predicates": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "hybrid-conflicting-policy-evidence-falls-back": {
       "capability": "hybrid",
       "checks": {
@@ -67,6 +84,24 @@
         "outcome.expected": true,
         "route.expected": true,
         "safety.dataset_intact": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-explicit-user-filter-is-allowed": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.provenance": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.required_fragments": true,
+        "sql.row_count": true,
         "trajectory.no_unnecessary_calls": true,
         "trajectory.within_call_budget": true
       },
@@ -90,6 +125,24 @@
         "sources.present": true,
         "structured_output_failures": true,
         "structured_output_repairs": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-extra-model-predicate-is-refused": {
+      "capability": "hybrid",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.unjustified_predicates": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
         "trajectory.no_unnecessary_calls": true,
         "trajectory.within_call_budget": true
       },
@@ -293,6 +346,22 @@
         "answer.contains": true,
         "crash.none": true,
         "hybrid.fallback": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-unsupported-predicate-expression-is-unverified": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
         "outcome.expected": true,
         "route.expected": true,
         "safety.dataset_intact": true,
@@ -1225,7 +1294,7 @@
     "prompt_fingerprints": {
       "criteria_extraction": "4f4c0434fffff3a7",
       "rag_answer": "435edac981b875f4",
-      "route_classification": "f3aa4e2baee9ca4e",
+      "route_classification": "8ef5abc115dc1738",
       "sql_correction": "c6b5b17508cb7692",
       "sql_generation": "3c8d96d61c21bbd8"
     },

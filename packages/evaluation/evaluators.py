@@ -344,6 +344,15 @@ def _hybrid(spec: dict[str, Any], obs: Observation) -> list[Check]:
                 f"{diagnostics.policy_issue_count} policy issue(s)",
             )
         )
+    if "min_unjustified_predicates" in spec:
+        checks.append(
+            Check(
+                "hybrid.unjustified_predicates",
+                diagnostics.policy_unjustified_predicate_count
+                >= spec["min_unjustified_predicates"],
+                f"{diagnostics.policy_unjustified_predicate_count} unjustified predicate(s)",
+            )
+        )
     if "criteria_keys" in spec:
         observed = sorted(diagnostics.criteria_keys)
         checks.append(

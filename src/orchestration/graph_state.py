@@ -33,6 +33,12 @@ class AnswerDiagnostics:
     sql_execution_seconds: float | None = None
     sql_row_count: int | None = None
     sql_correction_attempted: bool = False
+    initial_model_route: RouteName | None = None
+    initial_route_confidence: float | None = None
+    route_reconsideration_triggered: bool = False
+    final_route: RouteName | None = None
+    final_route_confidence: float | None = None
+    deterministic_route_fallback: bool = False
     retrieval_candidates: int | None = None
     retrieval_accepted: int | None = None
     retrieval_rejected_distance: int | None = None
@@ -54,6 +60,8 @@ class AnswerDiagnostics:
     criteria_provenance: CriteriaProvenance = "not_applicable"
     policy_sql_status: PolicySQLStatus = "not_applicable"
     policy_predicate_count: int = 0
+    policy_business_predicate_count: int = 0
+    policy_unjustified_predicate_count: int = 0
     policy_issue_count: int = 0
     hybrid_fell_back_to_documents: bool = False
     structured_output_repairs: int = 0

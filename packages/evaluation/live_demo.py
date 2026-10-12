@@ -37,7 +37,7 @@ from typing import Any
 import pandas as pd
 
 from src.llm.base import LLMGenerationError
-from src.llm.observability import tap_usage
+from src.llm.observability import UNKNOWN_PURPOSE, current_purpose, tap_usage
 from src.storage.query_executor import validate_read_query
 
 REPORT_SCHEMA = "live-demo-eval-v1"
@@ -137,6 +137,7 @@ class LiveBudget:
 
 @dataclass
 class CallRecord:
+    purpose: str
     duration_ms: float
     prompt_tokens: int | None
     output_tokens: int | None
@@ -244,6 +245,7 @@ class BudgetedLLM:
 
     def _call(self, prompt: str, call: Callable[[], Any]) -> Any:
         self._check(prompt)
+        purpose = current_purpose() or UNKNOWN_PURPOSE
         seen: dict[str, int | None] = {"prompt": None, "output": None}
 
         def tap(prompt_tokens: int | None, output_tokens: int | None) -> None:
@@ -273,6 +275,7 @@ class BudgetedLLM:
                 seen["output"] = seen["output"] or self.budget.max_output_tokens
             self.records.append(
                 CallRecord(
+                    purpose=purpose,
                     duration_ms=(time.perf_counter() - started) * 1000,
                     prompt_tokens=prompt_tokens,
                     output_tokens=seen["output"],

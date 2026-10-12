@@ -902,6 +902,12 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
     diagnostics = result.diagnostics
     attributes: dict[str, object] = {
         "route": result.route,
+        "initial_model_route": diagnostics.initial_model_route,
+        "initial_route_confidence": diagnostics.initial_route_confidence,
+        "route_reconsideration_triggered": diagnostics.route_reconsideration_triggered,
+        "final_route": diagnostics.final_route,
+        "final_route_confidence": diagnostics.final_route_confidence,
+        "deterministic_route_fallback": diagnostics.deterministic_route_fallback,
         "grounding_status": diagnostics.grounding_status,
         "criteria_provenance": diagnostics.criteria_provenance,
         "invalid_citation_count": diagnostics.invalid_citation_count,
@@ -909,6 +915,8 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
         "uncited_claim_count": diagnostics.uncited_claim_count,
         "policy_sql_status": diagnostics.policy_sql_status,
         "policy_predicate_count": diagnostics.policy_predicate_count,
+        "policy_business_predicate_count": diagnostics.policy_business_predicate_count,
+        "policy_unjustified_predicate_count": diagnostics.policy_unjustified_predicate_count,
         "policy_issue_count": diagnostics.policy_issue_count,
         "retrieval_candidates": diagnostics.retrieval_candidates,
         "retrieval_accepted": diagnostics.retrieval_accepted,

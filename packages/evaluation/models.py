@@ -24,6 +24,7 @@ CRITICAL_CHECKS: frozenset[str] = frozenset(
         "privacy.prompts_redacted",
         "provenance.untraceable_criteria_excluded",
         "hybrid.policy_sql_status",
+        "hybrid.unjustified_predicates",
         "isolation.cross_tenant_denied",
         "isolation.no_identifier_leak",
         "isolation.audit_stream_separated",

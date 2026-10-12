@@ -33,14 +33,22 @@ no documents). A cue-free question is never reconsidered.
 ## What route choice cannot bypass
 
 Choosing `hybrid` only selects the workflow. Generated SQL still passes read-only validation, the
-policy-to-SQL structural check, optional human approval, the guarded executor, and the documented
+policy-to-SQL predicate-completeness check, optional human approval, the guarded executor, and the documented
 fallback to document-only answers. The route does not affect tenant or workspace authorization,
 which is enforced before the orchestrator runs.
+
+Answer diagnostics record the initial model route and confidence, whether reconsideration ran, the
+final route and confidence when supplied by the model, whether deterministic routing was used, and
+the policy-to-SQL outcome. These are bounded enums, numbers, and booleans; no reasoning text or
+prompt content is recorded. If a later safety check changes the delivered route (for example, a
+hybrid predicate mismatch falls back to documents), the final route reflects the delivered result
+and its model-confidence field is cleared rather than attaching the hybrid decision's confidence to
+the document-only fallback.
 
 ## Known limits
 
 - The cue list is lexical and English-only. A hybrid question phrased without any cue is caught
   only by the model's first answer.
-- Reconsideration is not recorded in answer diagnostics; it is visible as an extra route call in
-  LLM telemetry.
+- Diagnostics show that reconsideration happened, but never expose hidden reasoning or the
+  consistency prompt.
 - Real-model behavior is measured only by the opt-in live evaluation, not by `evals/v1`.

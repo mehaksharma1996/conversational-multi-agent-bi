@@ -171,4 +171,7 @@ def test_orchestrator_result_defaults_to_empty_diagnostics_for_memory_route() ->
     result = orchestrator.answer("What should I investigate?")
 
     assert result.route == "unsupported"
-    assert result.diagnostics == AnswerDiagnostics()
+    assert result.diagnostics == AnswerDiagnostics(
+        final_route="unsupported",
+        deterministic_route_fallback=True,
+    )

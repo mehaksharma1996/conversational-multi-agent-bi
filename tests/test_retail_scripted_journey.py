@@ -144,7 +144,10 @@ def test_hybrid_questions_apply_the_policy_and_verify_it_structurally(
     provenance = message["provenance"]
     assert provenance["policy_sql_status"] == "structurally_verified"
     assert provenance["policy_predicate_count"] >= 1
+    assert provenance["policy_business_predicate_count"] >= provenance["policy_predicate_count"]
+    assert provenance["policy_unjustified_predicate_count"] == 0
     assert provenance["criteria_provenance"] == "traced"
+    assert provenance["final_route"] == "hybrid"
     assert message["sources"]
 
 

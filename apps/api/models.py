@@ -340,6 +340,8 @@ class ExecutionSummaryResponse(StrictModel):
     retrieval_accepted: int | None
     llm_calls: int
     llm_fallbacks: int
+    structured_output_repairs: int
+    structured_output_failures: int
 
 
 class ProvenanceResponse(StrictModel):
@@ -350,6 +352,12 @@ class ProvenanceResponse(StrictModel):
     """
 
     grounding_status: Literal["not_applicable", "checked_no_issues", "uncited", "warnings"]
+    initial_model_route: Literal["memory", "sql", "rag", "hybrid", "unsupported"] | None
+    initial_route_confidence: float | None
+    route_reconsideration_triggered: bool
+    final_route: Literal["memory", "sql", "rag", "hybrid", "unsupported"] | None
+    final_route_confidence: float | None
+    deterministic_route_fallback: bool
     source_count: int
     citation_count: int
     invalid_citation_count: int
@@ -371,9 +379,12 @@ class ProvenanceResponse(StrictModel):
         "structurally_verified",
         "mismatch",
         "conflicting_evidence",
+        "unverified",
         "not_evaluated",
     ]
     policy_predicate_count: int
+    policy_business_predicate_count: int
+    policy_unjustified_predicate_count: int
     policy_issue_count: int
     criteria_provenance: Literal[
         "not_applicable",

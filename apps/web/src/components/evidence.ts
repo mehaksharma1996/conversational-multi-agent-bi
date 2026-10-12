@@ -149,6 +149,10 @@ export const POLICY_SQL_TEXT: Record<
     text: "The policy passages disagree about the criteria, so the query may not apply the intended rule. Review the SQL and sources.",
     tone: "warning",
   },
+  unverified: {
+    text: "The SQL used a condition shape that the policy checker cannot verify safely, so it was not treated as a policy-grounded query.",
+    tone: "warning",
+  },
   not_evaluated: {
     text: "The relationship between the policy and the SQL was not evaluated.",
     tone: "info",
@@ -168,7 +172,14 @@ export interface TimelineStep {
 export function executionSteps(message: Message): TimelineStep[] {
   const { execution, grounding_status: grounding } = message.provenance;
   const steps: TimelineStep[] = [{ label: "Question received", state: "done" }];
-  steps.push({ label: `Workflow selected: ${message.route}`, state: "done" });
+  const routeDetail = message.provenance.deterministic_route_fallback
+    ? "deterministic fallback after no acceptable model decision"
+    : message.provenance.route_reconsideration_triggered
+      ? `reconsidered from ${message.provenance.initial_model_route ?? "an invalid decision"}`
+      : message.provenance.initial_model_route
+        ? `model confidence ${message.provenance.initial_route_confidence?.toFixed(2) ?? "unavailable"}`
+        : "no model route decision available";
+  steps.push({ label: `Workflow selected: ${message.route}`, detail: routeDetail, state: "done" });
 
   const usesDocuments = message.route === "rag" || message.route === "hybrid";
   if (usesDocuments && execution.retrieval_candidates !== null) {

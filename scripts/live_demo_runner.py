@@ -170,6 +170,7 @@ def run_live_demo_eval(
             wall_ms = (time.perf_counter() - t0) * 1000
             calls = budgeted.calls - before[0]
             failures = budgeted.failures - before[3]
+            call_records = budgeted.records[before[0] :]
             consecutive_failures = consecutive_failures + 1 if failures and calls == failures else 0
 
             record: dict[str, Any] = {
@@ -185,6 +186,20 @@ def run_live_demo_eval(
                 "model_latency_ms": round(
                     sum(r.duration_ms for r in budgeted.records) - before[4], 1
                 ),
+                "call_diagnostics": [
+                    {
+                        "purpose": item.purpose,
+                        "outcome": item.outcome,
+                        "prompt_tokens": item.prompt_tokens,
+                        "output_tokens": item.output_tokens,
+                        "usage_reported": item.usage_reported,
+                        "near_output_limit": (
+                            item.output_tokens is not None
+                            and item.output_tokens >= inputs.budget.max_output_tokens * 0.9
+                        ),
+                    }
+                    for item in call_records
+                ],
                 "wall_ms": round(wall_ms, 1),
             }
             if response.status_code != 201:
@@ -201,6 +216,12 @@ def run_live_demo_eval(
                     answer_excerpt=excerpt(str(message["answer"])),
                     grounding_status=message["provenance"]["grounding_status"],
                     policy_sql_status=message["provenance"]["policy_sql_status"],
+                    structured_output_repairs=message["provenance"]["execution"][
+                        "structured_output_repairs"
+                    ],
+                    structured_output_failures=message["provenance"]["execution"][
+                        "structured_output_failures"
+                    ],
                     checks=checks,
                     passed=(all(applicable) if case["scored"] and applicable else None),
                 )

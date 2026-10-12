@@ -89,6 +89,7 @@ HYBRID_EXPECT_KEYS = {
     "forbidden_sql_prompt_fragments",
     "policy_sql_status",
     "min_policy_predicates",
+    "min_unjustified_predicates",
     "min_policy_issues",
 }
 PROMPT_EXPECT_KEYS = {"must_not_contain", "must_contain"}

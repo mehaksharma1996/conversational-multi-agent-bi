@@ -184,6 +184,11 @@ class QuestionOrchestrator:
         self.last_route: RouteName | None = None
         self._structured_repairs = 0
         self._structured_failures = 0
+        self._initial_model_route: RouteName | None = None
+        self._initial_route_confidence: float | None = None
+        self._route_reconsideration_triggered = False
+        self._final_route_confidence: float | None = None
+        self._deterministic_route_fallback = False
         self._checkpointer = checkpointer or InMemorySaver(serde=build_checkpoint_serializer())
         self._graph = self._build_graph()
 
@@ -198,6 +203,11 @@ class QuestionOrchestrator:
         self.last_route = None
         self._structured_repairs = 0
         self._structured_failures = 0
+        self._initial_model_route = None
+        self._initial_route_confidence = None
+        self._route_reconsideration_triggered = False
+        self._final_route_confidence = None
+        self._deterministic_route_fallback = False
         initial_state: QuestionGraphState = {
             "question": question,
             "require_sql_approval": require_sql_approval,
@@ -242,8 +252,12 @@ class QuestionOrchestrator:
     ) -> OrchestratorResult:
         interrupted = bool(final_state.get("__interrupt__"))
         diagnostics = final_state.get("diagnostics", AnswerDiagnostics())
+        final_route = final_state.get("route", "unsupported")
+        final_route_confidence = (
+            diagnostics.final_route_confidence if diagnostics.final_route == final_route else None
+        )
         result = OrchestratorResult(
-            route=final_state.get("route", "unsupported"),
+            route=final_route,
             answer=final_state.get("answer", ""),
             sql=(final_state.get("validated_sql") if interrupted else final_state.get("sql")),
             dataframe=final_state.get("dataframe"),
@@ -252,6 +266,8 @@ class QuestionOrchestrator:
             status="pending_approval" if interrupted else final_state.get("status", "complete"),
             diagnostics=replace(
                 diagnostics,
+                final_route=final_route,
+                final_route_confidence=final_route_confidence,
                 structured_output_repairs=max(
                     diagnostics.structured_output_repairs,
                     self._structured_repairs,
@@ -361,6 +377,7 @@ class QuestionOrchestrator:
         )
         route = self._classify_route(question, memory_answer_available)
         if route is None:
+            self._deterministic_route_fallback = True
             route = route_question(
                 question=question,
                 has_table=self.stored_table is not None,
@@ -369,7 +386,19 @@ class QuestionOrchestrator:
                 memory_answer_available=memory_answer_available,
             )
         self.last_route = route
-        return {**state, "route": route}
+        return {
+            **state,
+            "route": route,
+            "diagnostics": replace(
+                state.get("diagnostics", AnswerDiagnostics()),
+                initial_model_route=self._initial_model_route,
+                initial_route_confidence=self._initial_route_confidence,
+                route_reconsideration_triggered=self._route_reconsideration_triggered,
+                final_route=route,
+                final_route_confidence=self._final_route_confidence,
+                deterministic_route_fallback=self._deterministic_route_fallback,
+            ),
+        }
 
     def _classify_route(
         self,
@@ -436,9 +465,14 @@ Question: {question}
 
 Return JSON only: {{"route": "route_name", "confidence": 0.0}}
 """
-        route = self._decide_route(prompt, available_routes)
+        decision = self._generate_route_decision(prompt)
+        if decision is not None:
+            self._initial_model_route = decision.route
+            self._initial_route_confidence = decision.confidence
+        route = self._accepted_route(decision, available_routes)
         if route is None:
             return None
+        self._final_route_confidence = decision.confidence if decision is not None else None
         conflict = _route_dependency_conflict(
             question,
             route,
@@ -446,6 +480,7 @@ Return JSON only: {{"route": "route_name", "confidence": 0.0}}
         )
         if conflict is None:
             return route
+        self._route_reconsideration_triggered = True
         # One bounded reconsideration. The model keeps the final say; the guard never
         # forces a route, and the second answer must still be an available route.
         if conflict == "document_criterion":
@@ -458,19 +493,30 @@ Return JSON only: {{"route": "route_name", "confidence": 0.0}}
                 "The question asks to count or aggregate records. Decide whether the "
                 "documents define criteria that must be applied to the table rows."
             )
-        reconsidered = self._decide_route(
+        reconsidered_decision = self._generate_route_decision(
             f"{prompt}\nConsistency check: you chose {route}. {note} "
             "Apply decision rules 1-4 and answer again.\n",
-            available_routes,
         )
+        reconsidered = self._accepted_route(reconsidered_decision, available_routes)
+        if reconsidered is not None and reconsidered_decision is not None:
+            self._final_route_confidence = reconsidered_decision.confidence
         return reconsidered or route
 
-    def _decide_route(self, prompt: str, available_routes: list[RouteName]) -> RouteName | None:
+    def _generate_route_decision(self, prompt: str) -> RouteDecision | None:
         try:
-            decision = self._generate_validated(prompt, RouteDecision)
+            return self._generate_validated(prompt, RouteDecision)
         except (RuntimeError, TypeError, ValueError, ValidationError):
             return None
-        if decision.route in available_routes and decision.confidence >= _ROUTE_CONFIDENCE_FLOOR:
+
+    @staticmethod
+    def _accepted_route(
+        decision: RouteDecision | None, available_routes: list[RouteName]
+    ) -> RouteName | None:
+        if (
+            decision is not None
+            and decision.route in available_routes
+            and decision.confidence >= _ROUTE_CONFIDENCE_FLOOR
+        ):
             return decision.route
         return None
 
@@ -510,7 +556,9 @@ Return JSON only: {{"route": "route_name", "confidence": 0.0}}
             **state,
             "document_result": result,
             "sources": _format_sources(result.retrieved_chunks),
-            "diagnostics": _document_diagnostics(result),
+            "diagnostics": _document_diagnostics(
+                result, state.get("diagnostics", AnswerDiagnostics())
+            ),
         }
 
     def _extract_criteria_node(self, state: QuestionGraphState) -> QuestionGraphState:
@@ -578,11 +626,17 @@ Return matching or highest-priority rows identifiable from the table columns.
         }
         if state.get("route") != "hybrid":
             return updated
-        verification = verify_policy_sql(validated, state.get("criteria", {}))
+        verification = verify_policy_sql(
+            validated,
+            state.get("criteria", {}),
+            user_question=state.get("question"),
+        )
         diagnostics = replace(
             state.get("diagnostics", AnswerDiagnostics()),
             policy_sql_status=verification.status,
             policy_predicate_count=verification.predicate_count,
+            policy_business_predicate_count=verification.business_predicate_count,
+            policy_unjustified_predicate_count=verification.unjustified_predicate_count,
             policy_issue_count=len(verification.issues),
             evidence_statuses=(
                 tuple(
@@ -601,7 +655,8 @@ Return matching or highest-priority rows identifiable from the table columns.
             **updated,
             "policy_sql_status": verification.status,
             "policy_sql_issues": verification.issues,
-            "sql_terminal_failure": verification.status in {"mismatch", "conflicting_evidence"},
+            "sql_terminal_failure": verification.status
+            in {"mismatch", "conflicting_evidence", "unverified"},
             "diagnostics": diagnostics,
         }
 
@@ -721,7 +776,8 @@ Return matching or highest-priority rows identifiable from the table columns.
                 sql=state.get("sql", ""),
             ),
             "status": "complete",
-            "diagnostics": AnswerDiagnostics(
+            "diagnostics": replace(
+                state.get("diagnostics", AnswerDiagnostics()),
                 sql_execution_seconds=state.get("sql_execution_seconds", 0.0),
                 sql_row_count=len(dataframe),
                 sql_correction_attempted=state.get("sql_correction_attempts", 0) > 0,
@@ -782,6 +838,18 @@ Return matching or highest-priority rows identifiable from the table columns.
 
     def _hybrid_fallback_node(self, state: QuestionGraphState) -> QuestionGraphState:
         document_result = state["document_result"]
+        validation_refused = state.get("policy_sql_status") in {
+            "mismatch",
+            "conflicting_evidence",
+            "unverified",
+        }
+        fallback_notice = (
+            "The hybrid table query was refused because its policy-to-SQL predicate validation "
+            "failed. No policy query was executed."
+            if validation_refused
+            else "I could not safely translate the document guidance into a table query, so no "
+            "policy query was executed."
+        )
         diagnostics = replace(
             state.get("diagnostics", AnswerDiagnostics()),
             criteria_provenance=state.get("criteria_provenance", "excerpt_fallback"),
@@ -791,11 +859,7 @@ Return matching or highest-priority rows identifiable from the table columns.
         return {
             **state,
             "route": "rag",
-            "answer": (
-                document_result.answer
-                + "\n\nI found relevant document guidance, but could not safely translate it "
-                "into a query for the uploaded table."
-            ),
+            "answer": (document_result.answer + "\n\n" + fallback_notice),
             "status": "complete",
             "diagnostics": diagnostics,
         }
@@ -818,7 +882,9 @@ Return matching or highest-priority rows identifiable from the table columns.
             **state,
             "answer": result.answer,
             "sources": _format_sources(result.retrieved_chunks),
-            "diagnostics": _document_diagnostics(result),
+            "diagnostics": _document_diagnostics(
+                result, state.get("diagnostics", AnswerDiagnostics())
+            ),
         }
 
     def _extract_hybrid_criteria(self, question: str, document_result) -> _ExtractedCriteria:
@@ -913,7 +979,9 @@ def _usage_fields(usage: QuestionUsage | None) -> dict[str, Any]:
     }
 
 
-def _document_diagnostics(result: RAGAnswer) -> AnswerDiagnostics:
+def _document_diagnostics(
+    result: RAGAnswer, base: AnswerDiagnostics | None = None
+) -> AnswerDiagnostics:
     """Structural grounding facts from a document answer (no content)."""
     citation_count = len(result.cited_source_numbers)
     status: GroundingStatus
@@ -925,7 +993,8 @@ def _document_diagnostics(result: RAGAnswer) -> AnswerDiagnostics:
         status = "warnings"
     else:
         status = "checked_no_issues"
-    return AnswerDiagnostics(
+    return replace(
+        base or AnswerDiagnostics(),
         retrieval_candidates=result.candidates_considered,
         retrieval_accepted=len(result.retrieved_chunks),
         retrieval_rejected_distance=result.candidates_rejected_by_distance,

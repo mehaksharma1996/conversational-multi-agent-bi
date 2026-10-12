@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 
 import pandas as pd
@@ -364,7 +365,48 @@ def test_structured_policy_predicate_must_match_sql_before_execution(monkeypatch
     assert result.route == "rag"
     assert result.diagnostics.policy_sql_status == "mismatch"
     assert result.diagnostics.hybrid_fell_back_to_documents is True
-    assert "could not safely translate" in result.answer
+    assert result.diagnostics.final_route == "rag"
+    assert result.diagnostics.final_route_confidence is None
+    assert "hybrid table query was refused" in result.answer
+    assert "No policy query was executed" in result.answer
+
+
+def test_extra_filter_that_changes_the_result_is_refused_before_execution(monkeypatch) -> None:
+    table = SQLiteStore(isolated_database_path("predicate-counterexample")).save_dataframe(
+        pd.DataFrame(
+            {
+                "merchant": ["A", "B", "A"],
+                "amount": [30.0, 40.0, 10.0],
+            }
+        )
+    )
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM(
+            'SELECT COUNT(*) AS n FROM uploaded_data WHERE "amount" > 20 AND "merchant" = \'A\''
+        ),
+        stored_table=table,
+        document_retriever=PolicyRetriever(),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "execute_sql",
+        lambda *args, **kwargs: pytest.fail("predicate-incomplete SQL was executed"),
+    )
+
+    with sqlite3.connect(table.database_path) as connection:
+        policy_count = connection.execute(
+            'SELECT COUNT(*) FROM uploaded_data WHERE "amount" > 20'
+        ).fetchone()[0]
+        narrowed_count = connection.execute(
+            'SELECT COUNT(*) FROM uploaded_data WHERE "amount" > 20 AND "merchant" = \'A\''
+        ).fetchone()[0]
+    result = orchestrator.answer("Which transactions violate the uploaded policy?")
+
+    assert (policy_count, narrowed_count) == (2, 1)
+    assert result.route == "rag"
+    assert result.dataframe is None
+    assert result.diagnostics.policy_sql_status == "mismatch"
+    assert result.diagnostics.policy_unjustified_predicate_count == 1
 
 
 def test_structured_policy_predicate_is_linked_to_executed_rows_and_insight() -> None:
@@ -410,6 +452,39 @@ def test_structured_policy_check_precedes_approval_and_survives_resume() -> None
     assert pending.diagnostics.policy_sql_status == "structurally_verified"
     assert completed.status == "complete"
     assert completed.diagnostics.policy_sql_status == "structurally_verified"
+
+
+def test_approval_edit_that_adds_an_unjustified_filter_is_refused(monkeypatch) -> None:
+    orchestrator = QuestionOrchestrator(
+        llm_client=PolicyHybridLLM(
+            'SELECT merchant, amount FROM uploaded_data WHERE "amount" > 20'
+        ),
+        stored_table=_stored_table(),
+        document_retriever=PolicyRetriever(),
+    )
+    pending = orchestrator.answer(
+        "Which transactions violate the uploaded policy?",
+        require_sql_approval=True,
+        thread_id="unjustified-edit-test",
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "execute_sql",
+        lambda *args, **kwargs: pytest.fail("unjustified approval edit was executed"),
+    )
+
+    completed = orchestrator.resume_approval(
+        "unjustified-edit-test",
+        decision="approve",
+        sql=(
+            'SELECT merchant, amount FROM uploaded_data WHERE "amount" > 20 AND "merchant" = \'B\''
+        ),
+    )
+
+    assert pending.status == "pending_approval"
+    assert completed.route == "rag"
+    assert completed.dataframe is None
+    assert completed.diagnostics.policy_unjustified_predicate_count == 1
 
 
 def test_hybrid_approval_rejection_never_executes(monkeypatch) -> None:

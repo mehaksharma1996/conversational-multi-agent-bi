@@ -226,6 +226,11 @@ def test_request_id_correlates_response_telemetry_audit_and_message() -> None:
     answered = [e for e in telemetry.named("agent.answer") if e.request_id == request_id]
     assert len(answered) == 1
     assert answered[0].attributes["route"] == "sql"
+    assert answered[0].attributes["initial_model_route"] == "sql"
+    assert answered[0].attributes["initial_route_confidence"] == 1.0
+    assert answered[0].attributes["route_reconsideration_triggered"] is False
+    assert answered[0].attributes["final_route"] == "sql"
+    assert answered[0].attributes["deterministic_route_fallback"] is False
     assert answered[0].attributes["sql_row_count"] == 1
     assert "sql_duration_ms" in answered[0].attributes
     http_events = [e for e in telemetry.named("http.request") if e.request_id == request_id]
@@ -234,7 +239,11 @@ def test_request_id_correlates_response_telemetry_audit_and_message() -> None:
         == "/api/v1/conversations/{conversation_id}/messages"
     )
     assert http_events[0].attributes["status_code"] == 201
-    assert response.json()["provenance"]["grounding_status"] == "not_applicable"
+    provenance = response.json()["provenance"]
+    assert provenance["grounding_status"] == "not_applicable"
+    assert provenance["initial_model_route"] == "sql"
+    assert provenance["final_route"] == "sql"
+    assert provenance["route_reconsideration_triggered"] is False
 
 
 def test_rag_message_reports_retrieval_counts_and_grounding() -> None:

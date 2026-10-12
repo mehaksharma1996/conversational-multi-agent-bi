@@ -293,9 +293,13 @@ def test_a_correct_answer_with_the_wrong_route_fails_only_routing_and_completion
 
 def test_a_hybrid_answer_needs_the_policy_verification_not_just_the_number(oracle: Any) -> None:
     case = _case("fulfillment-escalation-count")
+    extra_filter_sql = (
+        'SELECT COUNT(*) AS n FROM "uploaded_data" WHERE "fulfillment_days" >= 10 '
+        "AND \"status\" = 'review'"
+    )
     message = _message(
         route="hybrid",
-        sql='SELECT COUNT(*) AS n FROM "uploaded_data" WHERE "fulfillment_days" >= 10',
+        sql=extra_filter_sql,
         rows=[{"n": 13}],
         answer="13 transactions.",
         sources=[{"citation": "policy.pdf p.1"}],
@@ -310,6 +314,7 @@ def test_a_hybrid_answer_needs_the_policy_verification_not_just_the_number(oracl
 
     checks = evaluate_message(case, message, oracle)
 
+    assert reference_rows(oracle, extra_filter_sql) == [(13,)]
     assert checks["sql_semantic"] is True
     assert checks["policy_sql_consistency"] is False
     assert checks["task_completion"] is False

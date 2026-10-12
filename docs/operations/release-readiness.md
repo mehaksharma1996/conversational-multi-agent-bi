@@ -42,6 +42,24 @@ $env:RUN_LIVE_DEMO_EVALS = "1"
 ```
 
 The report is written to `evals/results/live-demo.json` (git-ignored) with `mode: "live"`.
+Each case also records content-free per-call diagnostics (purpose, success/failure, input/output
+token counts, whether usage was reported, and whether output was within 10% of the configured cap)
+plus structured-output repair/failure counts. It never records prompts or responses.
+
+### Structured-output evidence from the 2026-10-12 one-case run
+
+The preserved `live-demo-free-tier-routing-v2-2026-10-12.json` report shows five calls, one failed
+call, 2,586 prompt tokens, and 4,202 billed output tokens for the fulfillment case under a 2,048
+per-call output cap. The application performed one bounded structured-output repair. This proves a
+validation failure and high aggregate output use, but the old report did not retain per-call token
+counts, finish reasons, or the candidate/thinking split. It therefore does **not** prove response
+truncation or isolate Gemini thinking-token consumption.
+
+The smallest evidence-supported change is the per-call diagnostics above. The token cap remains
+2,048 and strict local Pydantic validation plus the one-repair bound remain unchanged. A future
+single-case rerun can now show whether the criteria call itself approaches the cap; only then should
+the prompt/schema or a purpose-specific thinking budget be changed. Do not raise output limits from
+the aggregate evidence alone.
 
 ### What each dimension means
 
