@@ -1,8 +1,9 @@
 # Release readiness and live-model evaluation
 
-Status as of 2026-10-11 on branch `demo/grounded-bi-experience`. This page separates what has been
-verified on this machine from what has not. Nothing here is a claim about a live model: no paid
-provider request has been made for this assessment.
+Status as of 2026-10-12 on branch `demo/grounded-bi-experience`. This page separates what has been
+verified on this machine from what has not. One controlled, free-tier Gemini hybrid case was run and
+its report is preserved under `evals/results/`; no additional provider request was made during
+release preparation.
 
 ## What is and is not verified
 
@@ -10,13 +11,24 @@ provider request has been made for this assessment.
 |---|---|---|
 | Deterministic evaluation gate | Verified locally | `python -m scripts.run_evaluations`, see the project report for exact counts |
 | Real-stack browser journeys with the **scripted** provider | Verified locally | `npm run test:e2e:real`, 20 Chromium journeys, including the mapper defaults |
-| Live Gemini answers to the nine demo questions | **NOT RUN** | Needs an approved budget; see below |
+| Controlled live Gemini hybrid case | Verified for one run | Four successful HTTP attempts; see the preserved report and evidence below |
+| Live Gemini answers to the full demo plan | **NOT RUN** | Only the controlled hybrid case was run; one result is not a rate |
 | Container build, nginx, compose smoke, Docker-only Playwright | **BLOCKED locally** | Docker is not installed on this machine; CI's `containers` job is the only check of these paths |
-| Image vulnerability scan | **BLOCKED locally** | Runs in CI's `security` job only |
+| Image vulnerability scan | **BLOCKED locally** | Runs in CI's `containers` job only |
 | Public hosted demo | **NOT READY** | See the assessment below |
 
 A scripted-provider run proves the application handles correct model behaviour. It is never evidence
 that a real model produces that behaviour.
+
+### Controlled hybrid evidence from 2026-10-12
+
+The preserved `live-demo-free-tier-controlled-hybrid-rerun-2026-10-12.json` report records one
+successful run of the fulfillment escalation case with four model calls and four HTTP attempts. The
+initial and final route were both `hybrid`; the extracted source-attributed policy criterion was
+`fulfillment_days >= 10`; the generated SQL contained one business predicate and no unjustified
+predicate; the policy-to-SQL check was `structurally_verified`; and the query returned exactly 13.
+There were no retries, provider fallbacks, provider failures, or quota errors. This is evidence for
+that controlled run only, not for the full demo plan or a general success rate.
 
 ## Evaluating a real model
 
@@ -158,10 +170,13 @@ deployed or purchased.
 
 - The branch is based on the head of PR #99 (`ccf5a2c`), so it **contains that CVE fix**. Merge
   #99 first; the shared commit then drops out of this branch's diff.
-- The branch also carries a local copy of the usage-guardrail documentation commit
-  (`2b672e4`), which duplicates `72c760a` on `docs/usage-guardrail-ask-user`. Merge that docs branch
-  first or expect an identical-content conflict.
+- The branch also carries the usage-guardrail documentation as `2b672e4`. It is patch-equivalent to
+  `72c760a` on `docs/usage-guardrail-ask-user`; do not merge both copies. Keep the feature copy, or
+  merge the docs branch and drop the duplicate while updating the feature branch.
 - PR #97 (numeric formats) is **not** in this branch. Its `containers` check fails because it
-  predates #99; rebase it after #99 lands. The demo CSV is clean, so the demo does not depend on it.
+  predates #99; refresh it after #99 lands and require a green rerun. The demo CSV is clean, so the
+  demo does not depend on it.
 - `main` CI is red at `60e3961` for the same CVE, and `main` has no branch protection.
-- Suggested order: #99, the guardrail docs branch, #97 (rebased), then this branch as one PR.
+- Suggested order: #99, #97 refreshed on the fixed base, then this branch updated from `main`
+  without rewriting its published history unless explicitly approved. Treat the standalone
+  guardrail branch as superseded if this feature copy is retained.
