@@ -47,6 +47,11 @@ each with a committed answer. A reload restores your workspace, data, and conver
 [demo walkthrough](docs/operations/demo-walkthrough.md), and usage, limits, and troubleshooting are in
 [frontend usage](docs/operations/frontend-usage-and-troubleshooting.md).
 
+What has and has not been verified (scripted versus live model, containers, public hosting), plus the
+bounded `scripts.run_live_demo_eval` procedure, is in
+[release readiness](docs/operations/release-readiness.md). The browser journeys above use a scripted
+model; no live-model accuracy is claimed.
+
 Add [`retail_operations_policy.pdf`](sample_data/retail_operations_policy.pdf), configure a provider,
 and drop `LOCAL_ONLY_MODE` to try guarded SQL, document, and hybrid questions. The full scenario and
 regeneration command are documented in [`sample_data/README.md`](sample_data/README.md). You can also
