@@ -330,6 +330,7 @@ def generate_assets(output_dir: Path) -> dict[str, Path]:
     paths["ground_truth"].write_text(
         json.dumps(build_ground_truth(rows), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     return paths
 
