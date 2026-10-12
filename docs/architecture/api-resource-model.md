@@ -49,7 +49,9 @@ an API in this iteration.
 | Method and path | Purpose | Notes |
 |---|---|---|
 | `POST /workspaces` | Create a tenant-owned workspace | Idempotent for a supplied creation key. |
+| `GET /workspaces` | List the caller's own workspaces, newest first | Tenant-filtered; read-only (does not extend retention). |
 | `GET /workspaces/{workspace_id}` | Read workspace status | Ownership enforced. |
+| `GET /workspaces/{workspace_id}/overview` | Ids of the latest dataset, analysis, document collection, and conversation | Same tenant-scoped 404 as `GET /workspaces/{workspace_id}`; see [workspace recovery](workspace-recovery.md). |
 | `DELETE /workspaces/{workspace_id}` | Reset and delete all owned artifacts | May return a job for verified cleanup. |
 | `POST /workspaces/{workspace_id}/tabular-uploads` | Upload CSV/Excel | Enforce byte limit before parsing. |
 | `GET /tabular-uploads/{upload_id}/sheets` | List Excel sheets | CSV returns an empty list. |

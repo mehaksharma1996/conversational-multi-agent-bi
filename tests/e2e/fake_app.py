@@ -35,9 +35,13 @@ class BrowserTestLLM:
             else:
                 text = '{"route":"sql","confidence":1}'
         elif "Extract business criteria" in prompt:
-            text = '{"thresholds":[1000]}'
+            text = (
+                '{"thresholds":[1000],"predicates":[{"field":"amount",'
+                '"operator":"gt","value":1000,"unit":"currency","source":1,'
+                '"null_behavior":"exclude"}],"predicate_join":"all"}'
+            )
         elif "careful document analyst" in prompt:
-            text = 'The policy states "Transactions over $1,000 require manager review." Source 1'
+            text = 'The policy states "Amount paid over $1000 requires manager review." Source 1'
         else:
             text = (
                 'SELECT "merchant", "amount" FROM "uploaded_data" '

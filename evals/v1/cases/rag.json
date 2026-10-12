@@ -126,5 +126,47 @@
       "route": "rag",
       "grounding": {"status": "checked_no_issues", "invalid_citations": 0}
     }
+  },
+  {
+    "id": "rag-flags-quote-attributed-to-wrong-source",
+    "capability": "document_rag",
+    "question": "According to the policy, what approval do refunds require?",
+    "rationale": "A verbatim quote found only in one retrieved chunk must not validate when the answer attributes it to a different source.",
+    "deterministic_only": true,
+    "context": {"corpus": "review_policy"},
+    "script": {
+      "rag_answer": "The policy says \"Refunds above 200 dollars require manager approval\" Source 2"
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "grounding": {
+        "status": "warnings",
+        "unverified_quotes": 1,
+        "evidence_statuses": ["QUOTE_MISMATCH", "NOT_EVALUATED"],
+        "warning_in_answer": true
+      }
+    }
+  },
+  {
+    "id": "rag-flags-partially-uncited-answer",
+    "capability": "document_rag",
+    "question": "Summarize the review and refund rules in the policy.",
+    "rationale": "One valid citation at the end of a multi-statement answer must not make an earlier uncited factual statement appear structurally grounded.",
+    "deterministic_only": true,
+    "context": {"corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Flagged transactions require a second reviewer. Refunds above 200 dollars require manager approval. Source 1"
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "grounding": {
+        "status": "warnings",
+        "uncited_claims": 1,
+        "evidence_statuses": ["UNVERIFIED_CLAIM", "NOT_EVALUATED"],
+        "warning_in_answer": true
+      }
+    }
   }
 ]

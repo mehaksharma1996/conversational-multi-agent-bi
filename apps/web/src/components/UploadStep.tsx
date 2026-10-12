@@ -4,7 +4,7 @@ interface UploadStepProps {
   disabled: boolean;
   busy: boolean;
   sheets: string[];
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File) => Promise<unknown>;
   onSelectSheet: (sheet: string) => Promise<void>;
 }
 

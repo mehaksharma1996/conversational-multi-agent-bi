@@ -78,6 +78,24 @@ class WorkspaceResponse(StrictModel):
     created_at: datetime
 
 
+class WorkspaceListResponse(StrictModel):
+    items: list[WorkspaceResponse]
+
+
+class WorkspaceOverviewResponse(StrictModel):
+    """Identifiers that let a client rebuild its view of one workspace after a reload.
+
+    Every identifier is the newest resource of its kind inside the workspace and is
+    resolved through the same tenant-scoped lookups as the resource's own endpoint.
+    """
+
+    workspace: WorkspaceResponse
+    dataset_id: str | None
+    analysis_id: str | None
+    document_collection_id: str | None
+    conversation_id: str | None
+
+
 class ConsentUpdateRequest(StrictModel):
     accepted: Literal[True]
     notice_version: str = Field(default="2026-09", min_length=1, max_length=32)
@@ -308,6 +326,24 @@ class SourceResponse(StrictModel):
     citation: str
 
 
+class ExecutionSummaryResponse(StrictModel):
+    """Content-free counts describing what the workflow did for one answer.
+
+    Every value comes from the diagnostics the orchestrator already records; there is
+    no per-step trace, timestamp, prompt, or model output behind it.
+    """
+
+    sql_row_count: int | None
+    sql_execution_ms: int | None
+    sql_correction_attempted: bool
+    retrieval_candidates: int | None
+    retrieval_accepted: int | None
+    llm_calls: int
+    llm_fallbacks: int
+    structured_output_repairs: int
+    structured_output_failures: int
+
+
 class ProvenanceResponse(StrictModel):
     """Content-free description of how an answer was checked.
 
@@ -316,10 +352,40 @@ class ProvenanceResponse(StrictModel):
     """
 
     grounding_status: Literal["not_applicable", "checked_no_issues", "uncited", "warnings"]
+    initial_model_route: Literal["memory", "sql", "rag", "hybrid", "unsupported"] | None
+    initial_route_confidence: float | None
+    route_reconsideration_triggered: bool
+    final_route: Literal["memory", "sql", "rag", "hybrid", "unsupported"] | None
+    final_route_confidence: float | None
+    deterministic_route_fallback: bool
     source_count: int
     citation_count: int
     invalid_citation_count: int
     unverified_quote_count: int
+    uncited_claim_count: int
+    evidence_statuses: list[
+        Literal[
+            "VERIFIED_REFERENCE",
+            "INVALID_REFERENCE",
+            "QUOTE_MISMATCH",
+            "MISSING_EVIDENCE",
+            "UNVERIFIED_CLAIM",
+            "CONFLICTING_EVIDENCE",
+            "NOT_EVALUATED",
+        ]
+    ]
+    policy_sql_status: Literal[
+        "not_applicable",
+        "structurally_verified",
+        "mismatch",
+        "conflicting_evidence",
+        "unverified",
+        "not_evaluated",
+    ]
+    policy_predicate_count: int
+    policy_business_predicate_count: int
+    policy_unjustified_predicate_count: int
+    policy_issue_count: int
     criteria_provenance: Literal[
         "not_applicable",
         "traced",
@@ -328,6 +394,7 @@ class ProvenanceResponse(StrictModel):
         "excerpt_fallback",
     ]
     hybrid_fell_back_to_documents: bool
+    execution: ExecutionSummaryResponse
 
 
 class MessageResponse(StrictModel):

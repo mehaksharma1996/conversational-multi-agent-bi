@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
+from src.agents.rag_agent import EvidenceStatus
+from src.orchestration.policy_grounding import PolicySQLStatus
+
 RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported"]
 AnswerStatus = Literal["complete", "pending_approval", "rejected"]
 GroundingStatus = Literal["not_applicable", "checked_no_issues", "uncited", "warnings"]
@@ -30,6 +33,12 @@ class AnswerDiagnostics:
     sql_execution_seconds: float | None = None
     sql_row_count: int | None = None
     sql_correction_attempted: bool = False
+    initial_model_route: RouteName | None = None
+    initial_route_confidence: float | None = None
+    route_reconsideration_triggered: bool = False
+    final_route: RouteName | None = None
+    final_route_confidence: float | None = None
+    deterministic_route_fallback: bool = False
     retrieval_candidates: int | None = None
     retrieval_accepted: int | None = None
     retrieval_rejected_distance: int | None = None
@@ -42,11 +51,18 @@ class AnswerDiagnostics:
     citation_count: int = 0
     invalid_citation_count: int = 0
     unverified_quote_count: int = 0
+    uncited_claim_count: int = 0
+    evidence_statuses: tuple[EvidenceStatus, ...] = ()
     grounding_status: GroundingStatus = "not_applicable"
     criteria_keys: tuple[str, ...] = ()
     criteria_rejected_keys: int = 0
     criteria_dropped_values: int = 0
     criteria_provenance: CriteriaProvenance = "not_applicable"
+    policy_sql_status: PolicySQLStatus = "not_applicable"
+    policy_predicate_count: int = 0
+    policy_business_predicate_count: int = 0
+    policy_unjustified_predicate_count: int = 0
+    policy_issue_count: int = 0
     hybrid_fell_back_to_documents: bool = False
     structured_output_repairs: int = 0
     structured_output_failures: int = 0
@@ -87,3 +103,5 @@ class QuestionGraphState(TypedDict, total=False):
     approval_decision: Literal["approve", "reject"]
     approval_sql: str | None
     sql_terminal_failure: bool
+    policy_sql_status: PolicySQLStatus
+    policy_sql_issues: tuple[str, ...]

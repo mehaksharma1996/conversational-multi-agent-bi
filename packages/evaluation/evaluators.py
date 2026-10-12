@@ -285,6 +285,24 @@ def _grounding(spec: dict[str, Any], obs: Observation) -> list[Check]:
                 f"{spec['unverified_quotes']}",
             )
         )
+    if "uncited_claims" in spec:
+        checks.append(
+            Check(
+                "grounding.claims_cited",
+                diagnostics.uncited_claim_count == spec["uncited_claims"],
+                f"{diagnostics.uncited_claim_count} uncited, expected {spec['uncited_claims']}",
+            )
+        )
+    if "evidence_statuses" in spec:
+        expected_statuses = set(spec["evidence_statuses"])
+        observed_statuses = set(diagnostics.evidence_statuses)
+        checks.append(
+            Check(
+                "grounding.evidence_statuses",
+                expected_statuses <= observed_statuses,
+                f"expected {sorted(expected_statuses)}, observed {sorted(observed_statuses)}",
+            )
+        )
     if "warning_in_answer" in spec:
         surfaced = "grounding check" in obs.result.answer.lower()
         checks.append(
@@ -302,6 +320,39 @@ def _hybrid(spec: dict[str, Any], obs: Observation) -> list[Check]:
         return [Check("hybrid.criteria_keys", False, "no answer was produced")]
     diagnostics = obs.result.diagnostics
     checks: list[Check] = []
+    if "policy_sql_status" in spec:
+        checks.append(
+            Check(
+                "hybrid.policy_sql_status",
+                diagnostics.policy_sql_status == spec["policy_sql_status"],
+                f"expected {spec['policy_sql_status']}, observed {diagnostics.policy_sql_status}",
+            )
+        )
+    if "min_policy_predicates" in spec:
+        checks.append(
+            Check(
+                "hybrid.policy_predicates",
+                diagnostics.policy_predicate_count >= spec["min_policy_predicates"],
+                f"{diagnostics.policy_predicate_count} policy predicate(s)",
+            )
+        )
+    if "min_policy_issues" in spec:
+        checks.append(
+            Check(
+                "hybrid.policy_issues",
+                diagnostics.policy_issue_count >= spec["min_policy_issues"],
+                f"{diagnostics.policy_issue_count} policy issue(s)",
+            )
+        )
+    if "min_unjustified_predicates" in spec:
+        checks.append(
+            Check(
+                "hybrid.unjustified_predicates",
+                diagnostics.policy_unjustified_predicate_count
+                >= spec["min_unjustified_predicates"],
+                f"{diagnostics.policy_unjustified_predicate_count} unjustified predicate(s)",
+            )
+        )
     if "criteria_keys" in spec:
         observed = sorted(diagnostics.criteria_keys)
         checks.append(

@@ -65,8 +65,12 @@ Directories under `data/api/` left from before a restart are orphaned and can be
 **An answer carries a grounding warning or "uncited".** This is the detector working. Read the cited sources in the UI. The telemetry line shows `grounding_status`, `invalid_citation_count`,
 `unverified_quote_count`. Do not use the answer without checking the evidence.
 
-**A hybrid answer says it fell back to the document answer.** The generated SQL was refused or failed. `criteria_provenance` on the `agent.answer` line will say `excerpt_fallback`, `unreferenced`,
-or `traced`. Review the SQL and the excerpts by hand.
+**A hybrid answer says it fell back to the document answer.** The generated SQL was refused or failed.
+Check `policy_sql_status`: `mismatch` includes missing or unjustified predicates,
+`conflicting_evidence` means the extracted sources disagree, and `unverified` means the SQL used an
+unsupported expression shape. `criteria_provenance` says whether criteria were traced or excerpt
+fallback was used. The status and counts are safe to inspect; review SQL and excerpts only in the
+authenticated product UI.
 
 **Suspected cross-tenant access.** Treat as a security incident. Reproduce with `python -m scripts.run_evaluations` (the isolation cases are critical checks). Verify the audit chain for the affected tenant
 (`JsonlAuditSink(...).verify(tenant_id)`); a `False` means the file was edited or truncated. Confirm no proxy is injecting identity: the API ignores client tenant headers by design.

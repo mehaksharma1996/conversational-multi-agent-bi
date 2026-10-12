@@ -11,3 +11,9 @@ Dockerfile* text eol=lf
 .dockerignore text eol=lf
 compose.yaml text eol=lf
 docker/** text eol=lf
+
+# Retail demo assets are compared byte-for-byte against the deterministic generator, which
+# writes LF; keep them LF even when checked out on Windows with core.autocrlf=true.
+sample_data/retail_operations.csv text eol=lf
+sample_data/retail_operations_ground_truth.json text eol=lf
+apps/web/public/demo/retail_operations.csv text eol=lf

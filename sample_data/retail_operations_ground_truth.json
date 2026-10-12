@@ -1,0 +1,89 @@
+{
+  "generator": {
+    "date_end": "2026-06-30",
+    "date_start": "2025-01-01",
+    "row_count": 2400,
+    "seed": 20261011
+  },
+  "policy_rules": {
+    "discount_review_minimum": "0.30",
+    "fulfillment_escalation_minimum_days": 10,
+    "gross_margin_review_below": "0.10",
+    "return_alone_requires_escalation": false
+  },
+  "questions": [
+    {
+      "answer": {
+        "total_revenue": "1625730.59"
+      },
+      "id": "total-revenue",
+      "question": "What is total revenue across the dataset?"
+    },
+    {
+      "answer": {
+        "region": "West",
+        "total_revenue": "533933.01"
+      },
+      "id": "top-region-revenue",
+      "question": "Which region has the highest total revenue?"
+    },
+    {
+      "answer": {
+        "category": "Electronics",
+        "gross_profit": "196361.54"
+      },
+      "id": "top-category-profit",
+      "question": "Which category generated the most gross profit?"
+    },
+    {
+      "answer": {
+        "month": "2025-10",
+        "total_revenue": "113432.96"
+      },
+      "id": "peak-month-revenue",
+      "question": "Which month had the highest revenue?"
+    },
+    {
+      "answer": {
+        "absolute_change": "25956.35",
+        "change_rate": "0.0516",
+        "h1_2025_revenue": "503347.58",
+        "h1_2026_revenue": "529303.93"
+      },
+      "id": "h1-year-comparison",
+      "question": "How did first-half revenue change from 2025 to 2026?"
+    },
+    {
+      "answer": {
+        "review_transaction_count": 45
+      },
+      "id": "policy-review-count",
+      "question": "How many transactions meet at least one documented review rule?"
+    },
+    {
+      "answer": {
+        "minimum_days": 10,
+        "transaction_count": 13
+      },
+      "id": "fulfillment-escalation-count",
+      "question": "How many transactions meet the policy fulfillment escalation rule?"
+    },
+    {
+      "answer": {
+        "missing_customer_segment_count": 24
+      },
+      "id": "missing-segments",
+      "question": "How many transactions have an unknown customer segment?"
+    },
+    {
+      "answer": {
+        "requires_escalation": false,
+        "source_text": "A returned transaction does not by itself require escalation."
+      },
+      "id": "policy-return-rule",
+      "question": "Does a return by itself require escalation?"
+    }
+  ],
+  "scenario": "retail_operations",
+  "schema_version": 1
+}

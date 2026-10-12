@@ -34,10 +34,29 @@ python -m uvicorn apps.api.main:app --port 8000          # terminal 1
 cd apps/web; npm ci; npm run dev                         # terminal 2 -> http://localhost:5173
 ```
 
-Upload [`sample_data/transactions.csv`](sample_data/transactions.csv), confirm the schema, run the
-analysis, and ask *"What limitations or unavailable analysis apply here?"*. Add `GEMINI_API_KEY`
-(and drop `LOCAL_ONLY_MODE`) to unlock SQL, document, and hybrid questions, or use
-[Docker Compose](docs/operations/local-containers.md) (`docker compose up -d --build --wait`).
+Upload [`sample_data/retail_operations.csv`](sample_data/retail_operations.csv), confirm the schema,
+and run the analysis. The deterministic 2,400-row scenario spans 18 months, four regions, five
+categories, three channels, policy-defined review cases, anomalies, and intentional nulls. Its exact
+answers are versioned in
+[`retail_operations_ground_truth.json`](sample_data/retail_operations_ground_truth.json).
+
+In the browser, the **Guided demo** panel's *Load demo data and policy* button does the same
+uploads through the normal endpoints (schema review still applies) and unlocks nine sample questions,
+each with a committed answer. A reload restores your workspace, data, and conversation
+([design](docs/architecture/workspace-recovery.md)); a step-by-step tour with real screenshots is in the
+[demo walkthrough](docs/operations/demo-walkthrough.md), and usage, limits, and troubleshooting are in
+[frontend usage](docs/operations/frontend-usage-and-troubleshooting.md).
+
+What has and has not been verified (scripted versus live model, containers, public hosting), plus the
+bounded `scripts.run_live_demo_eval` procedure, is in
+[release readiness](docs/operations/release-readiness.md). The browser journeys above use a scripted
+model; no live-model accuracy is claimed.
+
+Add [`retail_operations_policy.pdf`](sample_data/retail_operations_policy.pdf), configure a provider,
+and drop `LOCAL_ONLY_MODE` to try guarded SQL, document, and hybrid questions. The full scenario and
+regeneration command are documented in [`sample_data/README.md`](sample_data/README.md). You can also
+use [Docker Compose](docs/operations/local-containers.md)
+(`docker compose up -d --build --wait`).
 
 For the supervised path, upload
 [`sample_data/labelled_transactions.csv`](sample_data/labelled_transactions.csv) and confirm
@@ -51,7 +70,10 @@ and a ranked human-review queue; it has no relationship to real people or events
   deadline. A model that obeys a poisoned document still cannot run a destructive query.
 - **Answers carry their evidence.** Each reply shows its route (SQL, document RAG, hybrid, or
   memory), the generated SQL, retrieved sources, citation and quote checks, and a request ID.
-- **Safety is tested, not asserted.** An offline evaluation suite runs 45 cases through the real
+- **SQL insights are calculated, not invented.** Comparisons, rankings, and time changes are derived
+  from executed result rows with explicit null, precision, unit, and causality limitations. See the
+  [decision and tradeoffs](docs/architecture/grounded-sql-insights.md).
+- **Safety is tested, not asserted.** An offline evaluation suite runs 73 cases through the real
   guards with hard-fail safety gates and a committed baseline, and negative controls prove each
   check can fail.
 - **Privacy by construction.** Telemetry and audit logs are allowlist-only (no questions, SQL,
@@ -561,8 +583,11 @@ those controls before hosting it for untrusted users.
 - Gemini availability, quotas, and responses are external dependencies.
 - The evaluation suite checks safeguards against scripted model behavior; it does
   not measure real-model accuracy or PII-redaction recall on real data.
-- API resource metadata is process-local: restarting the API loses workspaces and
-  leaves their directories orphaned under `APP_DATA_DIR/api/`.
+- Unless `DURABLE_METADATA=true` (ADR 0022), API resource metadata is process-local: restarting the API
+  loses workspaces. With it enabled, the browser restores them after a reload or restart; a pending
+  SQL approval is still cancelled safely by a restart because its checkpoint is in memory.
+- The browser journeys in `apps/web/e2e/real` use a scripted model, not a live one, and ran in Chromium on
+  one machine. Real-model behavior, Docker, and screen-reader use are unverified.
 - Audit files are tamper-evident on one node but are not immutable, rotated, or
   access-controlled beyond filesystem permissions.
 - The container topology supports exactly one API container, has no authentication (the

@@ -365,6 +365,28 @@ class ExportRecord:
     created_at: datetime
 
 
+class _Stamped(Protocol):
+    @property
+    def id(self) -> str: ...
+    @property
+    def workspace_id(self) -> str: ...
+    @property
+    def tenant_id(self) -> str: ...
+    @property
+    def created_at(self) -> datetime: ...
+
+
+@dataclass(frozen=True)
+class WorkspaceOverview:
+    """Identifiers of the latest resource of each kind in one tenant-owned workspace."""
+
+    workspace: WorkspaceRecord
+    dataset: DatasetRecord | None
+    analysis: AnalysisRecord | None
+    document_collection: DocumentCollectionRecord | None
+    conversation: ConversationRecord | None
+
+
 @dataclass(frozen=True)
 class WorkspaceSnapshot:
     """A tenant-checked, point-in-time copy of one workspace's records (for data export)."""
@@ -942,6 +964,49 @@ class LocalResourceRepository:
     def get_workspace(self, workspace_id: str, tenant_id: str) -> WorkspaceRecord:
         with self._lock:
             return self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
+
+    def list_workspaces(self, tenant_id: str) -> list[WorkspaceRecord]:
+        """The caller's unexpired workspaces, newest first.
+
+        Listing is read-only: unlike a lookup it does not extend retention, so merely
+        discovering a workspace cannot keep it alive.
+        """
+        with self._lock:
+            self._purge_expired_unlocked()
+            owned = [
+                workspace
+                for workspace in self._workspaces.values()
+                if workspace.tenant_id == tenant_id
+            ]
+            return sorted(owned, key=lambda item: (item.created_at, item.id), reverse=True)
+
+    def workspace_overview(self, workspace_id: str, tenant_id: str) -> WorkspaceOverview:
+        """Latest dataset, analysis, document collection, and conversation of one workspace."""
+        with self._lock:
+            workspace = self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
+            self._hydrate_workspace_unlocked(workspace_id)
+
+            def latest[RecordT: _Stamped](records: dict[str, RecordT]) -> RecordT | None:
+                matches = [
+                    record
+                    for record in records.values()
+                    if record.workspace_id == workspace_id and record.tenant_id == tenant_id
+                ]
+                return max(matches, key=lambda item: (item.created_at, item.id), default=None)
+
+            dataset = latest(self._datasets)
+            analysis = (
+                self.latest_analysis_for_dataset(dataset.id, tenant_id)
+                if dataset is not None
+                else None
+            )
+            return WorkspaceOverview(
+                workspace=workspace,
+                dataset=dataset,
+                analysis=analysis,
+                document_collection=latest(self._document_collections),
+                conversation=latest(self._conversations),
+            )
 
     def set_consent(
         self,

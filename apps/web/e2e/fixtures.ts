@@ -47,12 +47,36 @@ export const messageFixture = {
   sources: [{ citation: "policy.pdf, page 2" }],
   provenance: {
     grounding_status: "checked_no_issues",
+    initial_model_route: "rag",
+    initial_route_confidence: 0.91,
+    route_reconsideration_triggered: false,
+    final_route: "rag",
+    final_route_confidence: 0.91,
+    deterministic_route_fallback: false,
     source_count: 1,
     citation_count: 1,
     invalid_citation_count: 0,
     unverified_quote_count: 0,
+    uncited_claim_count: 0,
+    evidence_statuses: ["VERIFIED_REFERENCE", "NOT_EVALUATED"],
+    policy_sql_status: "not_applicable",
+    policy_predicate_count: 0,
+    policy_business_predicate_count: 0,
+    policy_unjustified_predicate_count: 0,
+    policy_issue_count: 0,
     criteria_provenance: "not_applicable",
     hybrid_fell_back_to_documents: false,
+    execution: {
+      sql_row_count: null,
+      sql_execution_ms: null,
+      sql_correction_attempted: false,
+      retrieval_candidates: 3,
+      retrieval_accepted: 1,
+      llm_calls: 2,
+      llm_fallbacks: 0,
+      structured_output_repairs: 0,
+      structured_output_failures: 0,
+    },
   },
   request_id: "req-e2e-0001",
   created_at: createdAt,
@@ -162,3 +186,13 @@ export const analysisFixture = {
   charts: [],
   report: { title: "Business analysis summary", sections: [{ title: "Overview", bullets: ["Three transactions were analyzed."], body: null }] },
 };
+
+/** GET lists the caller's workspaces (none yet); POST creates one. Both share one URL. */
+export function fulfillWorkspaces(
+  route: import("@playwright/test").Route,
+  workspace: typeof workspaceFixture = workspaceFixture,
+) {
+  return route.request().method() === "GET"
+    ? route.fulfill({ status: 200, json: { items: [] } })
+    : route.fulfill({ status: 201, json: workspace });
+}

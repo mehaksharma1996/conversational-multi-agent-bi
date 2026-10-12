@@ -3,7 +3,7 @@
   "aggregate": {
     "by_capability": {
       "document_rag": {
-        "cases": 7,
+        "cases": 9,
         "pass_rate": 1.0
       },
       "failure_recovery": {
@@ -11,7 +11,7 @@
         "pass_rate": 1.0
       },
       "hybrid": {
-        "cases": 13,
+        "cases": 20,
         "pass_rate": 1.0
       },
       "mcp_tool_safety": {
@@ -35,7 +35,7 @@
         "pass_rate": 1.0
       },
       "routing": {
-        "cases": 9,
+        "cases": 12,
         "pass_rate": 1.0
       },
       "tenant_isolation": {
@@ -51,10 +51,62 @@
         "pass_rate": 1.0
       }
     },
-    "cases": 73
+    "cases": 85
   },
   "baseline_version": 1,
   "cases": {
+    "hybrid-approval-edit-extra-predicate-is-refused": {
+      "capability": "hybrid",
+      "checks": {
+        "approval.interrupted": true,
+        "approval.status": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.unjustified_predicates": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-conflicting-policy-evidence-falls-back": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "grounding.evidence_statuses": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-explicit-user-filter-is-allowed": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.provenance": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.required_fragments": true,
+        "sql.row_count": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "hybrid-extra-key-criteria-rejected": {
       "capability": "hybrid",
       "checks": {
@@ -73,6 +125,24 @@
         "sources.present": true,
         "structured_output_failures": true,
         "structured_output_repairs": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-extra-model-predicate-is-refused": {
+      "capability": "hybrid",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.unjustified_predicates": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
         "trajectory.no_unnecessary_calls": true,
         "trajectory.within_call_budget": true
       },
@@ -238,6 +308,24 @@
       },
       "passed": true
     },
+    "hybrid-structured-policy-predicate-verifies-sql": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "hybrid.provenance": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "sql.required_fragments": true,
+        "sql.row_count": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "hybrid-unparseable-criteria-fall-back-to-excerpts": {
       "capability": "hybrid",
       "checks": {
@@ -266,6 +354,22 @@
       },
       "passed": true
     },
+    "hybrid-unsupported-predicate-expression-is-unverified": {
+      "capability": "hybrid",
+      "checks": {
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "hybrid-untraceable-criterion-is-dropped": {
       "capability": "hybrid",
       "checks": {
@@ -278,6 +382,23 @@
         "route.expected": true,
         "safety.dataset_intact": true,
         "safety.sql_valid_read_only": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "hybrid-wrong-threshold-operator-falls-back-before-execution": {
+      "capability": "hybrid",
+      "checks": {
+        "answer.contains": true,
+        "crash.none": true,
+        "hybrid.fallback": true,
+        "hybrid.policy_issues": true,
+        "hybrid.policy_predicates": true,
+        "hybrid.policy_sql_status": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
         "trajectory.no_unnecessary_calls": true,
         "trajectory.within_call_budget": true
       },
@@ -560,6 +681,36 @@
       },
       "passed": true
     },
+    "rag-flags-partially-uncited-answer": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.claims_cited": true,
+        "grounding.evidence_statuses": true,
+        "grounding.status": true,
+        "grounding.warning_surfaced": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "rag-flags-quote-attributed-to-wrong-source": {
+      "capability": "document_rag",
+      "checks": {
+        "crash.none": true,
+        "grounding.evidence_statuses": true,
+        "grounding.quotes_supported": true,
+        "grounding.status": true,
+        "grounding.warning_surfaced": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "rag-model-classified-route-is-honored": {
       "capability": "document_rag",
       "checks": {
@@ -790,6 +941,19 @@
       },
       "passed": true
     },
+    "routing-low-confidence-reconsideration-keeps-first-route": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
     "routing-malformed-classification-is-ignored": {
       "capability": "routing",
       "checks": {
@@ -851,6 +1015,32 @@
         "crash.none": true,
         "outcome.expected": true,
         "route.expected": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "routing-reconsideration-keeps-a-consistent-model-route": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
+        "trajectory.no_unnecessary_calls": true,
+        "trajectory.within_call_budget": true
+      },
+      "passed": true
+    },
+    "routing-sql-route-for-document-criterion-is-reconsidered": {
+      "capability": "routing",
+      "checks": {
+        "crash.none": true,
+        "outcome.expected": true,
+        "route.expected": true,
+        "safety.dataset_intact": true,
+        "safety.sql_valid_read_only": true,
         "trajectory.no_unnecessary_calls": true,
         "trajectory.within_call_budget": true
       },
@@ -1095,16 +1285,16 @@
     }
   },
   "metadata": {
-    "dataset_revision": "2026-10-06.2",
+    "dataset_revision": "2026-10-11.1",
     "dataset_version": "v1",
     "embedding": {
       "evaluation_embedder": "hashing-bow-1024-v1"
     },
     "evaluator_version": "1.1.0",
     "prompt_fingerprints": {
-      "criteria_extraction": "fae37233e5c53ffa",
+      "criteria_extraction": "4f4c0434fffff3a7",
       "rag_answer": "435edac981b875f4",
-      "route_classification": "ee43d21646bb69a3",
+      "route_classification": "8ef5abc115dc1738",
       "sql_correction": "c6b5b17508cb7692",
       "sql_generation": "3c8d96d61c21bbd8"
     },

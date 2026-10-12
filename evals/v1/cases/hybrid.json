@@ -587,5 +587,282 @@
       "approval_interrupt": true
     },
     "deterministic_only": true
+  },
+  {
+    "id": "hybrid-structured-policy-predicate-verifies-sql",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "A source-attributed field, exclusive operator, value, currency unit, and null behavior are structurally matched before SQL execution.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500 ORDER BY \"amount\" DESC"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "hybrid",
+      "hybrid": {
+        "policy_sql_status": "structurally_verified",
+        "min_policy_predicates": 1,
+        "provenance": "traced"
+      },
+      "sql": {
+        "required_fragments": ["amount\" > 500"],
+        "row_count": 4
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-wrong-threshold-operator-falls-back-before-execution",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "A read-only query using an inclusive operator must not execute when the retrieved policy says the threshold is exclusive.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" >= 500"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "answer_contains": ["hybrid table query was refused"],
+      "hybrid": {
+        "policy_sql_status": "mismatch",
+        "min_policy_predicates": 1,
+        "min_policy_issues": 1,
+        "fell_back_to_documents": true
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-conflicting-policy-evidence-falls-back",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the conflicting policy amount rules?",
+    "rationale": "Contradictory source-attributed operators for the same field and value are not silently resolved or executed.",
+    "context": {"dataset": "transactions", "corpus": "conflicting_policy"},
+    "script": {
+      "rag_answer": "The policy contains conflicting amount rules. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          },
+          {
+            "field": "amount",
+            "operator": "lte",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "any"
+      },
+      "sql": [
+        "SELECT \"transaction_id\", \"amount\" FROM \"uploaded_data\" WHERE \"amount\" > 500"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "hybrid": {
+        "policy_sql_status": "conflicting_evidence",
+        "min_policy_predicates": 2,
+        "min_policy_issues": 1,
+        "fell_back_to_documents": true
+      },
+      "grounding": {
+        "evidence_statuses": ["CONFLICTING_EVIDENCE", "NOT_EVALUATED"]
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-extra-model-predicate-is-refused",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "A query containing the required amount predicate plus an unsupported model-added status filter is not predicate-complete and never executes.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": [
+        "SELECT COUNT(*) AS n FROM uploaded_data WHERE amount > 500 AND status != 'never'"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "answer_contains": ["hybrid table query was refused", "No policy query was executed"],
+      "hybrid": {
+        "policy_sql_status": "mismatch",
+        "min_policy_predicates": 1,
+        "min_policy_issues": 1,
+        "min_unjustified_predicates": 1,
+        "fell_back_to_documents": true
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-explicit-user-filter-is-allowed",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions with status flagged match the document policy escalation threshold?",
+    "rationale": "The policy amount condition remains mandatory while a status/value pair stated explicitly by the user is accepted as an additional conjunct.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": [
+        "SELECT transaction_id, amount, status FROM uploaded_data WHERE amount > 500 AND status = 'flagged' ORDER BY amount DESC"
+      ]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "hybrid",
+      "hybrid": {
+        "policy_sql_status": "structurally_verified",
+        "min_policy_predicates": 1,
+        "provenance": "traced"
+      },
+      "sql": {"row_count": 3, "required_fragments": ["status = 'flagged'"]}
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-unsupported-predicate-expression-is-unverified",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "Arithmetic around a policy field is outside the bounded predicate grammar and fails closed as unverified instead of claiming equivalence.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": ["SELECT transaction_id FROM uploaded_data WHERE amount + 0 > 500"]
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "hybrid": {
+        "policy_sql_status": "unverified",
+        "min_policy_predicates": 1,
+        "min_policy_issues": 1,
+        "fell_back_to_documents": true
+      }
+    },
+    "deterministic_only": true
+  },
+  {
+    "id": "hybrid-approval-edit-extra-predicate-is-refused",
+    "capability": "hybrid",
+    "question": "Which uploaded transactions match the document policy escalation threshold?",
+    "rationale": "A read-only approval edit that adds an unjustified status filter receives the same completeness check and falls back without execution.",
+    "context": {"dataset": "transactions", "corpus": "review_policy"},
+    "script": {
+      "rag_answer": "Transactions over 500 dollars require escalation. Source 1",
+      "criteria": {
+        "predicates": [
+          {
+            "field": "amount",
+            "operator": "gt",
+            "value": 500,
+            "unit": "currency",
+            "source": 1,
+            "null_behavior": "exclude"
+          }
+        ],
+        "predicate_join": "all"
+      },
+      "sql": ["SELECT transaction_id, amount FROM uploaded_data WHERE amount > 500"]
+    },
+    "approval": {
+      "decision": "approve",
+      "sql": "SELECT transaction_id, amount FROM uploaded_data WHERE amount > 500 AND status = 'flagged'"
+    },
+    "expect": {
+      "outcome": "answered",
+      "route": "rag",
+      "status": "complete",
+      "approval_interrupt": true,
+      "hybrid": {
+        "policy_sql_status": "mismatch",
+        "min_unjustified_predicates": 1,
+        "fell_back_to_documents": true
+      }
+    },
+    "deterministic_only": true
   }
 ]

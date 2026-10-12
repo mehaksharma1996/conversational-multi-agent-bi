@@ -80,6 +80,15 @@ FIELD_ALIASES = {
     },
 }
 
+# Fields that name an entity. A column whose name adds one of these descriptors to an alias
+# ("customer_segment", "store_type") describes the entity rather than identifying it, so a partial
+# name match is not enough. An exact alias such as "customer_id" is still accepted.
+IDENTIFIER_FIELDS = frozenset({"customer_id", "merchant"})
+DESCRIPTOR_TOKENS = frozenset(
+    {"segment", "tier", "type", "group", "category", "class", "status", "level", "channel"}
+    | {"cohort", "grade", "rank", "size"}
+)
+
 REQUIRED_TYPES = {
     "amount": {"numeric"},
     "date": {"date"},
@@ -218,6 +227,12 @@ def _score_column_for_field(field: str, column: ColumnProfile) -> FieldMapping:
     for alias in aliases:
         alias_tokens = set(alias.split("_"))
         if alias_tokens.issubset(normalized_tokens):
+            # "customer_segment" names a grouping of customers, not a customer identifier.
+            if (
+                field in IDENTIFIER_FIELDS
+                and (normalized_tokens - alias_tokens) & DESCRIPTOR_TOKENS
+            ):
+                continue
             return FieldMapping(
                 canonical_field=field,
                 source_column=column.name,

@@ -157,6 +157,8 @@ def _diagnostics_from_json(raw: str) -> AnswerDiagnostics:
     selected = {key: value for key, value in values.items() if key in known}
     if "criteria_keys" in selected:
         selected["criteria_keys"] = tuple(selected["criteria_keys"])
+    if "evidence_statuses" in selected:
+        selected["evidence_statuses"] = tuple(selected["evidence_statuses"])
     return AnswerDiagnostics(**selected)
 
 

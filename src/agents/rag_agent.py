@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Literal
 
 from src.documents.retriever import Retriever
 from src.documents.vector_store import RetrievedChunk
@@ -13,6 +14,16 @@ from src.utils.pii_redaction import redact_pii
 
 _CITATION_PATTERN = re.compile(r"Source\s+(\d+)", re.IGNORECASE)
 _QUOTE_PATTERN = re.compile(r'"([^"]{15,})"')
+_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])(?:[ \t]+|\n+)|\n+")
+EvidenceStatus = Literal[
+    "VERIFIED_REFERENCE",
+    "INVALID_REFERENCE",
+    "QUOTE_MISMATCH",
+    "MISSING_EVIDENCE",
+    "UNVERIFIED_CLAIM",
+    "CONFLICTING_EVIDENCE",
+    "NOT_EVALUATED",
+]
 
 
 class RAGAgentError(RuntimeError):
@@ -42,6 +53,8 @@ class RAGAnswer:
     cited_source_numbers: list[int] = field(default_factory=list)
     invalid_citations: list[int] = field(default_factory=list)
     unverified_quotes: list[str] = field(default_factory=list)
+    uncited_claims: list[str] = field(default_factory=list)
+    evidence_statuses: tuple[EvidenceStatus, ...] = ()
     candidates_considered: int = 0
     candidates_rejected_by_distance: int = 0
     duplicates_skipped: int = 0
@@ -92,11 +105,23 @@ def answer_with_documents(
     valid_numbers = set(range(1, len(retrieval.chunks) + 1))
     cited_source_numbers = [number for number in cited_numbers if number in valid_numbers]
     invalid_citations = [number for number in cited_numbers if number not in valid_numbers]
-    unverified_quotes = _find_unverified_quotes(response.text, retrieval.chunks)
+    claims = _extract_claims(response.text, valid_numbers)
+    unverified_quotes = _find_unverified_quotes(claims, retrieval.chunks)
+    uncited_claims = [claim.text for claim in claims if not claim.cited_source_numbers]
+    evidence_statuses = _evidence_statuses(
+        cited_source_numbers=cited_source_numbers,
+        invalid_citations=invalid_citations,
+        unverified_quotes=unverified_quotes,
+        uncited_claims=uncited_claims,
+    )
 
-    answer_text = response.text
-    if invalid_citations or unverified_quotes:
-        answer_text += "\n\n" + _grounding_warning(invalid_citations, unverified_quotes)
+    answer_text = redact_pii(response.text)
+    if invalid_citations or unverified_quotes or uncited_claims:
+        answer_text += "\n\n" + _grounding_warning(
+            invalid_citations,
+            unverified_quotes,
+            uncited_claims,
+        )
 
     return RAGAnswer(
         question=question,
@@ -105,6 +130,8 @@ def answer_with_documents(
         cited_source_numbers=cited_source_numbers,
         invalid_citations=invalid_citations,
         unverified_quotes=unverified_quotes,
+        uncited_claims=uncited_claims,
+        evidence_statuses=evidence_statuses,
         candidates_considered=retrieval.candidates_considered,
         candidates_rejected_by_distance=retrieval.candidates_rejected_by_distance,
         duplicates_skipped=retrieval.duplicates_skipped,
@@ -115,20 +142,112 @@ def answer_with_documents(
     )
 
 
-def _find_unverified_quotes(answer_text: str, chunks: list[RetrievedChunk]) -> list[str]:
-    combined = _normalize_whitespace(" ".join(chunk.text for chunk in chunks).lower())
-    unverified = []
-    for quote in _QUOTE_PATTERN.findall(answer_text):
-        if _normalize_whitespace(quote.lower()) not in combined:
-            unverified.append(quote)
-    return unverified
+@dataclass(frozen=True)
+class _AnswerClaim:
+    text: str
+    cited_source_numbers: tuple[int, ...] = ()
+
+
+def _extract_claims(answer_text: str, valid_numbers: set[int]) -> list[_AnswerClaim]:
+    """Extract likely factual statements and their local source references.
+
+    This is deliberately a citation-coverage heuristic, not semantic claim
+    verification. A citation-only sentence applies to the immediately preceding
+    statement so existing ``Statement. Source 1`` answers remain supported.
+    """
+    claims: list[_AnswerClaim] = []
+    for segment in _SENTENCE_SPLIT_PATTERN.split(answer_text.strip()):
+        text = segment.strip()
+        if not text:
+            continue
+        local_sources = tuple(
+            sorted(
+                {
+                    int(match)
+                    for match in _CITATION_PATTERN.findall(text)
+                    if int(match) in valid_numbers
+                }
+            )
+        )
+        without_citations = _CITATION_PATTERN.sub("", text)
+        if not _requires_retrieved_evidence(without_citations):
+            if local_sources and claims:
+                previous = claims[-1]
+                claims[-1] = replace(
+                    previous,
+                    cited_source_numbers=tuple(
+                        sorted(set(previous.cited_source_numbers) | set(local_sources))
+                    ),
+                )
+            continue
+        claims.append(_AnswerClaim(text=text, cited_source_numbers=local_sources))
+    return claims
+
+
+def _requires_retrieved_evidence(text: str) -> bool:
+    normalized = text.strip(" -*_()[]{}:;,.\t")
+    if not normalized or normalized.endswith("?"):
+        return False
+    lowered = normalized.lower()
+    if "does not provide enough information" in lowered or "not enough information" in lowered:
+        return False
+    return len(re.findall(r"[a-z0-9]+", lowered)) >= 3
+
+
+def _find_unverified_quotes(claims: list[_AnswerClaim], chunks: list[RetrievedChunk]) -> list[str]:
+    redacted_sources = {
+        index: _normalize_whitespace(redact_pii(chunk.text).lower())
+        for index, chunk in enumerate(chunks, start=1)
+    }
+    unverified: list[str] = []
+    for claim in claims:
+        cited_contexts = [
+            redacted_sources[number]
+            for number in claim.cited_source_numbers
+            if number in redacted_sources
+        ]
+        for quote in _QUOTE_PATTERN.findall(claim.text):
+            normalized_quote = _normalize_whitespace(quote.lower())
+            if not cited_contexts or not any(
+                normalized_quote in context for context in cited_contexts
+            ):
+                unverified.append(redact_pii(quote))
+    return list(dict.fromkeys(unverified))
 
 
 def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _grounding_warning(invalid_citations: list[int], unverified_quotes: list[str]) -> str:
+def _evidence_statuses(
+    *,
+    cited_source_numbers: list[int],
+    invalid_citations: list[int],
+    unverified_quotes: list[str],
+    uncited_claims: list[str],
+) -> tuple[EvidenceStatus, ...]:
+    statuses: list[EvidenceStatus] = []
+    if cited_source_numbers:
+        statuses.append("VERIFIED_REFERENCE")
+    else:
+        statuses.append("MISSING_EVIDENCE")
+    if invalid_citations:
+        statuses.append("INVALID_REFERENCE")
+    if unverified_quotes:
+        statuses.append("QUOTE_MISMATCH")
+    if uncited_claims:
+        statuses.append("UNVERIFIED_CLAIM")
+    # No deterministic structural check proves that paraphrased prose is
+    # semantically entailed by its cited passage.
+    statuses.append("NOT_EVALUATED")
+    return tuple(statuses)
+
+
+def _grounding_warning(
+    invalid_citations: list[int],
+    unverified_quotes: list[str],
+    uncited_claims: list[str],
+) -> str:
     parts = ["(Grounding check:"]
     if invalid_citations:
         numbers = ", ".join(str(number) for number in invalid_citations)
@@ -137,6 +256,10 @@ def _grounding_warning(invalid_citations: list[int], unverified_quotes: list[str
         parts.append(
             f"{len(unverified_quotes)} quoted passage(s) could not be found verbatim in the "
             "retrieved context."
+        )
+    if uncited_claims:
+        parts.append(
+            f"{len(uncited_claims)} factual statement(s) did not include a valid source reference."
         )
     parts.append("Review before relying on this answer.)")
     return " ".join(parts)

@@ -32,6 +32,7 @@ describe("AnswerProvenance", () => {
           grounding_status: "warnings",
           invalid_citation_count: 2,
           unverified_quote_count: 1,
+          uncited_claim_count: 1,
           criteria_provenance: "not_applicable",
         })}
       />,
@@ -40,6 +41,7 @@ describe("AnswerProvenance", () => {
     const note = screen.getByText(/Grounding warning/);
     expect(note).toHaveTextContent("2 citation(s) point to sources that were not retrieved");
     expect(note).toHaveTextContent("1 quotation(s) were not found word-for-word");
+    expect(note).toHaveTextContent("1 factual statement(s) do not include a valid source reference");
     expect(note).toHaveTextContent("Do not rely on this answer");
   });
 
@@ -54,7 +56,7 @@ describe("AnswerProvenance", () => {
     );
 
     expect(screen.getByText(/cites no source/)).toBeVisible();
-    expect(screen.queryByText(/found no problems/)).toBeNull();
+    expect(screen.queryByText(/found no structural problems/)).toBeNull();
   });
 
   it("warns when hybrid SQL ignores the extracted criteria or falls back to documents", () => {

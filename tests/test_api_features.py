@@ -44,9 +44,12 @@ class FakeLLM:
 
     def generate(self, prompt: str) -> LLMResponse:
         if "Classify a business-intelligence question" in prompt:
-            if "Which uploaded transactions" in prompt:
+            # Classify on the question line only: the prompt also carries instructions,
+            # examples, and prior questions as context.
+            question = prompt.split("\nQuestion: ", 1)[-1].split("\n", 1)[0]
+            if "Which uploaded transactions" in question:
                 text = '{"route":"hybrid","confidence":1}'
-            elif "policy" in prompt.lower():
+            elif "policy" in question.lower():
                 text = '{"route":"rag","confidence":1}'
             else:
                 text = '{"route":"sql","confidence":1}'
@@ -197,6 +200,9 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     assert rag_message.status_code == 201
     assert rag_message.json()["route"] == "rag"
     assert rag_message.json()["sources"]
+    assert rag_message.json()["sources"][0]["citation"].startswith("Source 1 - ")
+    assert rag_message.json()["provenance"]["uncited_claim_count"] >= 0
+    assert "NOT_EVALUATED" in rag_message.json()["provenance"]["evidence_statuses"]
 
     hybrid_message = client.post(
         f"/api/v1/conversations/{conversation_id}/messages",

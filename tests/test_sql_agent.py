@@ -160,4 +160,4 @@ def test_summarize_sql_result_includes_single_row_values() -> None:
     summary = summarize_sql_result(pd.DataFrame({"total": [60.0]}))
 
     assert "1 row" in summary
-    assert "total=60.0" in summary
+    assert "Metric result: total=60." in summary

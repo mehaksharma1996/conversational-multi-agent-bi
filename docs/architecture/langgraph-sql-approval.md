@@ -35,14 +35,16 @@ the corrected proposal interrupts again before it can execute.
 1. The browser sends `require_sql_approval: true` with a question.
 2. FastAPI generates the message ID and a private checkpoint thread ID from trusted tenant,
    workspace, and message identity. The thread ID is never returned to the browser.
-3. The hybrid graph retrieves evidence, extracts bounded criteria, generates SQL, and applies the
-   normal read-query guard.
+3. The hybrid graph retrieves evidence, extracts bounded criteria, generates SQL, applies the
+   normal read-query guard, and verifies that required policy predicates and every additional
+   business filter are justified.
 4. LangGraph interrupts before execution. The API stores a `pending_approval` message containing
    the proposed SQL and content-free provenance.
 5. `POST /api/v1/messages/{message_id}/approval` accepts `approve` or `reject` and an optional SQL
    edit. Repository ownership is checked before the server looks up its checkpoint.
 6. Approval, including unchanged SQL, returns through `validate_sql`. Rejection ends without rows.
-   An unsafe edit is terminally rejected and its checkpoint is removed.
+   An unsafe edit is terminally rejected; a read-only edit with an unjustified predicate falls back
+   to documents without execution. In either case the checkpoint is removed.
 
 Pending and rejected messages cannot be exported. Approval audit events contain tenant and message
 identity, outcome, and only an `sql_edited` boolean; they never contain SQL, questions, criteria,

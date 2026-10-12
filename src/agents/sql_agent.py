@@ -8,6 +8,7 @@ from time import monotonic
 
 import pandas as pd
 
+from src.agents.sql_insights import build_sql_insights
 from src.llm.base import LLMClient
 from src.llm.observability import llm_purpose
 from src.storage.query_executor import (
@@ -173,20 +174,14 @@ Correct the query. Return exactly one read-only SQLite query and no explanation.
 """
 
 
-def summarize_sql_result(result: pd.DataFrame) -> str:
-    """Build a deterministic plain-language summary of a query result."""
-    if result.empty:
-        return "The query ran successfully but returned no matching rows."
-    columns = ", ".join(str(column) for column in result.columns)
-    summary = (
-        f"Returned {len(result):,} row(s) across {len(result.columns):,} column(s): {columns}."
-    )
-    if len(result) == 1:
-        values = ", ".join(
-            f"{column}={value}" for column, value in result.iloc[0].to_dict().items()
-        )
-        summary += f" Result: {values}."
-    return summary
+def summarize_sql_result(
+    result: pd.DataFrame,
+    *,
+    question: str = "",
+    sql: str = "",
+) -> str:
+    """Render deterministic, evidence-linked observations about a query result."""
+    return build_sql_insights(result, question=question, sql=sql).render()
 
 
 def _format_column_context(column: str, stored_table: StoredTable) -> str:

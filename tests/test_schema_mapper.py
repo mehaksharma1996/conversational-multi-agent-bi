@@ -91,3 +91,34 @@ def test_bare_id_does_not_partially_match_customer_id() -> None:
     mapping = map_schema(profile)
 
     assert mapping.mappings["customer_id"].source_column is None
+
+
+@pytest.mark.parametrize("column", ["customer_segment", "customer_tier", "client_type"])
+def test_a_column_that_describes_customers_is_not_suggested_as_the_customer_id(
+    column: str,
+) -> None:
+    dataframe = pd.DataFrame({column: ["A", "B", "A"], "amount": [1.0, 2.0, 3.0]})
+
+    assert "customer_id" not in map_schema(profile_dataframe(dataframe)).mapped_fields()
+
+
+def test_identifier_columns_with_extra_words_are_still_suggested() -> None:
+    dataframe = pd.DataFrame({"customer_number": ["a1", "a2"], "store_name": ["X", "Y"]})
+
+    mapped = map_schema(profile_dataframe(dataframe)).mapped_fields()
+
+    assert mapped["customer_id"] == "customer_number"
+    assert mapped["merchant"] == "store_name"
+
+
+def test_the_retail_demo_table_gets_no_customer_id_suggestion() -> None:
+    from pathlib import Path
+
+    demo = pd.read_csv(Path(__file__).resolve().parents[1] / "sample_data/retail_operations.csv")
+
+    mapped = map_schema(profile_dataframe(demo)).mapped_fields()
+
+    assert mapped["amount"] == "revenue"
+    assert mapped["date"] == "transaction_date"
+    assert mapped["location"] == "region"
+    assert "customer_id" not in mapped

@@ -20,6 +20,7 @@ from apps.api.models import (
     DataProfileResponse,
     DatasetResponse,
     DocumentCollectionResponse,
+    ExecutionSummaryResponse,
     ExportResponse,
     FieldMappingResponse,
     JobResponse,
@@ -31,6 +32,8 @@ from apps.api.models import (
     SchemaMappingResponse,
     SourceResponse,
     TabularUploadResponse,
+    WorkspaceListResponse,
+    WorkspaceOverviewResponse,
     WorkspaceResponse,
 )
 from apps.api.repository import (
@@ -42,6 +45,7 @@ from apps.api.repository import (
     MessageRecord,
     ReportRecord,
     TabularUploadRecord,
+    WorkspaceOverview,
     WorkspaceRecord,
 )
 from packages.jobs import JobRecord
@@ -62,6 +66,28 @@ def workspace_response(record: WorkspaceRecord, retention_hours: int) -> Workspa
         consent_accepted=record.consent_accepted_at is not None,
         data_recipients=list(record.data_recipients),
         created_at=record.created_at,
+    )
+
+
+def workspace_list_response(
+    records: list[WorkspaceRecord], retention_hours: int
+) -> WorkspaceListResponse:
+    return WorkspaceListResponse(
+        items=[workspace_response(record, retention_hours) for record in records]
+    )
+
+
+def workspace_overview_response(
+    overview: WorkspaceOverview, retention_hours: int
+) -> WorkspaceOverviewResponse:
+    return WorkspaceOverviewResponse(
+        workspace=workspace_response(overview.workspace, retention_hours),
+        dataset_id=overview.dataset.id if overview.dataset else None,
+        analysis_id=overview.analysis.id if overview.analysis else None,
+        document_collection_id=(
+            overview.document_collection.id if overview.document_collection else None
+        ),
+        conversation_id=overview.conversation.id if overview.conversation else None,
     )
 
 
@@ -260,12 +286,42 @@ def message_response(record: MessageRecord) -> MessageResponse:
         sources=[SourceResponse(citation=source) for source in record.sources],
         provenance=ProvenanceResponse(
             grounding_status=record.diagnostics.grounding_status,
+            initial_model_route=record.diagnostics.initial_model_route,
+            initial_route_confidence=record.diagnostics.initial_route_confidence,
+            route_reconsideration_triggered=record.diagnostics.route_reconsideration_triggered,
+            final_route=record.diagnostics.final_route,
+            final_route_confidence=record.diagnostics.final_route_confidence,
+            deterministic_route_fallback=record.diagnostics.deterministic_route_fallback,
             source_count=record.diagnostics.source_count,
             citation_count=record.diagnostics.citation_count,
             invalid_citation_count=record.diagnostics.invalid_citation_count,
             unverified_quote_count=record.diagnostics.unverified_quote_count,
+            uncited_claim_count=record.diagnostics.uncited_claim_count,
+            evidence_statuses=list(record.diagnostics.evidence_statuses),
+            policy_sql_status=record.diagnostics.policy_sql_status,
+            policy_predicate_count=record.diagnostics.policy_predicate_count,
+            policy_business_predicate_count=(record.diagnostics.policy_business_predicate_count),
+            policy_unjustified_predicate_count=(
+                record.diagnostics.policy_unjustified_predicate_count
+            ),
+            policy_issue_count=record.diagnostics.policy_issue_count,
             criteria_provenance=record.diagnostics.criteria_provenance,
             hybrid_fell_back_to_documents=record.diagnostics.hybrid_fell_back_to_documents,
+            execution=ExecutionSummaryResponse(
+                sql_row_count=record.diagnostics.sql_row_count,
+                sql_execution_ms=(
+                    round(record.diagnostics.sql_execution_seconds * 1000)
+                    if record.diagnostics.sql_execution_seconds is not None
+                    else None
+                ),
+                sql_correction_attempted=record.diagnostics.sql_correction_attempted,
+                retrieval_candidates=record.diagnostics.retrieval_candidates,
+                retrieval_accepted=record.diagnostics.retrieval_accepted,
+                llm_calls=record.diagnostics.llm_calls,
+                llm_fallbacks=record.diagnostics.llm_fallbacks,
+                structured_output_repairs=record.diagnostics.structured_output_repairs,
+                structured_output_failures=record.diagnostics.structured_output_failures,
+            ),
         ),
         request_id=record.request_id,
         created_at=record.created_at,

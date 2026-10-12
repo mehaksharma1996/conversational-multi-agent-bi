@@ -33,6 +33,8 @@ from apps.api.models import (
     SchemaMappingUpdateRequest,
     TabularUploadResponse,
     WorkbookSheetsResponse,
+    WorkspaceListResponse,
+    WorkspaceOverviewResponse,
     WorkspaceResponse,
 )
 from apps.api.observability import ApiObservability
@@ -42,6 +44,8 @@ from apps.api.serializers import (
     analysis_response,
     dataset_response,
     upload_response,
+    workspace_list_response,
+    workspace_overview_response,
     workspace_response,
 )
 from config.settings import Settings
@@ -96,6 +100,50 @@ def create_workspace(
         local_only_mode=settings.local_only_mode,
     )
     return workspace_response(record, repository.retention_hours)
+
+
+@router.get(
+    "/workspaces",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
+    response_model=WorkspaceListResponse,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["workspaces"],
+    description=(
+        "Lists the caller's own active workspaces, newest first, so a reloaded client can "
+        "rediscover its work. Other tenants' workspaces are never listed, and listing does "
+        "not extend retention."
+    ),
+)
+def list_workspaces(
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+) -> WorkspaceListResponse:
+    return workspace_list_response(
+        repository.list_workspaces(identity.tenant_id), repository.retention_hours
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/overview",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
+    response_model=WorkspaceOverviewResponse,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["workspaces"],
+    description=(
+        "Returns the identifiers of the newest dataset, analysis, document collection, and "
+        "conversation in one workspace. A workspace owned by another tenant is "
+        "indistinguishable from a missing one."
+    ),
+)
+def get_workspace_overview(
+    workspace_id: str,
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+) -> WorkspaceOverviewResponse:
+    return workspace_overview_response(
+        repository.workspace_overview(workspace_id, identity.tenant_id),
+        repository.retention_hours,
+    )
 
 
 @router.get(
