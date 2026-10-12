@@ -79,8 +79,17 @@ class LiveBudget:
     input_usd_per_million: float | None = None
     output_usd_per_million: float | None = None
     max_cost_usd: float | None = None
+    min_interval_seconds: float = 0.0
+    free_tier_only: bool = False
 
     def __post_init__(self) -> None:
+        if self.min_interval_seconds < 0:
+            raise LiveBudgetError("min_interval_seconds cannot be negative.")
+        if self.free_tier_only:
+            if self.max_retries != 0:
+                raise LiveBudgetError("a free-tier-only run must use max_retries=0.")
+            if self.input_usd_per_million is not None or self.max_cost_usd is not None:
+                raise LiveBudgetError("a free-tier-only run takes no prices or cost limit.")
         for name in ("max_calls", "max_output_tokens", "max_total_tokens"):
             if getattr(self, name) < 1:
                 raise LiveBudgetError(f"{name} must be at least 1.")
@@ -121,6 +130,8 @@ class LiveBudget:
             "price_input_usd_per_million": self.input_usd_per_million,
             "price_output_usd_per_million": self.output_usd_per_million,
             "max_estimated_cost_usd": self.max_cost_usd,
+            "min_interval_seconds": self.min_interval_seconds,
+            "free_tier_only": self.free_tier_only,
         }
 
 
@@ -130,6 +141,22 @@ class CallRecord:
     prompt_tokens: int | None
     output_tokens: int | None
     outcome: str
+    usage_reported: bool = True
+
+
+QUOTA_MARKERS = ("429", "resource_exhausted", "quota")
+
+
+def is_quota_error(error: BaseException) -> bool:
+    """True when the error, or anything it was raised from, reports provider quota exhaustion."""
+    seen: BaseException | None = error
+    for _ in range(6):
+        if seen is None:
+            return False
+        if any(marker in str(seen).lower() for marker in QUOTA_MARKERS):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
 
 
 class BudgetedLLM:
@@ -146,8 +173,10 @@ class BudgetedLLM:
         self.model: str = str(getattr(inner, "model", "unknown"))
         self.records: list[CallRecord] = []
         self.refusals = 0
+        self.quota_errors = 0
         self.stop_reason: str | None = None
         self._lock = threading.Lock()
+        self._last_request_start: float | None = None
 
     @property
     def configured(self) -> bool:
@@ -189,8 +218,19 @@ class BudgetedLLM:
             self.stop_reason = self.stop_reason or reason
         return LiveBudgetExceeded(f"Live evaluation budget reached: {reason}.")
 
+    def _pace(self) -> None:
+        """Keep request starts at least ``min_interval_seconds`` apart (RPM courtesy)."""
+        interval = self.budget.min_interval_seconds
+        if interval > 0 and self._last_request_start is not None:
+            wait = self._last_request_start + interval - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+        self._last_request_start = time.monotonic()
+
     def _check(self, prompt: str) -> None:
         budget = self.budget
+        if self.quota_errors:
+            raise self._refuse("quota_exhausted")
         if self.calls >= budget.max_calls:
             raise self._refuse("max_calls")
         projected_prompt = self.prompt_tokens + max(1, len(prompt) // _CHARS_PER_TOKEN)
@@ -209,16 +249,23 @@ class BudgetedLLM:
         def tap(prompt_tokens: int | None, output_tokens: int | None) -> None:
             seen["prompt"], seen["output"] = prompt_tokens, output_tokens
 
+        self._pace()
         started = time.perf_counter()
         outcome = "success"
         try:
             with tap_usage(tap):
                 return call()
-        except BaseException:
+        except BaseException as exc:
             outcome = "failure"
+            if is_quota_error(exc):
+                # Never retried and never routed elsewhere: stop spending against this quota.
+                with self._lock:
+                    self.quota_errors += 1
+                    self.stop_reason = self.stop_reason or "quota_exhausted"
             raise
         finally:
             prompt_tokens = seen["prompt"]
+            usage_reported = prompt_tokens is not None
             if prompt_tokens is None and outcome == "success":
                 # The provider reported no usage; charge the pessimistic estimate so the local
                 # total can never silently under-count.
@@ -230,6 +277,7 @@ class BudgetedLLM:
                     prompt_tokens=prompt_tokens,
                     output_tokens=seen["output"],
                     outcome=outcome,
+                    usage_reported=usage_reported,
                 )
             )
 
@@ -445,8 +493,22 @@ def summarise(
         "budget_refusals": budgeted.refusals,
         "by_dimension": dimensions,
         "model_calls": budgeted.calls,
+        # Exact only because retries are forced to 0 where this is reported; otherwise unknown.
+        "http_attempts": budgeted.calls if budgeted.budget.max_retries == 0 else None,
+        "quota_errors": budgeted.quota_errors,
+        "free_tier_only": budgeted.budget.free_tier_only,
+        "calls_with_reported_usage": sum(1 for r in budgeted.records if r.usage_reported),
+        "calls_without_reported_usage": sum(
+            1 for r in budgeted.records if r.outcome == "success" and not r.usage_reported
+        ),
         "prompt_tokens": budgeted.prompt_tokens,
         "output_tokens": budgeted.output_tokens,
+        "prompt_tokens_reported": sum(
+            r.prompt_tokens or 0 for r in budgeted.records if r.usage_reported
+        ),
+        "output_tokens_reported": sum(
+            r.output_tokens or 0 for r in budgeted.records if r.usage_reported
+        ),
         "estimated_cost_usd": budgeted.estimated_cost_usd,
         "wall_ms_median": latencies[len(latencies) // 2] if latencies else None,
         "wall_ms_max": latencies[-1] if latencies else None,

@@ -480,3 +480,98 @@ def test_the_cli_refuses_a_real_run_without_explicit_limits(
 
     assert cli.main(["--execute"]) == 2
     assert cli.main(["--execute", "--max-calls", "5"]) == 2
+
+
+# ---- free-tier-only behaviour ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"free_tier_only": True, "max_retries": 1},
+        {
+            "free_tier_only": True,
+            "max_retries": 0,
+            "input_usd_per_million": 1.0,
+            "output_usd_per_million": 1.0,
+        },
+        {"min_interval_seconds": -1.0},
+    ],
+)
+def test_a_free_tier_budget_forbids_retries_and_prices(overrides: dict[str, Any]) -> None:
+    with pytest.raises(LiveBudgetError):
+        _budget(**overrides)
+
+
+def test_a_quota_error_stops_further_requests_and_is_never_retried() -> None:
+    class Exhausted(_Inner):
+        def generate(self, prompt: str) -> LLMResponse:
+            self.calls += 1
+            try:
+                raise RuntimeError("429 RESOURCE_EXHAUSTED. quota exceeded")
+            except RuntimeError as exc:
+                raise LLMGenerationError("Gemini generation failed") from exc
+
+    inner = Exhausted()
+    client = BudgetedLLM(inner, _budget(max_retries=0, free_tier_only=True))
+
+    with pytest.raises(LLMGenerationError):
+        client.generate("x")
+    with pytest.raises(LiveBudgetExceeded):
+        client.generate("y")
+
+    assert inner.calls == 1  # the second request never reached the provider
+    assert (client.quota_errors, client.stop_reason) == (1, "quota_exhausted")
+
+
+def test_requests_are_paced_by_the_minimum_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(live_demo.time, "sleep", sleeps.append)
+    client = BudgetedLLM(_Inner(), _budget(min_interval_seconds=30.0))
+
+    client.generate("a")
+    client.generate("b")
+
+    assert len(sleeps) == 1 and 0 < sleeps[0] <= 30.0
+
+
+def test_the_summary_reports_attempts_and_unavailable_usage_without_inventing_it() -> None:
+    client = BudgetedLLM(
+        _Inner(prompt_tokens=None, output_tokens=None),
+        _budget(max_retries=0, free_tier_only=True),
+    )
+    client.generate("x" * 30)
+
+    summary = live_demo.summarise([], [], client)
+
+    assert summary["http_attempts"] == 1
+    assert summary["calls_without_reported_usage"] == 1
+    assert (summary["prompt_tokens_reported"], summary["output_tokens_reported"]) == (0, 0)
+    assert summary["free_tier_only"] is True
+
+
+def test_the_cli_free_tier_mode_forces_no_retries_and_paces_requests() -> None:
+    args = cli._parse(
+        ["--free-tier", "--max-calls", "5", "--max-output-tokens", "10", "--max-total-tokens", "99"]
+    )
+    budget = cli._budget(args)
+
+    assert (budget.max_retries, budget.free_tier_only) == (0, True)
+    assert budget.min_interval_seconds == cli.FREE_TIER_MIN_INTERVAL_SECONDS
+    assert budget.worst_case_requests == 5
+
+    with pytest.raises(LiveBudgetError):
+        cli._budget(cli._parse([*_FREE, "--max-retries", "2"]))
+    with pytest.raises(LiveBudgetError):
+        cli._budget(cli._parse([*_FREE, "--input-price", "0.3", "--output-price", "2.5"]))
+
+
+_FREE = [
+    "--free-tier",
+    "--max-calls",
+    "5",
+    "--max-output-tokens",
+    "10",
+    "--max-total-tokens",
+    "99",
+]

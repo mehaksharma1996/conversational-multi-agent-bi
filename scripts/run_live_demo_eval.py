@@ -3,12 +3,17 @@
 Without ``--execute`` this only prints the plan and the budget: it builds no client and sends
 nothing. A real run needs ALL of: ``--execute``, ``RUN_LIVE_DEMO_EVALS=1``, a configured Gemini
 key in the environment, and explicit ``--max-calls``, ``--max-output-tokens`` and
-``--max-total-tokens`` (there are no defaults for a paid run).
+``--max-total-tokens`` (there are no defaults).
 
     python -m scripts.run_live_demo_eval                       # plan only, no provider calls
     $env:RUN_LIVE_DEMO_EVALS = "1"
-    python -m scripts.run_live_demo_eval --execute --max-calls 60 --max-output-tokens 1024 `
-        --max-total-tokens 400000 --input-price 0.30 --output-price 2.50 --max-cost-usd 0.50
+    python -m scripts.run_live_demo_eval --execute --free-tier --max-calls 20 `
+        --max-output-tokens 2048 --max-total-tokens 120000 --case total-revenue
+
+``--free-tier`` is for a project on the Gemini API free tier: it forces zero retries (so every HTTP
+attempt is one counted call), spaces requests at least ``--min-interval-seconds`` apart (default
+12), refuses prices and cost limits, refuses a separate fast model, and stops the run at the first
+429/RESOURCE_EXHAUSTED with no retry and no fallback. Look up your real limits in Google AI Studio.
 
 Only the synthetic retail demo is sent. The report (``evals/results/live-demo.json``, git-ignored)
 records the model and budget but never the API key. It is not a CI gate.
@@ -99,17 +104,28 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+FREE_TIER_MIN_INTERVAL_SECONDS = 12.0
+
+
 def _budget(args: argparse.Namespace) -> LiveBudget:
+    free = args.free_tier
+    if free and args.max_retries not in (None, 0):
+        raise LiveBudgetError("--free-tier requires --max-retries 0 (or leave it unset).")
+    interval = args.min_interval_seconds
+    if interval is None:
+        interval = FREE_TIER_MIN_INTERVAL_SECONDS if free else 0.0
     return LiveBudget(
         max_calls=args.max_calls,
         max_output_tokens=args.max_output_tokens,
         max_total_tokens=args.max_total_tokens,
-        max_retries=args.max_retries,
+        max_retries=0 if free else (1 if args.max_retries is None else args.max_retries),
         timeout_seconds=args.timeout_seconds,
         max_run_seconds=args.max_run_seconds,
         input_usd_per_million=args.input_price,
         output_usd_per_million=args.output_price,
         max_cost_usd=args.max_cost_usd,
+        min_interval_seconds=interval,
+        free_tier_only=free,
     )
 
 
@@ -124,6 +140,8 @@ def _build_client(budget: LiveBudget) -> tuple[Any, str]:
         )
     if not settings.gemini_configured:
         raise ValueError("a Gemini key is required and LOCAL_ONLY_MODE must be off")
+    if budget.free_tier_only and settings.gemini_model_fast:
+        raise ValueError("a free-tier-only run supports one model; unset GEMINI_MODEL_FAST")
     client = build_gemini_client(settings)
     client.max_output_tokens = budget.max_output_tokens
     client.max_retries = budget.max_retries
@@ -137,11 +155,12 @@ def _print_summary(report: dict[str, Any], output: Path) -> None:
     print(
         f"  scored {summary['scored_passed']}/{summary['scored_attempted']} passed; "
         f"stop: {summary['stop_reason']}; provider failures {summary['provider_failures']}; "
-        f"API errors {summary['api_errors']}"
+        f"API errors {summary['api_errors']}; quota errors {summary['quota_errors']}"
     )
     print(
-        f"  calls {summary['model_calls']}, tokens in/out "
-        f"{summary['prompt_tokens']}/{summary['output_tokens']}, "
+        f"  HTTP attempts {summary['http_attempts']}, tokens in/out (provider-reported) "
+        f"{summary['prompt_tokens_reported']}/{summary['output_tokens_reported']}, "
+        f"{summary['calls_without_reported_usage']} call(s) reported no usage; "
         f"estimated cost {summary['estimated_cost_usd']}"
     )
     for name, bucket in summary["by_dimension"].items():
@@ -162,7 +181,20 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--max-calls", type=int)
     parser.add_argument("--max-output-tokens", type=int)
     parser.add_argument("--max-total-tokens", type=int)
-    parser.add_argument("--max-retries", type=int, default=1)
+    parser.add_argument(
+        "--max-retries", type=int, default=None, help="Default 1; 0 on --free-tier."
+    )
+    parser.add_argument(
+        "--free-tier",
+        action="store_true",
+        help="Free-tier-only: no retries, paced requests, no prices, stop on first quota error.",
+    )
+    parser.add_argument(
+        "--min-interval-seconds",
+        type=float,
+        help=f"Minimum gap between request starts (default {FREE_TIER_MIN_INTERVAL_SECONDS:g} "
+        "with --free-tier, else 0).",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument("--max-run-seconds", type=float, default=900.0)
     parser.add_argument("--input-price", type=float, help="USD per million input tokens.")
