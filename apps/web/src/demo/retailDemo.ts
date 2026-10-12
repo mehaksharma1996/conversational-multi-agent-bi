@@ -41,6 +41,19 @@ export async function fetchDemoFile(spec: DemoFile): Promise<File> {
   return new File([await response.blob()], spec.filename, { type: spec.type });
 }
 
+/**
+ * Canonical fields the demo deliberately leaves unmapped, with the reason shown in schema review.
+ * The mapper's suggestion for `label` is `status`, but in this table `status` records whether a
+ * documented review rule matched. It is derived from other columns, so it is not an outcome to
+ * predict, and mapping it would offer a classifier that only rediscovers the rule. This is advice
+ * for the one bundled file, identified by name; the mapper's behaviour for other data is unchanged.
+ */
+export const DEMO_UNMAPPED_FIELDS: Readonly<Record<string, string>> = {
+  label:
+    "status marks which transactions matched a documented review rule. It is derived from other " +
+    "columns, so it is not an outcome to predict.",
+};
+
 export type DemoNeeds = "data" | "policy" | "both";
 
 export interface DemoQuestion {

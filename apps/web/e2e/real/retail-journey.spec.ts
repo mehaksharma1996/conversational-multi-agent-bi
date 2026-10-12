@@ -124,6 +124,15 @@ test("demo ingestion goes through schema review; data questions wait for confirm
 
   await expect(page.getByRole("heading", { name: "Confirm the canonical schema" })).toBeVisible();
   await expect(page.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+  // The real mapper's suggestions for this table: the measure, date, and region are mapped;
+  // "customer_segment" is a grouping rather than an ID, and "status" is a derived flag, so the
+  // customer ID and label stay unmapped (with the reason shown for the label).
+  await expect(page.getByLabel("amount")).toHaveValue("revenue");
+  await expect(page.getByLabel("date")).toHaveValue("transaction_date");
+  await expect(page.getByLabel("location")).toHaveValue("region");
+  await expect(page.getByLabel("customer id")).toHaveValue("");
+  await expect(page.getByLabel("label")).toHaveValue("");
+  await expect(page.getByText("label is left unmapped for the demo:")).toBeVisible();
   const samples = page.getByRole("region", { name: /Sample questions/ });
   await expect(samples.getByRole("button", { name: REGION })).toBeDisabled();
   // Nothing model-backed is enabled until the data-sharing notice is accepted.

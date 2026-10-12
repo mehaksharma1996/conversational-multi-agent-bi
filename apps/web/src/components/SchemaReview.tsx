@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { Dataset, SchemaMappingUpdate } from "../api/client";
+import { DEMO_DATA_FILENAME, DEMO_UNMAPPED_FIELDS } from "../demo/retailDemo";
 import { StatusBanner } from "./StatusBanner";
 
 const CANONICAL_FIELDS = [
@@ -24,9 +25,16 @@ const REQUIRED_TYPES: Record<CanonicalField, string[]> = {
   label: ["categorical", "boolean", "numeric"],
 };
 
+/** Fields the bundled demo file deliberately leaves unmapped (empty for any other file). */
+function intentionallyUnmapped(dataset: Dataset): Record<string, string> {
+  return dataset.filename === DEMO_DATA_FILENAME ? { ...DEMO_UNMAPPED_FIELDS } : {};
+}
+
 function initialMapping(dataset: Dataset): MappingDraft {
+  const unmapped = intentionallyUnmapped(dataset);
   return Object.fromEntries(
     CANONICAL_FIELDS.map((field) => {
+      if (field in unmapped) return [field, ""];
       const suggestion = dataset.schema_mapping.mappings[field];
       const source = suggestion && suggestion.confidence >= 0.5 ? suggestion.source_column : null;
       return [field, source ?? ""];
@@ -42,6 +50,7 @@ interface SchemaReviewProps {
 
 export function SchemaReview({ dataset, busy, onConfirm }: SchemaReviewProps) {
   const [mapping, setMapping] = useState<MappingDraft>(() => initialMapping(dataset));
+  const unmapped = useMemo(() => intentionallyUnmapped(dataset), [dataset]);
   const lowConfidenceFields = useMemo(
     () =>
       CANONICAL_FIELDS.filter((field) => {
@@ -98,6 +107,12 @@ export function SchemaReview({ dataset, busy, onConfirm }: SchemaReviewProps) {
           </StatusBanner>
         )),
       )}
+
+      {Object.entries(unmapped).map(([field, reason]) => (
+        <StatusBanner kind="info" key={`unmapped-${field}`}>
+          <strong>{field.replaceAll("_", " ")} is left unmapped for the demo:</strong> {reason}
+        </StatusBanner>
+      ))}
 
       {lowConfidenceFields.length > 0 ? (
         <StatusBanner kind="info">

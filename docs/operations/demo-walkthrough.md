@@ -31,8 +31,10 @@ exercised for this walkthrough.
    ![Home and demo guide](../assets/demo/01-home-and-demo-guide.png)
 2. **Load the demo (1 min).** Press *Load demo data and policy*. It uses the normal upload
    endpoints, so nothing is preloaded or exempt from validation. Review the suggested mapping and
-   press *Confirm schema* (the suggested customer ID and label are not meaningful for this table;
-   no sample question uses them).
+   press *Confirm schema*. Revenue, transaction date, and region are suggested automatically;
+   *customer ID* and *label* are left unmapped on purpose (`customer_segment` groups customers
+   rather than identifying them, and `status` is derived from the review rules, so predicting it
+   would only rediscover them). The page says so. No sample question uses either field.
    ![Schema review and sample questions](../assets/demo/02-schema-review.png)
 3. **Deterministic analysis (1 min).** *Run deterministic analysis*: profile, trends, anomaly
    candidates, a business summary. No model involved.
