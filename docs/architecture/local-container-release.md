@@ -31,7 +31,7 @@ waiver are in [ADR 0010](../adr/0010-local-container-release.md).
 | | `Dockerfile.api` | `Dockerfile.web` |
 |---|---|---|
 | Stages | builder (venv) → runtime | node build → nginx runtime |
-| Base | `python:3.12-slim-bookworm@sha256:…` | `node:24.14.0-bookworm-slim@sha256:…`, `nginx-unprivileged:1.30-alpine@sha256:…` |
+| Base | `python:3.12-slim-bookworm@sha256:…` | `node:24.14.0-bookworm-slim@sha256:…`, `nginx-unprivileged:1.30-alpine-slim@sha256:…` |
 | Dependencies | `requirements.txt` constrained by `requirements.lock`; CPU-only PyTorch at the locked version | `npm ci` from `package-lock.json` |
 | User | fixed uid/gid 10001, no shell login | uid 101 (base image) |
 | Health | `GET /health/ready` (storage and audit writable) | `GET /nginx-health` |
