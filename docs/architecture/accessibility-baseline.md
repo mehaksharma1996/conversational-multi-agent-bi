@@ -12,7 +12,10 @@ the nginx image in the container job.
 - a ready workspace and empty workflow;
 - schema review, including its profile table and canonical-field controls;
 - an analysis dashboard containing a Plotly chart, anomaly caveat, tables, and report actions;
-- a chat answer with sources and a grounding warning; and
+- a chat answer with sources and a grounding warning;
+- pending SQL approval controls; and, against the real API with a scripted model
+  (`apps/web/e2e/real`), the restored workspace with answers, evidence panels, and an approval, at
+  desktop and 375 px widths;
 - the safe API error banner with its request ID.
 
 The keyboard-only journey proves the skip link is first, becomes visible on focus, moves focus into

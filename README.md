@@ -40,6 +40,13 @@ categories, three channels, policy-defined review cases, anomalies, and intentio
 answers are versioned in
 [`retail_operations_ground_truth.json`](sample_data/retail_operations_ground_truth.json).
 
+In the browser, the **Guided demo** panel's *Load demo data and policy* button does the same
+uploads through the normal endpoints (schema review still applies) and unlocks nine sample questions,
+each with a committed answer. A reload restores your workspace, data, and conversation
+([design](docs/architecture/workspace-recovery.md)); a step-by-step tour with real screenshots is in the
+[demo walkthrough](docs/operations/demo-walkthrough.md), and usage, limits, and troubleshooting are in
+[frontend usage](docs/operations/frontend-usage-and-troubleshooting.md).
+
 Add [`retail_operations_policy.pdf`](sample_data/retail_operations_policy.pdf), configure a provider,
 and drop `LOCAL_ONLY_MODE` to try guarded SQL, document, and hybrid questions. The full scenario and
 regeneration command are documented in [`sample_data/README.md`](sample_data/README.md). You can also
@@ -571,8 +578,11 @@ those controls before hosting it for untrusted users.
 - Gemini availability, quotas, and responses are external dependencies.
 - The evaluation suite checks safeguards against scripted model behavior; it does
   not measure real-model accuracy or PII-redaction recall on real data.
-- API resource metadata is process-local: restarting the API loses workspaces and
-  leaves their directories orphaned under `APP_DATA_DIR/api/`.
+- Unless `DURABLE_METADATA=true` (ADR 0022), API resource metadata is process-local: restarting the API
+  loses workspaces. With it enabled, the browser restores them after a reload or restart; a pending
+  SQL approval is still cancelled safely by a restart because its checkpoint is in memory.
+- The browser journeys in `apps/web/e2e/real` use a scripted model, not a live one, and ran in Chromium on
+  one machine. Real-model behavior, Docker, and screen-reader use are unverified.
 - Audit files are tamper-evident on one node but are not immutable, rotated, or
   access-controlled beyond filesystem permissions.
 - The container topology supports exactly one API container, has no authentication (the

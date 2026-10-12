@@ -25,7 +25,8 @@ not removed by this phase.
 
 ## User journey
 
-1. The client creates an idempotent, process-local workspace.
+1. The client restores the caller's most recent workspace, or creates one only when the server
+   reports none ([workspace recovery](workspace-recovery.md)).
 2. The analyst uploads a bounded CSV or Excel file. Excel workbooks require an
    explicit sheet choice before profiling.
 3. The profile and canonical mapping suggestions are displayed for review.
