@@ -26,7 +26,7 @@ flowchart LR
     routes["Versioned /api/v1 routes<br/>OpenAPI + limits + tenant scope"]
     repo["Workspace repository<br/>durable metadata + recovery"]
     analytics["Deterministic analytics<br/>profiles, anomalies, reports"]
-    graph["LangGraph orchestrator<br/>memory, SQL, RAG, hybrid"]
+    orchestration["LangGraph orchestrator<br/>memory, SQL, RAG, hybrid"]
     sql["Guarded SQL<br/>parser + allowlists + authorizer"]
     retrieval["Document retrieval<br/>dense + BM25 + optional reranker"]
     observe["Allowlisted observability<br/>logs, metrics, traces, audit"]
@@ -49,10 +49,10 @@ flowchart LR
   identity --> routes
   routes --> repo
   routes --> analytics
-  routes --> graph
-  graph --> sql
-  graph --> retrieval
-  graph -. "consented, minimized context" .-> provider
+  routes --> orchestration
+  orchestration --> sql
+  orchestration --> retrieval
+  orchestration -. "consented, minimized context" .-> provider
   repo --> metadata
   repo --> content
   repo --> uploads
@@ -60,7 +60,7 @@ flowchart LR
   sql --> table
   retrieval --> index
   routes --> observe
-  graph --> observe
+  orchestration --> observe
   observe --> audit
   observe -. "only when configured" .-> telemetry
 ```
@@ -92,7 +92,7 @@ sequenceDiagram
   G-->>A: Allowed or safe error
   A->>O: Question + bounded session memory
   O->>M: Classify route with schema-constrained output
-  M-->>O: memory | sql | rag | hybrid | unsupported
+  M-->>O: memory, sql, rag, hybrid, or unsupported
 
   alt Document route
     O->>R: Retrieve dense + BM25 candidates
@@ -113,7 +113,7 @@ sequenceDiagram
     M-->>O: Candidate SQL
     O->>G: Validate SELECT, schema, functions, predicates, and limits
     opt Human approval required
-      O-->>W: Pending; no table query has run
+      O-->>W: Pending approval - table query not executed
       W-->>U: Show validated SQL
       U->>W: Approve, edit, or reject
       W->>A: Resume the server-owned checkpoint
@@ -147,46 +147,50 @@ back to the model. The implementation and state transitions are detailed in
 ## C. Grounding and trust boundaries
 
 ```mermaid
-flowchart TB
-  subgraph untrusted[Untrusted inputs and external outputs]
+flowchart LR
+  subgraph untrusted[Untrusted inputs and model output]
+    direction TB
     files["CSV, Excel, and PDF uploads"]
-    question["Typed question"]
-    document["Retrieved document text<br/>may contain instructions"]
-    modelOutput["Route, criteria, SQL, and answer<br/>proposed by a model"]
+    question["User question"]
+    excerpts["Retrieved text<br/>treated as untrusted"]
+    proposals["Model proposals<br/>route, criteria, SQL, answer"]
   end
 
-  subgraph controls[Deterministic control plane]
-    ingest["Size, row, page, and chunk limits<br/>parsing + formula neutralization"]
-    identity["Verified identity + server-owned roles<br/>tenant scope + CSRF/Origin"]
-    consent["Explicit consent + LOCAL_ONLY_MODE<br/>PII redaction + prompt minimization"]
-    relevance["Dense/BM25 relevance gate<br/>reranker may reorder only"]
-    grounding["Source attribution<br/>citation + quote checks"]
-    predicate["Bounded policy predicate verifier<br/>not a theorem prover"]
-    query["SELECT-only parser + allowlists<br/>SQLite authorizer + read-only caps"]
-    privacy["Allowlisted logs, metrics, traces, audit<br/>no content or secrets"]
+  subgraph controls[Deterministic controls]
+    direction TB
+    ingest["Upload limits and safe parsing"]
+    access["Identity, authorization, and tenant scope"]
+    consent["Consent, local-only mode, and prompt minimization"]
+    retrieval["Retrieval relevance gate"]
+    grounding["Source attribution and citation checks"]
+    predicate["Bounded policy predicate checks"]
+    sqlSafety["SQL safety<br/>SELECT-only, allowlists, authorizer, caps"]
+    recording["Allowlisted telemetry and auditing"]
   end
 
-  subgraph protected[Protected local assets]
-    workspace[("Tenant workspace data")]
-    credentials[("Provider and OIDC credentials")]
-    audit[("Hash-chained audit history")]
+  subgraph protected[Protected tenant assets]
+    direction TB
+    tenantData[("Tenant workspace data")]
+    auditHistory[("Hash-chained audit history")]
   end
 
-  files --> ingest --> workspace
-  question --> identity --> consent
-  workspace --> relevance
-  relevance --> document
-  document --> grounding
-  document --> predicate
-  consent -. "only when allowed" .-> modelOutput
-  document -. "labelled untrusted" .-> modelOutput
-  modelOutput --> grounding
-  modelOutput --> predicate --> query --> workspace
-  identity --> workspace
-  query --> privacy --> audit
-  grounding --> privacy
-  credentials -. "never recorded or sent to the browser" .-> privacy
+  files --> ingest --> tenantData
+  question --> access --> consent
+  access --> tenantData
+  tenantData --> retrieval --> excerpts
+  consent -. "only when allowed" .-> proposals
+  excerpts -. "untrusted context" .-> proposals
+  excerpts --> grounding
+  proposals --> grounding
+  excerpts --> predicate
+  proposals --> predicate
+  predicate --> sqlSafety --> tenantData
+  grounding --> recording
+  sqlSafety --> recording --> auditHistory
 ```
+
+Provider and OIDC credentials remain server-side. They must not be recorded in logs, metrics,
+traces, or audit events, and they must never be exposed to the browser.
 
 The model does not receive authority because it cannot bypass identity, consent, retrieval admission,
 SQL validation, tenant scoping, or execution limits. Grounding is still bounded: valid citations show
