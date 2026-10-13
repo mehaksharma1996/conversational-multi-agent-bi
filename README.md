@@ -62,26 +62,25 @@ proposals inspectable and places guarantees in code.
 
 ## Architecture at a glance
 
-```mermaid
-flowchart LR
-  analyst["Analyst"] --> web["React workbench"]
-  web --> api["FastAPI API"]
-  api --> orchestration["LangGraph routing"]
-  orchestration --> retrieval["Dense and BM25 retrieval"]
-  retrieval --> grounding["Citations and policy criteria"]
-  grounding --> sql["Guarded read-only SQL"]
-  sql --> approval{"Approval required"}
-  approval -->|approved or not required| data[("Tenant workspace")]
-  approval -->|rejected| stopped["No table query"]
-  data --> result["Deterministic result"]
-  orchestration -. "consented minimized context" .-> provider["Model provider"]
-  api --> analytics["Deterministic analytics"]
-  analytics --> data
-  api --> audit["Allowlisted telemetry and audit"]
-```
+![System architecture: an analyst uses a React workbench that calls a FastAPI service. The service enforces identity, tenant, and consent gates and hands questions to a LangGraph orchestrator. The orchestrator routes to a guarded SQL path with optional human approval and a read-only SQLite workspace, or to a document RAG path over a vector index. Models only propose; allowlisted observability writes a hash-chained audit log.](docs/architecture/system-architecture.svg)
 
-The [system overview](docs/architecture/system-overview.md) shows the exact route lifecycle, storage
-paths, trust boundaries, and local container topology.
+The React client talks to a versioned FastAPI service. Identity, tenant scope, and consent are enforced
+before any question reaches the LangGraph orchestrator, which routes it to the guarded SQL path, the
+document RAG path, or both for hybrid questions. The model provider only proposes routes, answers,
+criteria, and SQL; code validates and executes, and the result summary is computed without the model.
+Observability is allowlisted and the audit log is hash-chained. The API, orchestration, and
+workspace stores run in one local process; hosted model providers are used only after consent.
+
+The distinctive path is hybrid policy-to-SQL: policy text is retrieved and cited first, criteria are
+extracted and checked against the excerpts, and the drafted SQL must pass the safety check and a
+structural policy check (plus optional human approval, after which both checks repeat) before it runs
+read-only.
+
+![Hybrid policy-to-SQL workflow: the analyst question is routed, document evidence is retrieved and a cited answer is drafted and citation-checked, criteria are extracted and kept only if sourced, SQL is drafted, then the SQL safety check and policy-to-SQL check run in that order. Optional human approval leads to rejection or a repeat of both checks; verified SQL runs read-only and a deterministic result is returned; failures return a documents-only answer without a table query.](docs/architecture/hybrid-policy-to-sql-workflow.svg)
+
+The [system overview](docs/architecture/system-overview.md) has the full route lifecycle, storage
+paths, trust boundaries, and local container topology. The diagrams were generated with Archify; their specifications, with
+per-node source-line citations, are under [`.archify/`](.archify/).
 
 ## Evidence and engineering depth
 

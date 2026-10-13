@@ -1,0 +1,525 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Conversational BI System Architecture",
+    "locale": "en",
+    "output": ".archify/architecture-readme-system-20261013-031505/system-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/mehaksharma1996/conversational-multi-agent-bi.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "5d48f92bb3d8ccbd567418c2b66148a12b8ec4e2"
+    }
+  },
+  "components": [
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "React workbench",
+      "sublabel": "Analyst upload, review, chat",
+      "pos": [
+        30,
+        250
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "line": 11,
+          "end_line": 16,
+          "label": "React root"
+        },
+        {
+          "path": "apps/web/src/api/client.ts",
+          "line": 1,
+          "end_line": 20,
+          "label": "HTTP client"
+        }
+      ]
+    },
+    {
+      "id": "gates",
+      "type": "security",
+      "label": "Identity and tenant gates",
+      "sublabel": "OIDC, CSRF, roles, consent",
+      "pos": [
+        300,
+        40
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "apps/api/dependencies.py",
+          "line": 40,
+          "end_line": 66,
+          "label": "Identity and CSRF resolution"
+        },
+        {
+          "path": "apps/api/authorization.py",
+          "line": 21,
+          "end_line": 49,
+          "label": "Role capabilities"
+        },
+        {
+          "path": "apps/api/feature_routes.py",
+          "line": 433,
+          "end_line": 459,
+          "label": "Rate limit, pending-approval and consent checks"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI /api/v1",
+      "sublabel": "Versioned routes, tenant scope",
+      "pos": [
+        300,
+        250
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "apps/api/main.py",
+          "line": 61,
+          "end_line": 80,
+          "label": "Application composition"
+        },
+        {
+          "path": "apps/api/feature_routes.py",
+          "line": 412,
+          "end_line": 441,
+          "label": "Message route"
+        }
+      ]
+    },
+    {
+      "id": "analytics",
+      "type": "backend",
+      "label": "Deterministic analytics",
+      "sublabel": "Profiles, anomalies, reports",
+      "pos": [
+        470,
+        460
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "apps/api/routes.py",
+          "line": 386,
+          "end_line": 400,
+          "label": "Analysis route"
+        },
+        {
+          "path": "packages/analytics/service.py",
+          "line": 35,
+          "end_line": 80,
+          "label": "Tabular application service"
+        }
+      ]
+    },
+    {
+      "id": "obs",
+      "type": "backend",
+      "label": "Allowlisted observability",
+      "sublabel": "Logs, metrics, audit events",
+      "pos": [
+        260,
+        460
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "apps/api/observability.py",
+          "line": 18,
+          "end_line": 71,
+          "label": "API telemetry and audit facade"
+        },
+        {
+          "path": "apps/api/feature_routes.py",
+          "line": 485,
+          "end_line": 513,
+          "label": "Instrumented answer call"
+        }
+      ]
+    },
+    {
+      "id": "audit",
+      "type": "database",
+      "label": "Hash-chained audit log",
+      "sublabel": "Per-tenant JSONL",
+      "pos": [
+        30,
+        460
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "packages/governance/audit.py",
+          "line": 226,
+          "end_line": 290,
+          "label": "JSONL audit sink"
+        }
+      ]
+    },
+    {
+      "id": "orch",
+      "type": "backend",
+      "label": "LangGraph orchestrator",
+      "sublabel": "Memory, SQL, RAG, hybrid routes",
+      "pos": [
+        590,
+        250
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 295,
+          "end_line": 368,
+          "label": "Graph nodes and edges"
+        },
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 371,
+          "end_line": 401,
+          "label": "Route selection"
+        }
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "external",
+      "label": "Model provider",
+      "sublabel": "Gemini, Anthropic or Ollama",
+      "pos": [
+        590,
+        40
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "tag": "proposals only",
+      "sources": [
+        {
+          "path": "src/llm/factory.py",
+          "line": 14,
+          "end_line": 51,
+          "label": "Provider chain"
+        },
+        {
+          "path": "apps/api/feature_routes.py",
+          "line": 448,
+          "end_line": 459,
+          "label": "Consent before hosted use"
+        }
+      ]
+    },
+    {
+      "id": "sql",
+      "type": "security",
+      "label": "Guarded SQL path",
+      "sublabel": "Draft, validate, read-only run",
+      "pos": [
+        870,
+        250
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/agents/sql_agent.py",
+          "line": 98,
+          "end_line": 121,
+          "label": "Generate, validate, execute"
+        },
+        {
+          "path": "src/storage/query_executor.py",
+          "line": 82,
+          "end_line": 166,
+          "label": "Read-only execution and SQL guard"
+        },
+        {
+          "path": "src/orchestration/policy_grounding.py",
+          "line": 144,
+          "end_line": 227,
+          "label": "Policy-to-SQL verifier"
+        }
+      ]
+    },
+    {
+      "id": "approval",
+      "type": "security",
+      "label": "Human approval",
+      "sublabel": "Opt-in for hybrid SQL",
+      "pos": [
+        870,
+        40
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 663,
+          "end_line": 706,
+          "label": "Approval interrupt"
+        },
+        {
+          "path": "apps/api/approvals.py",
+          "line": 11,
+          "end_line": 37,
+          "label": "Server-owned checkpoints"
+        },
+        {
+          "path": "apps/api/feature_routes.py",
+          "line": 582,
+          "end_line": 640,
+          "label": "Approval decision route"
+        }
+      ]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "Workspace SQLite",
+      "sublabel": "Uploaded table copy",
+      "pos": [
+        1150,
+        250
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/storage/query_executor.py",
+          "line": 98,
+          "end_line": 112,
+          "label": "Read-only connection"
+        },
+        {
+          "path": "src/storage/sqlite_store.py",
+          "line": 31,
+          "end_line": 86,
+          "label": "Table persistence"
+        }
+      ]
+    },
+    {
+      "id": "rag",
+      "type": "backend",
+      "label": "Document RAG path",
+      "sublabel": "Retrieve, answer, check citations",
+      "pos": [
+        870,
+        460
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/agents/rag_agent.py",
+          "line": 67,
+          "end_line": 143,
+          "label": "Grounded answer with citation checks"
+        },
+        {
+          "path": "src/documents/retriever.py",
+          "line": 83,
+          "end_line": 170,
+          "label": "Dense, lexical and rerank fusion"
+        }
+      ]
+    },
+    {
+      "id": "vector",
+      "type": "database",
+      "label": "Vector index",
+      "sublabel": "Chroma or pgvector",
+      "pos": [
+        1150,
+        460
+      ],
+      "size": [
+        180,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/documents/vector_store.py",
+          "line": 40,
+          "end_line": 70,
+          "label": "Chroma store"
+        },
+        {
+          "path": "src/documents/pgvector_store.py",
+          "line": 1,
+          "end_line": 60,
+          "label": "pgvector adapter"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "web_to_api",
+      "from": "web",
+      "to": "api",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api_to_gates",
+      "from": "api",
+      "to": "gates",
+      "label": "enforces",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api_to_analytics",
+      "from": "api",
+      "to": "analytics",
+      "label": "tables",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "api_to_obs",
+      "from": "api",
+      "to": "obs",
+      "label": "events",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "obs_to_audit",
+      "from": "obs",
+      "to": "audit",
+      "label": "appends",
+      "variant": "dashed"
+    },
+    {
+      "id": "api_to_orch",
+      "from": "api",
+      "to": "orch",
+      "label": "question",
+      "variant": "emphasis"
+    },
+    {
+      "id": "orch_to_provider",
+      "from": "orch",
+      "to": "provider",
+      "label": "minimized prompts",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "orch_to_sql",
+      "from": "orch",
+      "to": "sql",
+      "label": "SQL route",
+      "variant": "emphasis"
+    },
+    {
+      "id": "orch_to_rag",
+      "from": "orch",
+      "to": "rag",
+      "label": "RAG route",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "rag_to_sql",
+      "from": "rag",
+      "to": "sql",
+      "label": "hybrid criteria",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "sql_to_approval",
+      "from": "sql",
+      "to": "approval",
+      "label": "opt-in pause",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "sql_to_sqlite",
+      "from": "sql",
+      "to": "sqlite",
+      "label": "read-only",
+      "variant": "security"
+    },
+    {
+      "id": "rag_to_vector",
+      "from": "rag",
+      "to": "vector",
+      "label": "retrieve"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Models propose",
+      "items": [
+        "Route choice, cited answers, policy criteria and SQL drafts come from the model provider",
+        "Hosted providers are used only after consent and receive minimized context"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Code enforces",
+      "items": [
+        "SELECT-only validation, then policy-to-SQL predicate verification",
+        "Optional approval pause, then read-only, row-capped execution"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Local-first scope",
+      "items": [
+        "One API process with workspace SQLite and vector stores",
+        "Result summaries are computed by code, not sent back to the model"
+      ]
+    }
+  ]
+}

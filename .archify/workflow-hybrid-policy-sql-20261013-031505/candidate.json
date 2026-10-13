@@ -1,0 +1,532 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Hybrid Policy-to-SQL Workflow",
+    "locale": "en",
+    "output": ".archify/workflow-hybrid-policy-sql-20261013-031505/hybrid-policy-sql-workflow.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/mehaksharma1996/conversational-multi-agent-bi.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "5d48f92bb3d8ccbd567418c2b66148a12b8ec4e2"
+    },
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "Analyst or human"
+        },
+        "external": {
+          "label": "Model proposal"
+        },
+        "backend": {
+          "label": "Deterministic step"
+        },
+        "security": {
+          "label": "Deterministic guard"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "analyst",
+      "label": "Analyst"
+    },
+    {
+      "id": "model",
+      "label": "Model proposes (untrusted)"
+    },
+    {
+      "id": "code",
+      "label": "Code verifies and runs"
+    },
+    {
+      "id": "outcome",
+      "label": "Outcome"
+    }
+  ],
+  "mainPath": [
+    "question",
+    "route",
+    "retrieve",
+    "answer",
+    "cite",
+    "criteria",
+    "sanitize",
+    "sql",
+    "safety",
+    "policy",
+    "exec",
+    "result"
+  ],
+  "nodes": [
+    {
+      "id": "question",
+      "lane": "analyst",
+      "col": 0,
+      "type": "frontend",
+      "label": "Analyst question",
+      "sublabel": "after API gates",
+      "width": 138,
+      "sources": [
+        {
+          "path": "apps/api/feature_routes.py",
+          "line": 433,
+          "end_line": 459,
+          "label": "Rate limit, pending-approval and consent checks"
+        }
+      ]
+    },
+    {
+      "id": "route",
+      "lane": "model",
+      "col": 0,
+      "type": "external",
+      "label": "Route question",
+      "sublabel": "model, code fallback",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 371,
+          "end_line": 401,
+          "label": "Route selection with deterministic fallback"
+        },
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 314,
+          "end_line": 324,
+          "label": "Hybrid route enters document retrieval"
+        }
+      ]
+    },
+    {
+      "id": "retrieve",
+      "lane": "code",
+      "col": 0,
+      "type": "backend",
+      "label": "Retrieve evidence",
+      "sublabel": "dense + BM25 + gate",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/documents/retriever.py",
+          "line": 83,
+          "end_line": 170,
+          "label": "Dense, lexical and relevance-gated retrieval"
+        },
+        {
+          "path": "src/agents/rag_agent.py",
+          "line": 79,
+          "end_line": 98,
+          "label": "Refusal when nothing relevant is retrieved"
+        }
+      ]
+    },
+    {
+      "id": "answer",
+      "lane": "model",
+      "col": 1,
+      "type": "external",
+      "label": "Draft cited answer",
+      "sublabel": "from retrieved excerpts",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/agents/rag_agent.py",
+          "line": 100,
+          "end_line": 102,
+          "label": "Model drafts answer from excerpts"
+        }
+      ]
+    },
+    {
+      "id": "cite",
+      "lane": "code",
+      "col": 1,
+      "type": "security",
+      "label": "Check citations",
+      "sublabel": "flags unverified quotes",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/agents/rag_agent.py",
+          "line": 110,
+          "end_line": 131,
+          "label": "Citation and quote checks"
+        }
+      ]
+    },
+    {
+      "id": "criteria",
+      "lane": "model",
+      "col": 2,
+      "type": "external",
+      "label": "Extract criteria",
+      "sublabel": "structured predicates",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 564,
+          "end_line": 585,
+          "label": "Criteria extraction node"
+        },
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 890,
+          "end_line": 925,
+          "label": "Structured extraction prompt"
+        }
+      ]
+    },
+    {
+      "id": "sanitize",
+      "lane": "code",
+      "col": 2,
+      "type": "security",
+      "label": "Keep sourced criteria",
+      "sublabel": "checked against excerpts",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/policy_grounding.py",
+          "line": 111,
+          "end_line": 141,
+          "label": "Predicate attribution to excerpts"
+        },
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 1114,
+          "end_line": 1157,
+          "label": "Criteria sanitization"
+        }
+      ]
+    },
+    {
+      "id": "sql",
+      "lane": "model",
+      "col": 3,
+      "type": "external",
+      "label": "Draft SQL",
+      "sublabel": "uses verified criteria",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 586,
+          "end_line": 611,
+          "label": "SQL prompt with criteria and SQL draft"
+        }
+      ]
+    },
+    {
+      "id": "safety",
+      "lane": "code",
+      "col": 3,
+      "type": "security",
+      "label": "SQL safety check",
+      "sublabel": "SELECT-only, allowlists",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 613,
+          "end_line": 626,
+          "label": "Safety validation runs first"
+        },
+        {
+          "path": "src/storage/query_executor.py",
+          "line": 134,
+          "end_line": 166,
+          "label": "Read-only SQL guard"
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "lane": "code",
+      "col": 4,
+      "type": "security",
+      "label": "Policy-to-SQL check",
+      "sublabel": "predicates vs criteria",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 627,
+          "end_line": 661,
+          "label": "Structural policy verification after safety"
+        },
+        {
+          "path": "src/orchestration/policy_grounding.py",
+          "line": 144,
+          "end_line": 227,
+          "label": "Policy predicate verifier"
+        }
+      ]
+    },
+    {
+      "id": "approval",
+      "lane": "analyst",
+      "col": 4,
+      "type": "frontend",
+      "label": "Human approval",
+      "sublabel": "approve, edit or reject",
+      "tag": "then rechecks SQL",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 663,
+          "end_line": 706,
+          "label": "Approval interrupt and decision handling"
+        },
+        {
+          "path": "apps/api/feature_routes.py",
+          "line": 582,
+          "end_line": 640,
+          "label": "Approval decision route"
+        }
+      ]
+    },
+    {
+      "id": "rejected",
+      "lane": "analyst",
+      "col": 5,
+      "type": "security",
+      "label": "Rejected",
+      "sublabel": "no table query run",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 686,
+          "end_line": 695,
+          "label": "Rejection stops without a table query"
+        }
+      ]
+    },
+    {
+      "id": "exec",
+      "lane": "code",
+      "col": 5,
+      "type": "security",
+      "label": "Read-only execution",
+      "sublabel": "cap, timeout, authorizer",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 708,
+          "end_line": 744,
+          "label": "Execution node"
+        },
+        {
+          "path": "src/storage/query_executor.py",
+          "line": 82,
+          "end_line": 132,
+          "label": "Read-only connection, limit, timeout, authorizer"
+        }
+      ]
+    },
+    {
+      "id": "result",
+      "lane": "outcome",
+      "col": 5,
+      "type": "backend",
+      "label": "Deterministic result",
+      "sublabel": "numbers computed by code",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 787,
+          "end_line": 837,
+          "label": "Hybrid finalization"
+        },
+        {
+          "path": "src/agents/sql_agent.py",
+          "line": 177,
+          "end_line": 184,
+          "label": "Deterministic result summary"
+        }
+      ]
+    },
+    {
+      "id": "fallback",
+      "lane": "outcome",
+      "col": 4,
+      "type": "security",
+      "label": "No table query",
+      "sublabel": "documents-only answer",
+      "width": 138,
+      "sources": [
+        {
+          "path": "src/orchestration/langgraph_orchestrator.py",
+          "line": 839,
+          "end_line": 865,
+          "label": "Hybrid fallback to the cited document answer"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_question_route",
+      "from": "question",
+      "to": "route",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_route_retrieve",
+      "from": "route",
+      "to": "retrieve",
+      "label": "hybrid",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_retrieve_answer",
+      "from": "retrieve",
+      "to": "answer",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e_answer_cite",
+      "from": "answer",
+      "to": "cite",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_cite_criteria",
+      "from": "cite",
+      "to": "criteria",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e_criteria_sanitize",
+      "from": "criteria",
+      "to": "sanitize",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_sanitize_sql",
+      "from": "sanitize",
+      "to": "sql",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e_sql_safety",
+      "from": "sql",
+      "to": "safety",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_safety_policy",
+      "from": "safety",
+      "to": "policy",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e_policy_approval",
+      "from": "policy",
+      "to": "approval",
+      "label": "if required",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "e_policy_exec",
+      "from": "policy",
+      "to": "exec",
+      "label": "verified",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e_approval_rejected",
+      "from": "approval",
+      "to": "rejected",
+      "label": "reject",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e_safety_fallback",
+      "from": "safety",
+      "to": "fallback",
+      "label": "unsafe",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e_policy_fallback",
+      "from": "policy",
+      "to": "fallback",
+      "label": "mismatch",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_exec_result",
+      "from": "exec",
+      "to": "result",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Model proposes",
+      "items": [
+        "Route, cited answer, policy criteria and SQL are model drafts",
+        "Retrieved excerpts are treated as untrusted data"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Code decides",
+      "items": [
+        "SQL safety runs first, then structural policy verification",
+        "Mismatch or unsafe SQL returns the cited document answer only"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Bounded claim",
+      "items": [
+        "A structural match does not prove the policy is complete or correct",
+        "Approved or edited SQL repeats both checks before it can run"
+      ]
+    }
+  ]
+}
