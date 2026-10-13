@@ -5,592 +5,223 @@
 ![Python 3.12–3.14](https://img.shields.io/badge/python-3.12%E2%80%933.14-3776ab.svg)
 ![React + FastAPI](https://img.shields.io/badge/stack-React%20%7C%20FastAPI%20%7C%20LangGraph-61dafb.svg)
 
-**Upload a spreadsheet and a policy PDF, then ask questions in plain English. Every answer shows
-how it was produced, and the model is never trusted to enforce a rule.**
+**Ask questions across uploaded business data and policy documents, then inspect the evidence, SQL,
+and safeguards behind every answer.**
 
-A local-first conversational BI platform with a primary React/FastAPI product
-surface and a developer-only Streamlit compatibility surface over deterministic
-analytics, read-only SQL, document retrieval, and coordinated conversational workflows.
+This is a local-first conversational BI workbench for CSV, Excel, and PDF files. Its primary product
+is a React client over a versioned FastAPI service; LangGraph coordinates deterministic analytics,
+guarded read-only SQL, document retrieval, session memory, and hybrid policy-to-data questions.
+Models help interpret language. Code—not a prompt—enforces access, SQL safety, consent, grounding,
+and approval boundaries.
 
 <p align="center">
-  <img src="docs/assets/03-analysis-dashboard.png" alt="Analysis dashboard with summary metrics, capability checks, and Plotly charts" width="49%">
-  <img src="docs/assets/04-conversation.png" alt="Conversation panel showing a memory-route answer with provenance and a request ID" width="49%">
-</p>
-<p align="center">
-  <img src="docs/assets/02-schema-review.png" alt="Schema review step where the analyst confirms each canonical field mapping" width="60%">
+  <img src="docs/assets/demo/04-grounded-sql-insight.png" alt="Grounded SQL answer showing calculated observations, generated SQL, and result rows" width="49%">
+  <img src="docs/assets/demo/07-hybrid-policy-answer.png" alt="Hybrid policy answer showing the approved query, evidence, and 13 matching transactions" width="49%">
 </p>
 
-## Try it in 60 seconds
+*Real captures from the automated browser journey. The captured model behavior is deterministic and
+scripted; it demonstrates the product workflow, not live-model accuracy.*
 
-No API key is needed for the deterministic features (profiling, analytics, anomaly review,
-charts, reports, and session-memory answers).
+## The workflow
+
+1. Upload a table and optionally a PDF policy.
+2. Review the inferred schema before analysis is allowed to run.
+3. Run deterministic profiles, trends, anomaly candidates, and reports.
+4. Ask a table, document, memory, or combined policy-and-data question.
+5. Inspect the route, sources, generated SQL, result rows, and grounding checks.
+6. For hybrid questions, optionally require a human to approve or safely edit validated SQL before
+   execution.
+
+The committed synthetic retail scenario has **2,400 rows**. Its exact ground truth includes West as
+the highest-revenue region at **533,933.01**, the policy predicate `fulfillment_days >= 10`, and
+**13 matching transactions**. The guided demo uploads the same files through the normal API—nothing
+is preloaded or exempt from validation.
+
+See the [eight-minute browser walkthrough](docs/operations/demo-walkthrough.md) for the full scripted
+journey and screenshots.
+
+## Architectural differentiator
+
+The central design rule is: **put guarantees in deterministic code; use a model only where its output
+is checked, reviewable, or non-authoritative.**
+
+| Concern | Deterministic boundary | Bounded model role |
+|---|---|---|
+| SQL | One `SELECT`/CTE; table, column, and function allowlists; SQLite authorizer; read-only connection; 500-row cap; 5-second deadline | Draft SQL, with at most one corrected draft; both pass the same guards |
+| Policy-to-data questions | Retrieved criteria must be attributable to evidence; the predicate verifier rejects missing or unjustified conditions; optional approval interrupts before execution | Route the question, summarize retrieved policy text, and extract structured criteria |
+| Document answers | Relevance refusal, source-number checks, quote substring checks, and visible citations | Write an answer from excerpts explicitly labelled as untrusted data |
+| Analytics and anomalies | Reproducible calculations and fixed-seed models; anomaly flags are review candidates | No model involved |
+| Identity and tenancy | Server-derived tenant, capability checks, indistinguishable foreign-resource 404s | No model involved |
+| Telemetry and audit | Allowlists exclude questions, SQL, rows, document text, prompts, and secrets | No model involved |
+
+The policy-to-SQL verifier is a bounded structural predicate checker, **not a theorem prover**. A
+query can be safe to execute and still answer the wrong business question, which is why SQL and rows
+remain visible for human review.
+
+## Current system architecture
+
+```mermaid
+flowchart LR
+  analyst([Analyst]) --> web[React client]
+  web -->|same-origin /api| edge[nginx]
+  edge --> api[FastAPI API]
+  api --> auth[OIDC or local identity<br/>roles + capabilities + CSRF]
+  api --> core[Deterministic analytics<br/>guarded SQL + reports]
+  api --> graph[LangGraph orchestration]
+  graph --> retrieval[Dense + BM25 retrieval<br/>optional local reranker]
+  graph -. consented, minimized prompts .-> model{{Gemini, Anthropic,<br/>or local Ollama}}
+  api --> stores[(Single-node workspace stores<br/>SQLite + Chroma or pgvector)]
+  api --> evidence[Allowlisted telemetry<br/>hash-chained audit]
+```
+
+For the exact query lifecycle, storage paths, grounding boundaries, and container topology, see the
+[repository-backed system diagrams](docs/architecture/system-overview.md).
+
+## Safeguards that matter
+
+- OIDC Bearer verification and authorization-code + PKCE browser login are implemented, with
+  HttpOnly sessions, Origin/CSRF checks, logout, server-owned roles, and route-level capabilities.
+- `LOCAL_ONLY_MODE=true` prevents hosted-model calls; otherwise explicit consent gates data sharing.
+- Workspace metadata, uploads, conversations, exports, analyses, and indexes recover after a local
+  single-node restart when durable metadata is enabled. Versioned migrations, backup/restore, checksum
+  verification, and conservative corruption handling are tested.
+- Retrieval combines dense search and BM25 with a relevance gate. An optional pinned local
+  cross-encoder may reorder accepted candidates but cannot admit rejected text.
+- Prometheus-format metrics and privacy-safe OTLP traces are opt-in. The repository does not ship a
+  collector, scraper, dashboards, or a hosted monitoring service.
+- Append-only audit records are hash-chained per tenant. This provides tamper evidence, not immutable
+  storage against an administrator with filesystem access.
+- The default Docker topology is digest-pinned, non-root, read-only where practical, and exposed only
+  on `127.0.0.1`.
+
+## Evidence, not equivalence
+
+Different checks answer different questions; none substitutes for a production deployment or a
+statistically meaningful live-model study.
+
+| Evidence class | What is verified | What is not implied |
+|---|---|---|
+| Deterministic offline evaluation | **85 cases** exercise routing, SQL, retrieval, hybrid, injection, isolation, privacy, recovery, and MCP safety through real guards with scripted providers | General accuracy of Gemini, Anthropic, Ollama, MiniLM, or a real reranker |
+| Scripted-provider browser suite | **20 Chromium journeys** exercise the real API and React workflow, including PDF, citations, hybrid approval/editing, recovery, export, and responsive behavior | Live-model reliability |
+| Container CI | Linux CI builds and scans both images, starts Compose, checks hardening and restart recovery, runs nginx/browser journeys, and exercises a test-only provider stack | A hosted deployment or every Docker Desktop platform |
+| Authentication tests | JWT verification, PKCE login, sessions, CSRF/Origin checks, role mapping, denials, and auth audit events | Integration with a real public identity provider |
+| Durability tests | Versioned local metadata, content/index recovery, workspace backup/restore, deletion, and corruption paths on one API process | Horizontal scale or multi-process coordination |
+| Metrics and tracing tests | Opt-in `/metrics`, bounded labels, W3C request propagation, job correlation, and OTLP export | A deployed collector, alert routing, dashboards, or on-call operations |
+| Controlled live-model evidence | One preserved Gemini hybrid run used four successful calls, extracted `fulfillment_days >= 10`, and returned 13 rows | A success rate or full-demo accuracy claim |
+| Public deployment | **Not performed** | Internet exposure, production readiness, or operational certification |
+
+The exact boundaries and preserved live-run report are documented in
+[release readiness](docs/operations/release-readiness.md). The offline gate is deterministic by
+design: it proves how the system reacts to specified provider behavior, not what an arbitrary model
+will do.
+
+## Reproduce the demo
+
+### Docker (shortest path)
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.lock
 $env:LOCAL_ONLY_MODE = "true"
-python -m uvicorn apps.api.main:app --port 8000          # terminal 1
-cd apps/web; npm ci; npm run dev                         # terminal 2 -> http://localhost:5173
+docker compose up -d --build --wait
+# open http://127.0.0.1:8080
 ```
 
-Upload [`sample_data/retail_operations.csv`](sample_data/retail_operations.csv), confirm the schema,
-and run the analysis. The deterministic 2,400-row scenario spans 18 months, four regions, five
-categories, three channels, policy-defined review cases, anomalies, and intentional nulls. Its exact
-answers are versioned in
-[`retail_operations_ground_truth.json`](sample_data/retail_operations_ground_truth.json).
+Press **Load demo data and policy**, confirm the proposed schema, then run the deterministic analysis.
+Local-only mode requires no API key and sends nothing to a hosted model. To reproduce the committed
+model-assisted browser story, follow the [scripted-provider walkthrough](docs/operations/demo-walkthrough.md).
 
-In the browser, the **Guided demo** panel's *Load demo data and policy* button does the same
-uploads through the normal endpoints (schema review still applies) and unlocks nine sample questions,
-each with a committed answer. A reload restores your workspace, data, and conversation
-([design](docs/architecture/workspace-recovery.md)); a step-by-step tour with real screenshots is in the
-[demo walkthrough](docs/operations/demo-walkthrough.md), and usage, limits, and troubleshooting are in
-[frontend usage](docs/operations/frontend-usage-and-troubleshooting.md).
+Stop while keeping data with `docker compose down`; `docker compose down -v` is an intentional full
+reset. Backup, restore, upgrades, and host-specific limits are in
+[local container operations](docs/operations/local-containers.md).
 
-What has and has not been verified (scripted versus live model, containers, public hosting), plus the
-bounded `scripts.run_live_demo_eval` procedure, is in
-[release readiness](docs/operations/release-readiness.md). The browser journeys above use a scripted
-model; no live-model accuracy is claimed.
+### Local development
 
-Add [`retail_operations_policy.pdf`](sample_data/retail_operations_policy.pdf), configure a provider,
-and drop `LOCAL_ONLY_MODE` to try guarded SQL, document, and hybrid questions. The full scenario and
-regeneration command are documented in [`sample_data/README.md`](sample_data/README.md). You can also
-use [Docker Compose](docs/operations/local-containers.md)
-(`docker compose up -d --build --wait`).
-
-For the supervised path, upload
-[`sample_data/labelled_transactions.csv`](sample_data/labelled_transactions.csv) and confirm
-`label` as the canonical label. This synthetic 160-row demo produces held-out decision metrics
-and a ranked human-review queue; it has no relationship to real people or events.
-
-## Why it is different
-
-- **The model proposes; deterministic code enforces.** Generated SQL must pass a parser, table,
-  column and function allowlists, SQLite's authorizer, a read-only connection, a row cap, and a
-  deadline. A model that obeys a poisoned document still cannot run a destructive query.
-- **Answers carry their evidence.** Each reply shows its route (SQL, document RAG, hybrid, or
-  memory), the generated SQL, retrieved sources, citation and quote checks, and a request ID.
-- **SQL insights are calculated, not invented.** Comparisons, rankings, and time changes are derived
-  from executed result rows with explicit null, precision, unit, and causality limitations. See the
-  [decision and tradeoffs](docs/architecture/grounded-sql-insights.md).
-- **Safety is tested, not asserted.** An offline evaluation suite runs 73 cases through the real
-  guards with hard-fail safety gates and a committed baseline, and negative controls prove each
-  check can fail.
-- **Privacy by construction.** Telemetry and audit logs are allowlist-only (no questions, SQL,
-  rows, or document text), audit files are hash-chained per tenant, and `LOCAL_ONLY_MODE`
-  guarantees nothing is sent to Gemini.
-- **Honest about limits.** Anomalies are review candidates, hybrid answers disclose that SQL
-  provenance is a literal-value check, and the [responsible-AI notes](docs/governance/responsible-ai.md)
-  list what is and is not covered.
-
-## What It Does
-
-- Profiles uploaded tabular data and proposes a reviewable canonical schema.
-- Runs deterministic summaries, trends, category breakdowns, and Plotly charts.
-- Flags unusual numeric patterns with a configurable Isolation Forest model.
-- Persists each browser session to its own SQLite and ChromaDB workspace.
-- Generates Gemini-backed SQL and executes it through table, column, function,
-  row, and execution-time guardrails.
-- Retrieves page-aware PDF context with relevance filtering.
-- Routes questions through SQL, document RAG, session memory, or a hybrid
-  document-plus-data workflow using LangGraph.
-- Produces a deterministic business report with on-demand PDF export.
-
-Anomaly results are review candidates, not confirmed fraud or misconduct. The
-application is a decision-support workbench, not an autonomous decision maker.
-
-## Architecture
-
-[![Conversational BI Workbench architecture](docs/architecture/conversational-bi-architecture.png)](.archify/architecture-conversational-bi-20260928-134410/conversational-bi.html)
-
-The diagram is generated from repository-backed source evidence with Archify.
-Download and open the [interactive architecture artifact](.archify/architecture-conversational-bi-20260928-134410/conversational-bi.html)
-locally to inspect components, trace routes, switch themes, and follow source
-references. Its [typed diagram specification](.archify/architecture-conversational-bi-20260928-134410/candidate.json)
-is versioned alongside the rendered artifact.
-
-The SQL and RAG components are specialized workflows coordinated by a router.
-For questions that explicitly combine uploaded transactions with document
-guidance, the hybrid route retrieves the guidance first and then generates a
-guarded query using that context. It does not claim autonomous agent consensus.
-
-### Modernization roadmap
-
-The production-structure roadmap is tracked in
-[GitHub issue #6](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/6).
-Its first iteration records the [current-to-target baseline](docs/architecture/modernization-baseline.md),
-the [initial API resource model](docs/architecture/api-resource-model.md), and
-the [architecture decisions](docs/adr/README.md) that govern the incremental
-React, FastAPI, evaluation, observability, governance, and local Docker work.
-The validated
-[interactive target architecture](.archify/architecture-target-platform-20260928-232755/target-platform.html)
-shows how those boundaries fit together.
-React/FastAPI is the primary local product. Streamlit remains an explicit
-developer-only compatibility/reference surface under [ADR 0011](docs/adr/0011-streamlit-disposition.md).
-
-Phase 2 introduces a [framework-neutral tabular core](docs/architecture/framework-neutral-core.md)
-under `packages/analytics/`, with typed upload, profile, schema-review, and
-analysis commands now used by Streamlit. Provider and repository contracts live
-under `packages/connectors/`, and CI prevents these packages from importing UI
-or API frameworks.
-
-Phase 3 adds the [versioned FastAPI tabular vertical slice](docs/architecture/fastapi-vertical-slice.md)
-under `apps/api/`. It covers local identity, tenant-scoped workspaces, bounded
-CSV/Excel upload and sheet discovery, profiling, explicit schema confirmation,
-deterministic analysis, health checks, safe request-ID errors, and a committed
-OpenAPI contract. The API repository is intentionally process-local at this
-stage; durable persistence is deferred and documented.
-
-Phase 4 adds the [React and TypeScript tabular vertical slice](docs/architecture/react-vertical-slice.md)
-under `apps/web/`. It uses the committed OpenAPI contract to provide a typed
-upload, schema-review, anomaly-configuration, and deterministic-analysis
-journey, with responsive styling, accessible controls, component coverage,
-and a Playwright critical-path test. Streamlit remains available while later
-phases migrate conversational SQL, document retrieval, and exports.
-
-Phase 5 completes [React and FastAPI feature parity](docs/architecture/feature-parity.md)
-for the core analyst journey. The typed web client now indexes bounded PDFs,
-records explicit Gemini data-sharing consent, invokes the existing memory,
-safe-SQL, RAG, and hybrid routes, displays citations and generated SQL,
-downloads Markdown/PDF reports and spreadsheet-safe CSV/Excel results, and
-resets the full local workspace. Tenant checks and sliding retention apply to
-the new API resources; Streamlit remains available as a compatibility surface.
-
-Phase 6 adds [evaluation, governance, and observability](docs/architecture/evaluation-governance-observability.md):
-a deterministic offline evaluation suite with hard-fail safety gates and a
-committed baseline (`evals/v1/`, `python -m scripts.run_evaluations`),
-allowlist-only structured telemetry with request-ID correlation
-(`packages/observability/`), append-only, hash-chained, per-tenant audit events
-for consequential API operations (`packages/governance/`), and user-visible
-route, grounding, and provenance status in the web client. See the
-[responsible-AI notes](docs/governance/responsible-ai.md),
-[evaluation guide](docs/governance/evaluation.md),
-[audit and observability behavior](docs/governance/audit-and-observability.md),
-and [incident runbook](docs/operations/incident-debugging.md). There is still no
-production telemetry exporter, and API resource metadata remains process-local.
-
-Phase 7 adds the [local container release](docs/architecture/local-container-release.md):
-multi-stage, digest-pinned, non-root images for the API and web client, a hardened
-`compose.yaml` (read-only filesystems, dropped capabilities, health checks, named
-volumes, loopback-only port), runtime switching between Gemini-enabled and
-`LOCAL_ONLY_MODE` without rebuilding, audit backup/restore scripts, startup recovery,
-and a CI job that builds the images and runs an end-to-end smoke test. See
-[running with Docker Compose](docs/operations/local-containers.md) and
-[ADR 0010](docs/adr/0010-local-container-release.md), which records that workspace
-state is still not durable across restarts.
-
-Phase 8 records the [Streamlit parity evidence](docs/architecture/streamlit-parity-evidence.md),
-[accessibility baseline](docs/architecture/accessibility-baseline.md),
-[definition-of-done ledger](docs/architecture/definition-of-done.md), and
-[migration/rollback procedure](docs/operations/migration-and-rollback.md). Real Playwright journeys
-now exercise the Compose stack, an in-repo OpenAPI compatibility gate rejects breaking changes,
-and [ADR 0011](docs/adr/0011-streamlit-disposition.md) retains Streamlit only until the documented
-authentication, durability, retention, and independent-exercise conditions are met.
-
-The conversational workflow now exposes its SQL generation, validation, execution, and bounded
-correction steps as [explicit LangGraph nodes](docs/architecture/langgraph-sql-approval.md). Hybrid
-questions can opt into a process-local approval interrupt that shows the validated SQL before any
-table query runs; approval, edits, rejection, tenant isolation, and checkpoint cleanup are covered
-by API, evaluation, accessibility, and deterministic-provider browser tests.
-
-## Quick start with Docker
-
-```powershell
-docker compose up -d --build --wait      # then open http://127.0.0.1:8080
-$env:LOCAL_ONLY_MODE = "true"; docker compose up -d --wait   # never contact Gemini
-docker compose down -v                   # stop and delete all data
-```
-
-No Python or Node installation is needed on the host. The web port is published on
-`127.0.0.1` only because the API has no user authentication yet. Upload
-`sample_data/transactions.csv` to try the analysis. Details, backup/restore, upgrades, and
-troubleshooting are in [docs/operations/local-containers.md](docs/operations/local-containers.md).
-
-## Local Setup
-
-Python 3.12 through 3.14 is supported. The current verified environment uses
-Python 3.14.
+Python 3.12–3.14 and the Node/npm versions pinned in `.nvmrc` and `apps/web/package.json` are supported.
 
 ```powershell
 py -3.14 -m venv .venv
 & ".\.venv\Scripts\python.exe" -m pip install -r requirements.lock
-Copy-Item .env.example .env
-& ".\.venv\Scripts\python.exe" -m streamlit run app.py
+$env:LOCAL_ONLY_MODE = "true"
+& ".\.venv\Scripts\python.exe" -m uvicorn apps.api.main:app --port 8000
 ```
 
-Run the FastAPI service locally in a separate terminal:
-
-```powershell
-& ".\.venv\Scripts\python.exe" -m uvicorn apps.api.main:app --reload
-```
-
-Run the React web client in another terminal. Node 24.14 and npm 11.20 are
-pinned in `.nvmrc` and `apps/web/package.json`:
+In a second terminal:
 
 ```powershell
 Set-Location apps/web
 npm ci
 npm run dev
+# open http://127.0.0.1:5173
 ```
 
-Open `http://127.0.0.1:5173`. Vite proxies `/api` and `/health` to the local
-FastAPI process on port 8000, keeping local development same-origin without
-introducing a production hosting decision.
+Use [`sample_data/retail_operations.csv`](sample_data/retail_operations.csv) and
+[`sample_data/retail_operations_policy.pdf`](sample_data/retail_operations_policy.pdf). Expected
+answers and regeneration instructions are versioned in [`sample_data/`](sample_data/README.md).
 
-Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
-The committed [OpenAPI contract](openapi/openapi.json) can be regenerated with
-`python -m scripts.generate_openapi`. Until durable resource persistence lands,
-run one API process. Restarting it clears API-created workspace metadata; use
-the UI reset before shutdown when you also want its local files removed.
-Breaking changes are checked against the base branch by
-`python -m scripts.check_openapi_compatibility --base-ref <ref>`; the explicit version-bump/ADR
-override is documented in [openapi-compatibility.md](docs/architecture/openapi-compatibility.md).
+Set a supported provider in your untracked `.env` and disable local-only mode only when you intend to
+send the disclosed, minimized context. The first PDF upload may download the configured embedding
+model. Streamlit remains a developer-only compatibility surface under
+[ADR 0011](docs/adr/0011-streamlit-disposition.md).
 
-For development tools:
+## Quality gates
 
 ```powershell
-& ".\.venv\Scripts\python.exe" -m pip install -r requirements-dev.txt
+& ".\.venv\Scripts\python.exe" -m scripts.check_all
+& ".\.venv\Scripts\python.exe" -m scripts.check_all --full
+& ".\.venv\Scripts\python.exe" -m scripts.run_evaluations
 ```
 
-Set `GEMINI_API_KEY` in `.env` to enable SQL generation and document answers.
-The deterministic dashboard, analytics, and report structure do not require an
-API key.
+CI additionally runs container build/scan/smoke tests, browser journeys, OpenAPI compatibility, the
+pgvector contract against Postgres, dependency/license checks, and secret scanning. Benchmarks are
+reported but intentionally do not gate merges.
 
-The first PDF upload may download the configured SentenceTransformer model.
+## Deployment boundaries and known limits
 
-To try the dashboard immediately, upload `sample_data/transactions.csv` and
-`sample_data/review_policy.pdf`.
+- This is a **local, single-node workbench**, not a public SaaS deployment. Compose defaults to one
+  full-capability local development identity and keeps nginx loopback-only.
+- The OIDC/session/role implementation is covered by deterministic tests, but a live IdP integration
+  and a public deployment have not been validated. TLS, anti-abuse controls, per-user cost quotas,
+  and hosted storage/operations remain deployment responsibilities.
+- Durable local recovery does not make the SQLite/Chroma design horizontally scalable. In-flight jobs
+  do not survive restart; pending SQL approvals are safely rejected.
+- Prometheus and OTLP emission are implemented, but monitoring infrastructure is not bundled.
+- The vector index is unencrypted under a time-bounded waiver; conversation storage is encrypted only
+  when `APP_ENCRYPTION_KEY` is configured.
+- Prompt injection is mitigated with untrusted-context labelling and deterministic output checks, not
+  eliminated. Citation validity means the reference maps to retrieved text, not that the text is true.
+- Anomaly and classifier outputs support human review; they do not establish fraud, misconduct, or
+  causality.
+- Independent operational validation and calibrated multi-case live-model evaluation remain open.
 
-Resource and retention limits can be configured with `MAX_TABULAR_UPLOAD_BYTES`,
-`MAX_TABULAR_ROWS`, `MAX_PDF_UPLOAD_BYTES`, `MAX_TOTAL_PDF_BYTES`,
-`MAX_PDF_PAGES`, `MAX_DOCUMENT_CHUNKS`, `RETRIEVAL_TOP_K`,
-`RETRIEVAL_MAX_DISTANCE`, `SESSION_RETENTION_HOURS`, and
-`SESSION_CLEANUP_INTERVAL_MINUTES`. `SQLITE_DB_PATH` and
-`CHROMA_PERSIST_DIR` define the non-session defaults; browser sessions are
-intentionally stored below `APP_DATA_DIR/sessions/<tenant-id>/<session-id>`
-for isolation, where `<tenant-id>` identifies the authenticated user (or a
-fixed local-development tenant when authentication is not configured; see
-"Authentication" below).
+## Read the engineering evidence
 
-## Quality Checks
+| Topic | Document |
+|---|---|
+| Reviewer-oriented design and residual risks | [Portfolio walkthrough](docs/portfolio-walkthrough.md) |
+| Architecture, lifecycle, and trust boundaries | [System overview](docs/architecture/system-overview.md) |
+| SQL approval state machine | [LangGraph SQL approval](docs/architecture/langgraph-sql-approval.md) |
+| Policy predicate verification | [Policy-to-SQL verification](docs/architecture/policy-sql-predicate-verification.md) |
+| Evaluation cases and baseline policy | [Evaluation guide](docs/governance/evaluation.md) |
+| Audit and telemetry privacy | [Audit and observability](docs/governance/audit-and-observability.md) |
+| Threats, mitigations, and accepted risk | [Threat model](docs/security/threat-model.md) |
+| Release claims and live-model boundary | [Release readiness](docs/operations/release-readiness.md) |
+| API decisions and trade-offs | [ADR index](docs/adr/README.md) |
+| Read-only MCP surface | [MCP server](docs/operations/mcp-server.md) |
 
-```powershell
-& ".\.venv\Scripts\python.exe" -m ruff check .
-& ".\.venv\Scripts\python.exe" -m ruff format --check .
-& ".\.venv\Scripts\python.exe" -m mypy apps config packages scripts src tests
-& ".\.venv\Scripts\python.exe" -m pytest --cov --cov-report=term-missing
-Set-Location apps/web
-npm run lint
-npm run typecheck
-npm run test
-npm run build
-npm run test:e2e
-```
+The MCP server (`python -m apps.mcp`) exposes tenant-fixed, read-only dataset profile, guarded query,
+and document search tools over stdio. It has no write tools and reuses the same SQL and retrieval
+boundaries as the application.
 
-The offline evaluation suite runs under `pytest` and can also be run directly
-(no API key or network needed). It writes a machine-readable JSON report and
-exits non-zero if a safety check fails, a case regresses, or the baseline is out of date:
-
-```powershell
-& ".\.venv\Scripts\python.exe" -m scripts.run_evaluations --output evals/results/latest.json
-```
-
-See [the evaluation guide](docs/governance/evaluation.md) for adding cases and updating the baseline.
-
-CI runs the same Python and frontend checks on pushes and pull requests. The
-frontend job also verifies that its generated client matches the committed
-OpenAPI contract and exercises axe, keyboard, and critical browser journeys. The
-Python quality job regenerates OpenAPI and rejects breaking changes relative to the base branch.
-The container job adds real-stack local-only and isolated deterministic-provider PDF/hybrid/export
-journeys while preserving the CSP guard. A separate security
-job: `pip-audit` against `requirements.lock` (with a documented, reviewed
-exception for four chromadb advisories scoped to its standalone HTTP server,
-which this app never runs) and a `gitleaks` secret scan. Dependabot opens
-weekly update PRs for Python and frontend dependencies and GitHub Actions.
-`requirements.txt` pins direct runtime dependencies; `requirements.lock`
-captures the fully resolved, tested environment.
-
-## Example Questions
+## Repository map
 
 ```text
-Show the top five merchants by total amount.
-What analysis is possible with this dataset?
-Show me the SQL used for the previous question.
-According to the uploaded policy, which transaction types require escalation?
-Which uploaded transactions appear to match the escalation policy?
+apps/web/            React + TypeScript client
+apps/api/            FastAPI service and resource boundary
+apps/mcp/            read-only stdio MCP adapter
+packages/            framework-neutral analytics, retrieval, ports, observability, governance, evals
+src/                 ingestion, storage guards, agents, orchestration, memory, reporting
+evals/v1/            versioned deterministic evaluation fixtures and baseline
+docs/                architecture decisions, operations, governance, security, and evidence
+tests/                Python unit, integration, contract, and configuration tests
 ```
 
-The final question activates the hybrid route when both table data and document
-context are available.
-
-## MCP server
-
-`python -m apps.mcp` exposes one dataset (and optionally its indexed PDFs) to an MCP host over stdio with
-three read-only tools: `get_dataset_profile`, `query_table` (one guarded `SELECT`), and `search_documents`.
-It reuses the same SQL guard and retriever as the API, fixes tenant and data scope in server configuration
-(no tool argument can change them), labels every result as untrusted data with provenance, and has no write
-tools. See [docs/operations/mcp-server.md](docs/operations/mcp-server.md) and
-[ADR 0014](docs/adr/0014-mcp-server.md).
-
-## Authentication
-
-The FastAPI boundary has two explicit identity modes. The default `API_AUTH_MODE=local` uses one
-fixed development tenant. `API_AUTH_MODE=oidc` requires an HTTPS issuer, audience, and JWKS URL and
-requires a signed Bearer JWT on every `/api/v1` request. The API verifies the configured asymmetric
-signature algorithm and the `iss`, `aud`, `sub`, `exp`, and optional time claims before deriving the
-tenant from `sub`; request headers and token tenant claims are never authority. Partial or malformed
-OIDC configuration fails startup instead of falling back to local mode.
-
-Authorization is capability-based and server-owned. Every `/api/v1` operation requires one of
-`workspace:read`, `data:write`, `analysis:run`, `report:export`, or `workspace:admin`. In OIDC mode the
-capabilities come only from the verified token claim named by `OIDC_ROLES_CLAIM` (default `roles`),
-whose values map as `viewer` (read), `analyst` (viewer + upload, query/chat, report/export), and
-`workspace_admin` (analyst + consent and workspace deletion). Unknown, missing, or malformed roles grant
-nothing and receive a 403 `permission_denied`. Local mode explicitly grants every capability to its one
-loopback-only development user; no other mode receives implicit permissions. Headers, query strings, and
-bodies never supply tenant, role, or capability.
-
-Browser transport follows [ADR 0013](docs/adr/0013-browser-authentication-transport.md): a backend
-session in an opaque `__Host-` HttpOnly, Secure, SameSite=Lax cookie (provider tokens are never stored
-or sent to the browser), with `X-CSRF-Token` plus `Origin` (`WEB_ORIGIN`) verification on every
-cookie-authenticated state-changing request, `GET /api/v1/auth/session`, and `POST /api/v1/auth/logout`.
-The API sends no CORS headers; the product is same-origin through the nginx proxy.
-
-Sign-in is an authorization-code + PKCE flow run by the API (`GET /api/v1/auth/login`, then
-`/api/v1/auth/callback`). Configure `OIDC_AUTHORIZATION_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`,
-`OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` (`WEB_ORIGIN` + `/api/v1/auth/callback`), and `WEB_ORIGIN` together;
-partial configuration fails startup, and the optional `OIDC_CLIENT_SECRET` belongs only in your untracked
-environment. The callback verifies `state`, a login-binding cookie, the PKCE verifier, and the ID token's
-signature, issuer, audience, expiry, and nonce, then discards every provider token. API and nginx access
-logs omit query strings so authorization codes never reach logs.
-
-The React client implements sign-in, sign-out, CSRF-token handling, and expired-session recovery.
-Sign-in, sign-out, CSRF rejections, and authorization denials are recorded as privacy-safe audit events (see
-`docs/governance/audit-and-observability.md`). Docker-validated deployment and a live identity-provider check are still open under [issue #9](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/9).
-Keep the packaged web application loopback-only until those slices are complete.
-
-The developer-only Streamlit compatibility surface supports native OIDC login (`st.login()`/`st.user`) for
-gating access and scoping storage per authenticated user. To enable it, copy
-`.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in a
-real identity provider's OAuth client credentials and OIDC discovery URL
-(Google, Microsoft Entra, Auth0, Okta, or any OIDC-compliant provider).
-
-If `.streamlit/secrets.toml` does not exist, the app runs without a login
-wall under a single fixed local-development tenant, matching today's
-single-user local workflow. A sidebar warning makes this mode visible. A
-*malformed* `secrets.toml` (present but invalid) fails loudly instead of
-silently falling back to the unauthenticated mode, so a real misconfiguration
-in a hosted deployment cannot be mistaken for intentional local-dev use.
-
-Each authenticated identity's storage is namespaced under a tenant id derived
-from that identity's stable OIDC `sub` claim, never from anything client-
-supplied, so one signed-in user cannot reach another's workspace. CSRF
-protection and secure session cookies are provided by Streamlit's native
-auth implementation (an Authlib-backed OAuth2 `state` parameter during login
-plus a signed, expiring identity cookie) rather than custom code. A user's
-workspace does not currently persist or share across multiple browser tabs
-or devices — each tab still gets its own ephemeral session within that
-user's tenant.
-
-## Encryption at Rest
-
-Tabular SQLite storage can be encrypted at rest via SQLCipher. Set
-`APP_ENCRYPTION_KEY` to a 64-character hex string (32 bytes; generate one with
-`python -c "import secrets; print(secrets.token_hex(32))"`). Without it, the
-app runs with unencrypted SQLite storage and shows a sidebar warning. A key
-present but not exactly 64 hex characters fails loudly at startup rather than
-silently falling back.
-
-This covers the tabular SQLite database only. The Chroma vector store is not
-encrypted: Chroma manages its own internal storage engine, and embedding
-vectors must remain in plaintext for similarity search to function regardless
-of any field-level encryption of document text or metadata. Vector-store
-encryption is a deferred follow-up, not implemented here.
-
-Stale session directories are identified by a per-session heartbeat file
-(updated on every active render), not by directory modification time, which
-never updates from writes to files inside it. Cleanup runs periodically
-(`SESSION_CLEANUP_INTERVAL_MINUTES`, default 15) rather than only when a new
-browser tab starts, and every removal is recorded in
-`APP_DATA_DIR/cleanup_audit.log`.
-
-## Gemini Data Retention
-
-Before asking any question while Gemini is configured, the chat panel shows a
-one-time consent notice describing what may be sent (question text, table
-schema, sample values, and/or retrieved document excerpts); it must be
-accepted before the chat input is enabled for that session.
-
-For billing-enabled (paid) Gemini API projects, prompts and responses are not
-used to improve Google's products by default, and logs are retained for a
-default maximum of 55 days (configurable down to 7/14/28 days in AI Studio,
-with a Zero Data Retention option for eligible accounts). Free-tier terms
-differ. These are Google's terms, not this project's, and can change — see
-the current policy at
-[ai.google.dev/gemini-api/docs/logs-policy](https://ai.google.dev/gemini-api/docs/logs-policy).
-
-Two settings reduce what is sent regardless of provider terms:
-
-- `GEMINI_EXCLUDE_SAMPLE_VALUES=true` omits real column sample values from
-  SQL-generation prompts (schema and data types are still sent).
-- Text sent to Gemini (SQL sample values, prior-question history, and
-  retrieved document excerpts) passes through best-effort regex-based PII
-  redaction first (`src/utils/pii_redaction.py`) — emails, SSN-like numbers,
-  phone-like numbers, and Luhn-valid card numbers are replaced with
-  `[REDACTED_*]` markers. This is defense-in-depth, not a guarantee: it will
-  not catch names, addresses, or other free-text PII.
-
-`LOCAL_ONLY_MODE=true` is the only complete guarantee that content stays on this machine: it
-withholds **every hosted provider's credentials** (Gemini, Anthropic, and any non-local Ollama endpoint) at client
-construction, even if keys are set, so no SQL generation, document RAG, hybrid query, or model-based routing
-can reach a hosted service. By default that leaves deterministic analytics, the dashboard, and reports only.
-If you configure a **local model** (`LLM_PROVIDERS=ollama`, `OLLAMA_MODEL`), model-backed questions keep working
-in local-only mode, but only when the endpoint is loopback (`localhost`, `127.0.0.0/8`, `::1`) or a host you
-explicitly declare container-internal in `OLLAMA_TRUSTED_HOSTS`; an Ollama URL pointing anywhere else is
-treated as a hosted recipient and is withheld. The application cannot verify what a declared host really is, so
-`OLLAMA_TRUSTED_HOSTS` is an operator assertion.
-
-Model providers are chosen by server configuration only (`LLM_PROVIDERS`, an ordered fallback chain such as
-`gemini,anthropic`); requests can never select one. Each hosted provider in the chain receives the same
-redacted prompts, and consent names every hosted provider (the API reports them as `data_recipients`).
-Adding a provider invalidates earlier consent until the user accepts again.
-
-By default, server logs record only the route, elapsed time, and
-question/SQL length for each answered question — never the raw question or
-generated SQL text. Set `DEBUG_LOG_RAW_CONTENT=true` to additionally log raw
-content at `DEBUG` level for local troubleshooting; leave it unset in any
-shared or hosted deployment. It affects only the orchestrator's debug log; the
-API's structured telemetry and audit events never contain raw content
-regardless of this setting. Its risks are described in
-[audit and observability behavior](docs/governance/audit-and-observability.md#debug_log_raw_content).
-
-The same privacy-safe structured logging covers retrieval rejection counts,
-LLM failures and query timeouts (each with a correlation ID, see "Data and
-Security Boundaries" below), storage usage in bytes, and cleanup deletion
-failures — all as counts and identifiers, never question or document
-content. The FastAPI service additionally writes one JSON telemetry line per
-request and workflow step (correlated by `X-Request-ID`) and an append-only
-audit file per tenant under `APP_DATA_DIR/audit/`. There is no metrics exporter
-(e.g. Prometheus) or tracing backend; these are plain log lines and files
-intended for a log-based pipeline if one is available in your deployment.
-
-## Data and Security Boundaries
-
-- Uploaded table and vector data are isolated under a per-tenant, per-session
-  directory (see "Authentication" above).
-- Removing an upload clears its derived state; **Reset session data** clears the
-  complete current workspace.
-- SQLite is opened read-only for user queries and constrained to the current
-  session table and columns.
-- Query results are capped in SQL and execution is interrupted after a deadline.
-- Upload size, row, PDF page, and document chunk limits protect local resources
-  and are enforced before the corresponding parsing work happens.
-- CSV/Excel downloads of query results neutralize values beginning with `=`,
-  `+`, `-`, or `@` to prevent spreadsheet-formula injection when opened.
-- Unexpected internal errors (storage, PDF report generation, ad-hoc SQL, and
-  Gemini request failures) are shown to users as a generic message plus a
-  correlation ID; full exception detail is logged server-side only.
-- A failed tabular upload or PDF indexing attempt leaves the previous
-  successfully loaded data usable and offers a Retry button, rather than
-  silently discarding it. PDF indexing builds into a staging collection and
-  only swaps it in after every chunk succeeds, so a failure never leaves a
-  partial document index.
-- Document retrieval rejects candidates beyond `RETRIEVAL_MAX_DISTANCE`
-  (default 0.7, empirically evaluated) rather than always returning the
-  nearest chunks regardless of relevance, deduplicates near-identical
-  overlapping chunks, and reports how many candidates were considered versus
-  rejected as evidence for a "no relevant information" answer.
-- RAG answers are checked after generation: a citation to a source number
-  outside the retrieved set, or a quoted passage that doesn't actually
-  appear in the retrieved text, is flagged in the answer as unverified
-  rather than trusted at face value. This is a structural check (citation
-  numbers, substring matches), not a semantic proof that every claim is
-  correct. The hybrid route's document-to-criteria extraction only accepts
-  an allowlisted set of keys/types within a size limit, and drops any string
-  value that doesn't trace back to the retrieved document text — defense
-  against a document trying to inject extra instructions or criteria that
-  aren't actually stated in it. The hybrid route additionally checks whether
-  the generated SQL literally references at least one of the extracted
-  criteria values, flagging it when it doesn't — a provenance check (does
-  the SQL mention the criteria at all), not a semantic proof that the SQL's
-  logic is correct.
-- Chat history is capped at `MAX_CHAT_MESSAGES` (default 50); messages beyond
-  `MAX_CHAT_DATAFRAMES_RETAINED` (default 10) keep their text but drop the
-  full result DataFrame, bounding memory growth in long sessions.
-- A schema-mapping suggestion below 50% confidence (e.g., an unnamed numeric
-  column guessed as "amount") defaults to "Not mapped" rather than being
-  applied automatically; using it requires explicitly selecting it in the
-  schema review panel, and a warning is shown while it's in use.
-- Anomaly detection reports model-flagged and rule-flagged rows separately
-  (a row can be flagged by either or both) along with the model's anomaly
-  score distribution, rather than presenting a single combined flag.
-- Currency, percentage, and date-format normalization is lossy (the original
-  string formatting isn't retained), so a warning is shown per affected
-  column: which currency symbol was removed, mixed currency symbols in one
-  column, a percentage-to-fraction conversion, or a day/month order that
-  couldn't be determined from the data. This is disclosure, not full
-  reversibility — locale/timezone selection and a real parsing preview are
-  not implemented.
-- `.env`, session databases, vector indexes, reports, and test artifacts are
-  excluded from Git.
-
-Gemini receives the user question and schema information for SQL generation. For
-document questions, the retrieved PDF excerpts are also sent to Gemini. Do not
-upload sensitive material unless this data flow is acceptable for your use case.
-
-This project supports optional authentication and tabular-data encryption at
-rest (see "Authentication" and "Encryption at Rest" above) but does not yet
-provide Chroma vector-store encryption or enterprise retention controls. Add
-those controls before hosting it for untrusted users.
-
-## Repository Layout
-
-- `app.py`: Streamlit entry point and session initialization.
-- `apps/api/`: versioned FastAPI application and HTTP contracts.
-- `apps/web/`: React and TypeScript web client for the migrated vertical slice.
-- `src/ui/`: upload, dashboard, report, and chat interfaces.
-- `src/profiling/`: profiling, schema mapping, and capability readiness.
-- `src/analytics/`: deterministic analytics and anomaly detection.
-- `src/storage/`: per-session SQLite persistence and guarded querying.
-- `src/documents/`: page-aware chunking, embeddings, retrieval, and ChromaDB.
-- `src/agents/`: SQL, document-answering, and report workflows.
-- `src/orchestration/`: LangGraph routing and hybrid coordination.
-- `src/memory/`: state lifecycle and conversational memory.
-- `packages/analytics/`: framework-neutral tabular workflow commands and service.
-- `packages/connectors/`: provider, identity, audit, and persistence ports.
-- `packages/retrieval/`: framework-neutral PDF indexing application service.
-- `packages/observability/`: request-ID context, allowlist telemetry, error categories.
-- `packages/governance/`: audit vocabulary, sanitization, and append-only audit sinks.
-- `packages/evaluation/`: deterministic evaluation harness, gates, and baseline tooling.
-- `evals/`: versioned synthetic evaluation fixtures, thresholds, and baseline.
-- `docs/governance/`: responsible-AI, evaluation, and audit/observability documentation.
-- `docs/operations/`: local container guide and incident/debugging runbook.
-- `Dockerfile.api`, `Dockerfile.web`, `compose.yaml`, `docker/nginx/`: local container topology.
-- `ops/`: audit-log backup and restore scripts.
-- `openapi/`: generated, reproducibility-checked API contract.
-- `tests/`: unit and Streamlit integration tests.
-
-## Current Limitations
-
-- Deliberate non-goals and their revisit triggers are recorded in [ADR 0012](docs/adr/0012-deliberate-non-goals.md).
-- Schema mapping remains heuristic until confirmed by the user.
-- Retrieval relevance is model- and document-dependent.
-- Hybrid policy-to-SQL translation must be reviewed before operational use.
-- Scanned PDFs are detected and rejected with a specific message asking for
-  OCR before upload; OCR itself is not performed by this app.
-- PDF reports use a bundled Unicode font covering Latin Extended, Greek, and
-  Cyrillic scripts, but not CJK, Arabic, or other non-alphabetic scripts.
-- Gemini availability, quotas, and responses are external dependencies.
-- The evaluation suite checks safeguards against scripted model behavior; it does
-  not measure real-model accuracy or PII-redaction recall on real data.
-- Unless `DURABLE_METADATA=true` (ADR 0022), API resource metadata is process-local: restarting the API
-  loses workspaces. With it enabled, the browser restores them after a reload or restart; a pending
-  SQL approval is still cancelled safely by a restart because its checkpoint is in memory.
-- The browser journeys in `apps/web/e2e/real` use a scripted model, not a live one, and ran in Chromium on
-  one machine. Real-model behavior, Docker, and screen-reader use are unverified.
-- Audit files are tamper-evident on one node but are not immutable, rotated, or
-  access-controlled beyond filesystem permissions.
-- The container topology supports exactly one API container, has no authentication (the
-  web port is loopback-only), and does not preserve workspaces across restarts.
-- Streamlit remains in the repository only as the developer compatibility/reference surface defined
-  by ADR 0011; the API authentication, persistence, and retention conditions for retirement are open.
+Licensed under the [MIT License](LICENSE).
