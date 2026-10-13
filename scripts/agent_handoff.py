@@ -8,9 +8,11 @@ script records live Git state deterministically; the agent only fills the narrat
     python -m scripts.agent_handoff resume --latest
 
 ``resume`` never trusts the file: it compares the recorded branch, commit, and dirty files with
-the live repository and prints ``STATUS: CURRENT | STALE | DIVERGED``. It runs only local ``git``
-commands and reads only files inside ``work/handoffs/``. Exit status: 0 success, 1 a ``check``
-problem, 2 a usage or environment error.
+the live repository and prints ``STATUS: CURRENT | STALE | DIVERGED``. It runs only read-only local
+``git`` subcommands (an allowlist) and reads only files inside ``work/handoffs/``. Each git call
+sets ``safe.directory`` to this repository's exact root for that invocation only, because a
+sandbox account that does not own the checkout would otherwise be refused; no Git configuration is
+ever modified. Exit status: 0 success, 1 a ``check`` problem, 2 a usage or environment error.
 """
 
 from __future__ import annotations
@@ -67,18 +69,60 @@ class GitState:
     dirty_digest: str = ""
 
 
+# The only Git subcommands this module may run. All are read-only; ``_git_command`` refuses the
+# rest, so the ownership exception below can never reach a write or destructive operation.
+READ_ONLY_GIT = frozenset(
+    {"rev-parse", "status", "diff", "log", "merge-base", "cat-file", "check-ignore"}
+)
+
+
+def _trusted_root(root: Path) -> str:
+    """Return the exact, validated repository root used for the ownership exception.
+
+    ``root`` is the helper's own location (or the invoking user's ``--root`` argument), never a
+    path taken from GitHub text. It must be an existing directory with a ``.git`` entry and no
+    glob characters, so wildcard trust is impossible.
+    """
+    resolved = root.resolve()
+    posix = resolved.as_posix()
+    if any(char in posix for char in "*?[]\r\n"):
+        raise RuntimeError("repository root contains characters that are not allowed")
+    if not resolved.is_dir() or not (resolved / ".git").exists():
+        raise RuntimeError("repository root is not a Git working tree root")
+    return posix
+
+
+def _git_command(root: Path, *args: str) -> list[str]:
+    """Build a read-only git command for ``root``.
+
+    ``safe.directory`` is set per invocation to this exact root only: a Codex sandbox account
+    does not own the checkout, so Git otherwise refuses ("dubious ownership"). Global and system
+    config are never modified. ``core.fsmonitor`` is disabled so a repository config cannot run
+    a program during ``status``.
+    """
+    if not args or args[0] not in READ_ONLY_GIT:
+        raise ValueError(f"git subcommand not allowed here: {args[:1]}")
+    return [
+        "git",
+        "-c",
+        f"safe.directory={_trusted_root(root)}",
+        "-c",
+        "core.fsmonitor=false",
+        *args,
+    ]
+
+
 def _dirty_digest(root: Path, names: list[str]) -> str:
     """Short hash over every changed path name and the tracked diff; stores no content."""
-    diff = subprocess.run(
-        ["git", "diff", "HEAD", "--binary", "--no-ext-diff"], cwd=root, capture_output=True
-    ).stdout
+    command = _git_command(root, "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv")
+    diff = subprocess.run(command, cwd=root, capture_output=True).stdout
     digest = hashlib.sha256("\n".join(sorted(names)).encode() + b"\0" + diff)
     return digest.hexdigest()[:16]
 
 
 def _git(root: Path, *args: str) -> tuple[int, str]:
     completed = subprocess.run(
-        ["git", *args],
+        _git_command(root, *args),
         cwd=root,
         capture_output=True,
         text=True,
@@ -299,7 +343,13 @@ def evaluate_resume(root: Path, text: str, now: datetime | None = None) -> Resum
         stale = True
         raw_files = recorded.get("dirty_files")
         recorded_dirty = {str(i) for i in raw_files} if isinstance(raw_files, list) else set()
-        complete = live.dirty_count <= MAX_DIRTY_LISTED and len(recorded_dirty) <= MAX_DIRTY_LISTED
+        recorded_count = recorded.get("dirty_count")
+        # Name lists are capped, so only trust them when neither side was truncated.
+        complete = (
+            live.dirty_count <= MAX_DIRTY_LISTED
+            and isinstance(recorded_count, int)
+            and recorded_count <= MAX_DIRTY_LISTED
+        )
         new_dirty = sorted(set(live.dirty_files) - recorded_dirty)
         gone_dirty = sorted(recorded_dirty - set(live.dirty_files))
         if complete and new_dirty:
@@ -358,13 +408,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         text = path.read_text(encoding="utf-8", errors="replace")[: MAX_BYTES * 2]
         _print_resume(evaluate_resume(root, text), text)
         return 0
-    except (
-        ValueError,
-        RuntimeError,
-        FileNotFoundError,
-        FileExistsError,
-        json.JSONDecodeError,
-    ) as error:
+    except PermissionError as error:
+        # Typical in a read-only sandbox: report it plainly instead of a traceback.
+        print(f"error: not permitted to write or read {error.filename!r} here", file=sys.stderr)
+        return 2
+    except (ValueError, RuntimeError, OSError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 

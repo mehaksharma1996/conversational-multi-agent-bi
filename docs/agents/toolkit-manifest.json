@@ -114,7 +114,7 @@
       "local_files": {
         "agents/openai.yaml": "b1b1321285e6120ec46e744381761025e0a8e7e7c7b1ec3587497c1cd1eff130",
         "LICENSE.txt": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
-        "SKILL.md": "9f3c9aec27bff23c7a7f60d7431be9cd34f4a298314fda1aaf03f87c73f77aff"
+        "SKILL.md": "3f1d327dd8ba9dbfd38329f55b169aa523cfd8559abca8fc38d611308ababaac"
       }
     },
     "issue-to-pr": {
@@ -151,7 +151,7 @@
       },
       "local_files": {
         "agents/openai.yaml": "7d859831b5766da5f8affc3590bdf8d910e4c64010b0954212441f19439c373d",
-        "SKILL.md": "33069d29374e51fb5ea45f231d4fdb96d22e019df0c1b73915d7a507a9f2215a"
+        "SKILL.md": "12b5e5d1099428165d6c1199bded32a1c088321f00bfd0cafc3621f31016cc02"
       }
     },
     "grill-me": {

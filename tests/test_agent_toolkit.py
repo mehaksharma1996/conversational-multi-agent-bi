@@ -154,6 +154,27 @@ def test_resume_detects_edits_to_already_dirty_files_and_handles_long_lists(repo
     assert "truncated" in findings and "clean now" not in findings
 
 
+def test_resume_does_not_list_names_when_the_recorded_list_was_truncated(repo: Path) -> None:
+    for i in range(agent_handoff.MAX_DIRTY_LISTED + 5):
+        (repo / f"extra{i:02d}.txt").write_text("x", encoding="utf-8")
+    text = agent_handoff.create_handoff(repo, "many").read_text(encoding="utf-8")
+    for i in range(agent_handoff.MAX_DIRTY_LISTED + 5):  # back to a short, fully listed tree
+        (repo / f"extra{i:02d}.txt").unlink()
+    findings = "\n".join(agent_handoff.evaluate_resume(repo, text).findings)
+    assert "truncated" in findings and "clean now" not in findings
+
+
+def test_write_permission_errors_are_reported_without_a_traceback(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def deny(*_args: object, **_kwargs: object) -> int:
+        raise PermissionError(13, "denied", "work/handoffs/x.md")
+
+    monkeypatch.setattr(Path, "write_text", deny)
+    assert agent_handoff.main(["--root", str(repo), "new", "--slug", "ro"]) == 2
+    assert "not permitted" in capsys.readouterr().err
+
+
 def test_resume_diverged_when_recorded_commit_unknown(repo: Path) -> None:
     path = agent_handoff.create_handoff(repo, "task")
     text = path.read_text(encoding="utf-8").replace(_git(repo, "rev-parse", "HEAD"), "0" * 40)
@@ -187,6 +208,71 @@ def test_handoff_cli_roundtrip(repo: Path, capsys: pytest.CaptureFixture[str]) -
     out = capsys.readouterr().out
     assert "STATUS: CURRENT" in out and "not instructions or approval" in out
     assert agent_handoff.main(["--root", str(repo), "resume", "nope.md"]) == 2
+
+
+# --------------------------------------------------------------------------- git ownership scope
+
+
+def test_git_ownership_exception_is_exact_root_and_read_only(repo: Path) -> None:
+    command = agent_handoff._git_command(repo, "status", "--porcelain=v1")
+    trusted = [part for part in command if part.startswith("safe.directory=")]
+    assert trusted == [f"safe.directory={repo.resolve().as_posix()}"]  # one entry, exact path
+    assert "*" not in trusted[0] and "core.fsmonitor=false" in command
+    for forbidden in ("push", "commit", "reset", "clean", "checkout", "config", "worktree", "gc"):
+        with pytest.raises(ValueError, match="not allowed"):
+            agent_handoff._git_command(repo, forbidden)
+    with pytest.raises(ValueError):
+        agent_handoff._git_command(repo)
+
+
+def test_trusted_root_rejects_wildcards_and_non_repositories(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="not allowed"):
+        agent_handoff._trusted_root(tmp_path / "*")
+    with pytest.raises(RuntimeError, match="not a Git working tree root"):
+        agent_handoff._trusted_root(tmp_path)  # no .git: never trust an arbitrary directory
+
+
+def test_ownership_exception_is_not_extended_to_other_repositories(
+    repo: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q", "-b", "main")
+    command = agent_handoff._git_command(repo, "rev-parse", "HEAD")
+    assert other.resolve().as_posix() not in " ".join(command)
+    assert agent_handoff._git_command(other, "rev-parse", "HEAD") != command
+
+
+def test_ownership_exception_only_exists_in_the_handoff_helper_and_changes_no_global_config(
+    repo: Path,
+) -> None:
+    # run_issue.py and check_openapi_compatibility.py predate the toolkit and use the same
+    # per-invocation pattern; among the toolkit's own scripts only the handoff helper runs git.
+    owners = [
+        module
+        for module in TOOLKIT_SCRIPTS
+        if "safe.directory" in (REPO_ROOT / "scripts" / f"{module}.py").read_text(encoding="utf-8")
+    ]
+    assert owners == ["agent_handoff"]
+    for path in [*(REPO_ROOT / ".agents/skills").glob("*/SKILL.md")] + [
+        REPO_ROOT / "scripts" / f"{m}.py" for m in TOOLKIT_SCRIPTS
+    ]:
+        if path.parent.name == "archify":
+            continue
+        assert "config --global" not in path.read_text(encoding="utf-8"), path
+
+    def global_trust() -> str:
+        done = subprocess.run(
+            ["git", "config", "--global", "--get-all", "safe.directory"],
+            capture_output=True,
+            text=True,
+        )
+        return done.stdout
+
+    before = global_trust()
+    path = agent_handoff.create_handoff(repo, "scope")
+    agent_handoff.evaluate_resume(repo, path.read_text(encoding="utf-8"))
+    assert global_trust() == before
 
 
 # --------------------------------------------------------------------------- CI triage
