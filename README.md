@@ -16,11 +16,13 @@ Models interpret language; deterministic code owns access control, query safety,
 approval boundaries, and calculations.
 
 <p align="center">
-  <img src="docs/assets/demo/07-hybrid-policy-answer.png" alt="Hybrid policy answer showing the verified SQL and a deterministic result of 13 matching transactions" width="900">
+  <img src="docs/assets/portfolio/06-approved-hybrid-result.png" alt="Hybrid policy answer showing the verified SQL and a deterministic result of 13 matching transactions" width="900">
 </p>
 
 *Authentic capture from the automated browser journey. The journey uses a deterministic scripted
 provider, so it demonstrates the product workflow and guardrails, not live-model accuracy.*
+
+[View the complete six-screenshot portfolio sequence.](docs/portfolio-screenshots.md)
 
 ## A business question, traced end to end
 
