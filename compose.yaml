@@ -8,9 +8,11 @@
 # Configuration comes from the environment or a local .env file (never baked into an
 # image). Nothing here assumes a hosting platform. See docs/operations/local-containers.md.
 #
-# SECURITY: local mode uses a fixed development identity. OIDC bearer verification exists,
-# but browser login, roles, CSRF/CORS, and logout are not complete, so the web port remains
-# loopback-only. Do not expose it to a network until issue #9 is complete.
+# SECURITY: local mode uses one fixed development identity with every capability. OIDC Bearer
+# verification, browser authorization-code + PKCE login, HttpOnly sessions, server-owned roles,
+# CSRF/Origin checks, logout, and auth audit events are implemented and tested. A live IdP and a
+# public deployment are not validated, so this topology remains loopback-only. Do not expose it
+# without TLS, deployment-specific identity testing, abuse/cost controls, and an operations review.
 
 name: conversational-bi
 

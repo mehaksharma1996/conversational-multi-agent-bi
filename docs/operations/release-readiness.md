@@ -1,21 +1,24 @@
 # Release readiness and live-model evaluation
 
-Status as of 2026-10-12 on branch `demo/grounded-bi-experience`. This page separates what has been
-verified on this machine from what has not. One controlled, free-tier Gemini hybrid case was run and
-its report is preserved under `evals/results/`; no additional provider request was made during
-release preparation.
+Current portfolio status, reconciled with merged `main` at `8d0360ad` on 2026-10-13. This page
+separates deterministic, scripted-provider, live-model, container-CI, and deployment evidence. The
+controlled free-tier Gemini material and the final integration note are retained as dated historical
+records; no additional provider request was made for this documentation update.
 
 ## What is and is not verified
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Deterministic evaluation gate | Verified locally | `python -m scripts.run_evaluations`, see the project report for exact counts |
-| Real-stack browser journeys with the **scripted** provider | Verified locally | `npm run test:e2e:real`, 20 Chromium journeys, including the mapper defaults |
+| Deterministic evaluation gate | Verified | 85 versioned cases in `evals/v1/baseline.json`; scripted providers exercise the real guards |
+| Real-stack browser journeys with the **scripted** provider | Verified | `npm run test:e2e:real`, 20 Chromium journeys, including the mapper defaults |
 | Controlled live Gemini hybrid case | Verified for one run | Four successful HTTP attempts; see the preserved report and evidence below |
 | Live Gemini answers to the full demo plan | **NOT RUN** | Only the controlled hybrid case was run; one result is not a rate |
-| Container build, nginx, compose smoke, Docker-only Playwright | **BLOCKED locally** | Docker is not installed on this machine; CI's `containers` job is the only check of these paths |
-| Image vulnerability scan | **BLOCKED locally** | Runs in CI's `containers` job only |
-| Public hosted demo | **NOT READY** | See the assessment below |
+| Container build, nginx, Compose smoke, Docker-only Playwright | Verified in Linux CI; not run on the assessment host | Merged-main run `38340160017` passed the `containers` job; this is not Docker Desktop evidence |
+| Image vulnerability scan and SBOM generation | Verified in Linux CI | The same `containers` job generated SBOMs and passed the configured Trivy gates |
+| OIDC, browser sessions, roles, CSRF, and auth audit | Verified with deterministic tests | No live identity-provider integration or public deployment has been exercised |
+| Durable workspace recovery | Verified for one local API process | Compose enables ADR 0022 metadata/content/index recovery; this is not horizontal scale |
+| Prometheus metrics and OTLP traces | Implemented and tested, opt-in | No collector, scraper, dashboard, alert delivery, or hosted monitoring stack is bundled |
+| Public hosted demo | **NOT DEPLOYED** | See the assessment below |
 
 A scripted-provider run proves the application handles correct model behaviour. It is never evidence
 that a real model produces that behaviour.
@@ -125,15 +128,14 @@ low quota.
 
 ## Containers
 
-Docker is not installed on the machine used for this assessment, so image builds, nginx behaviour,
-the compose smoke test, and the Docker-specific browser journeys were **not run locally**. What was
-checked statically: `tests/test_container_config.py` and `tests/test_web_demo_assets.py` pass; the
-web image still uses `nginxinc/nginx-unprivileged:1.30-alpine-slim` (the PR #99 fix for
-CVE-2026-4775) and a digest-pinned Node build stage; the nginx config sends a restrictive
-Content-Security-Policy, allows 60 MB bodies in front of the API's exact limits, and serves
-`/demo/*` from static files. CI's `containers` job builds both images, enforces size budgets, runs
-`scripts/compose_smoke.py`, and its `security` job scans dependencies; those are the independent
-checks of these paths.
+Docker was not installed on the machine used for the original demo-branch assessment, so those paths
+were not run there. They are nevertheless verified in Linux CI: merged-main run
+[`38340160017`](https://github.com/mehaksharma1996/conversational-multi-agent-bi/actions/runs/38340160017)
+passed the `containers` job, which builds both digest-pinned, non-root images; enforces size budgets;
+generates SBOMs; applies Trivy gates; starts the health-checked Compose topology; exercises hardening,
+restart recovery, audit backup/restore, nginx/CSP, browser journeys, and the test-only provider stack;
+then tears the stack down. This is strong container evidence, but it is not a local Docker Desktop
+run, a live-identity test, or a deployment.
 
 ## Public deployment assessment
 
@@ -141,13 +143,15 @@ The repository is a local application. The project's own documents say to keep i
 ([threat model](../security/threat-model.md), [local containers](local-containers.md)). Concrete
 blockers for an externally reachable demo:
 
-1. **No user authentication in the shipped stack.** `API_AUTH_MODE=local` gives every visitor the
-   same fixed tenant with all capabilities. Browser sign-in (issue #9, parts d to f) is not
-   delivered, so there is no demo-account isolation: visitors would share one tenant.
+1. **The default stack is intentionally not public.** `API_AUTH_MODE=local` gives every visitor the
+   same fixed tenant with all capabilities. OIDC Bearer verification, authorization-code + PKCE
+   browser login, HttpOnly sessions, CSRF/Origin checks, roles/capabilities, and auth audit events are
+   implemented and tested, but no live IdP or public-hosting configuration has been validated.
 2. **Anyone could spend your model key.** Rate limits are per process and generous by default
    (120 messages per minute), and there is no per-visitor quota or cost cap.
-3. **State on ephemeral hosts.** Workspaces, audit logs, and vectors live on disk. A host with an
-   ephemeral filesystem loses them on restart, which defeats workspace recovery.
+3. **Hosted durability is unsolved.** Workspaces, audit logs, and vectors are durable on the local
+   single-node volumes, with tested recovery and backup/restore. An ephemeral host still loses them,
+   and the repository does not implement a coordinated multi-process store.
 4. **Vector store is unencrypted** under a documented waiver that expires 2027-01-31.
 5. **No HSTS header** in the nginx config; TLS termination is the host's job.
 6. **Uploads are user-controlled files** processed by the server; the limits exist but no
@@ -166,7 +170,12 @@ blockers for an externally reachable demo:
 No free service has been shown to have enough resources for this application. Nothing has been
 deployed or purchased.
 
-## Release integration
+## Historical release integration note
+
+The following bullets record the state and merge advice from the original
+`demo/grounded-bi-experience` assessment. They are retained for provenance and are **not current
+instructions**: PRs #97, #99, #100, and #101 are now represented in merged `main`, whose audited tip
+for this checkpoint is `8d0360ad`.
 
 - The branch is based on the head of PR #99 (`ccf5a2c`), so it **contains that CVE fix**. Merge
   #99 first; the shared commit then drops out of this branch's diff.

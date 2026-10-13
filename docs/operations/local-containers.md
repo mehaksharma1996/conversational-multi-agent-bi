@@ -1,7 +1,8 @@
 # Running the workbench with Docker Compose
 
-Everything runs locally; nothing here assumes a hosting provider. Decisions and the
-restart-persistence waiver are recorded in [ADR 0010](../adr/0010-local-container-release.md).
+Everything runs locally; nothing here assumes a hosting provider. The original container decision is
+recorded in [ADR 0010](../adr/0010-local-container-release.md); its workspace-persistence waiver was
+closed for single-node resources by [ADR 0022](../adr/0022-durable-workspace-metadata.md).
 
 ## Requirements
 
@@ -44,9 +45,10 @@ Capabilities come only from the verified `OIDC_ROLES_CLAIM` roles (`viewer`, `an
 `workspace_admin`). API and nginx access logs record paths without query strings so authorization
 codes never reach logs.
 
-Compose still publishes the web port on `127.0.0.1` only. Do not change the mapping to `0.0.0.0` or
-put the service on a shared network until the remaining issue #9 work (authentication audit events
-and a Docker-validated stack) is complete.
+Compose still publishes the web port on `127.0.0.1` only. Authentication audit events and the local
+Docker stack are tested, but no live identity provider or public deployment has been validated. Do
+not change the mapping to `0.0.0.0` or put the service on a shared network without TLS,
+deployment-specific identity testing, anti-abuse and model-cost controls, and an operations review.
 
 Change the port with `WEB_PORT` (default `8080`).
 
@@ -202,9 +204,11 @@ docker compose up -d --wait
 python scripts/compose_smoke.py --compose --expect-local-only   # optional confidence check
 ```
 
-- No data migration is required: workspace state is not durable, and the audit record format is
-  unchanged (`verify_audit` confirms the chain).
-- Restarting the API ends active workspaces; warn users first.
+- The API applies forward-only, checksummed metadata migrations at startup. Back up workspace and
+  audit state before upgrading; a database written by a newer build is refused rather than guessed
+  at. See [migration and rollback](migration-and-rollback.md).
+- Restarting the API recovers durable workspace resources. In-flight jobs do not recover, and any
+  pending SQL approval is marked rejected so no query can run unexpectedly after restart.
 - **Re-pinning base images.** Dockerfiles pin base images by digest. To move to a newer
   base, resolve the tag's new digest (for example
   `docker buildx imagetools inspect python:3.12-slim-bookworm`), update the `ARG ..._IMAGE=` line in
@@ -253,7 +257,7 @@ emit the API's audit events. Its disposition is governed by [ADR 0009](../adr/00
 | UI shows "service not ready" (503) | The API cannot write to `/data` or `/audit`. Check disk space and volume health. |
 | PDF upload fails with an embedding/model error | The model could not download. Check network or proxy settings, or prefetch it (see "Offline use"). |
 | PDF report has no chart images | Chart export needs a headless Chrome that the image deliberately does not include; reports still contain all tables and text. |
-| Everything is gone after a restart | Expected: workspace state is not durable (ADR 0010). Audit is preserved. |
+| A workspace is missing after restart | Check startup logs for checksum failures, expired retention, or metadata quarantine. With Compose, `DURABLE_METADATA=true`; ordinary workspace state should recover under ADR 0022. Pending approvals and jobs intentionally do not. |
 | Permission errors on Linux bind mounts | The compose file uses named volumes on purpose; if you switch to bind mounts, `chown 10001:10001` the host directories. |
 | Very slow analysis or out-of-memory kills | Give Docker at least 4 GB; reduce `MAX_TABULAR_ROWS` and upload sizes. |
 
@@ -263,7 +267,11 @@ emit the API's audit events. Its disposition is governed by [ADR 0009](../adr/00
   jobs). Run exactly one API container.
 - Conversation content is stored in each workspace's `content.db`; it is plain SQLite unless
   `APP_ENCRYPTION_KEY` is set, and changing that key makes earlier encrypted content unreadable.
-- No user authentication; loopback only.
-- No worker, telemetry profile, image scanning, or SBOM yet (see ADR 0010 follow-ups).
+- OIDC API and browser authentication, sessions, CSRF/Origin checks, and role capabilities are
+  implemented and tested, but live-IdP and public-hosting validation are not; keep the stack
+  loopback-only.
+- Jobs run in-process and do not survive restart. Prometheus metrics and OTLP trace export are
+  implemented but no collector/scraper/dashboard profile is bundled. CI generates SBOMs and scans
+  both images; it is not a deployed monitoring or supply-chain service.
 - Compose and the smoke test were validated in CI on Linux; other Docker hosts (Docker Desktop on
   Windows/macOS) use the same images but are not part of CI.
