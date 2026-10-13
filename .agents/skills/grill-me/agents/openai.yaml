@@ -1,0 +1,5 @@
+interface:
+  display_name: "Grill Me"
+  short_description: "Sharpen a plan through 1-3 questions per round"
+policy:
+  allow_implicit_invocation: false

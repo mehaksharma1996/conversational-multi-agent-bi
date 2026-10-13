@@ -1,0 +1,5 @@
+interface:
+  display_name: "Fix CI (diagnose)"
+  short_description: "Read-only triage of a failing GitHub Actions PR or run"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Issue to PR"
+  short_description: "Read-only issue investigation, then approved runner-based implementation"
+policy:
+  allow_implicit_invocation: false

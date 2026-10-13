@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "description": "Provenance, permissions, and local file hashes for the developer agent toolkit. Canonical skills live in .agents/skills/ and are mirrored to .claude/skills/ by scripts/sync_agent_skills.py. 'upstream.files' are SHA-256 of the exact reviewed upstream blobs at the pinned commit; 'local_files' are SHA-256 of the files in this repository (LF-normalised text).",
+  "install_method": "Reviewed files vendored by hand from the pinned commits via the GitHub contents API (no skills.sh installer, no npx, no third-party script executed).",
+  "skills": {
+    "handoff": {
+      "kind": "adapted-upstream",
+      "invocation": "explicit",
+      "publisher": "Matt Pocock",
+      "upstream": {
+        "repo": "https://github.com/mattpocock/skills",
+        "commit": "49dd158d1076134a641b33efb035946536778336",
+        "license": "MIT",
+        "files": {
+          "skills/productivity/handoff/SKILL.md": "4cbb043950dad2ffd3662ff1a5a0b51ae676004b5cae10e3787e8ee7a4ee69d3",
+          "skills/productivity/handoff/agents/openai.yaml": "5c479fd562c691851690e8b18c8501045bef0943c10743d636b2fae26add1d28",
+          "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5"
+        }
+      },
+      "local_modifications": "Output moved from the OS temp dir to git-ignored work/handoffs/; Git state recorded by scripts/agent_handoff.py; required sections; size and secret validation.",
+      "dependencies": [
+        "scripts/agent_handoff.py",
+        "scripts/agent_text.py"
+      ],
+      "permissions": {
+        "reads": [
+          "git metadata of this repository"
+        ],
+        "writes": [
+          "work/handoffs/*.md (git-ignored)"
+        ],
+        "commands": [
+          "git rev-parse|status|check-ignore"
+        ],
+        "github_scopes": [],
+        "network": []
+      },
+      "local_files": {
+        "agents/openai.yaml": "dc7241a823b85600de63391a98809d89f3262ade50b2d8fa74c313df42ebbf6d",
+        "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "SKILL.md": "08ab9c8f760a965175b08a44fcd4f6780e4cee6ad76ecdb2980e94630bd17e54"
+      }
+    },
+    "resume": {
+      "kind": "custom",
+      "invocation": "explicit",
+      "publisher": "this repository",
+      "upstream": null,
+      "local_modifications": "n/a (original)",
+      "dependencies": [
+        "scripts/agent_handoff.py"
+      ],
+      "permissions": {
+        "reads": [
+          "work/handoffs/*.md",
+          "git metadata of this repository"
+        ],
+        "writes": [],
+        "commands": [
+          "git rev-parse|status|cat-file|merge-base|log"
+        ],
+        "github_scopes": [],
+        "network": []
+      },
+      "local_files": {
+        "agents/openai.yaml": "ddd3775dda2e199ec6b14c0645fb8154e696663d519d641d09bd1c69c8401df2",
+        "SKILL.md": "15eb1e2e4a51e51ac7a4214fdc5fa9cd57d82893c9331b060c4bbddf6a46fa2b"
+      }
+    },
+    "fix-ci": {
+      "kind": "adapted-upstream",
+      "invocation": "explicit",
+      "publisher": "OpenAI",
+      "upstream": {
+        "repo": "https://github.com/openai/skills",
+        "path": "skills/.curated/gh-fix-ci",
+        "commit": "49f948faa9258a0c61caceaf225e179651397431",
+        "license": "Apache-2.0",
+        "files": {
+          "skills/.curated/gh-fix-ci/SKILL.md": "7b326b4a2f0f5f85122144628ec02077e48841e0e0e82efce88b3415bcfb7c26",
+          "skills/.curated/gh-fix-ci/agents/openai.yaml": "36f73b9450504983d1647c960689596f59bf9147c14b1b43162912ed7ada9af6",
+          "skills/.curated/gh-fix-ci/scripts/inspect_pr_checks.py": "9459e5b03f86785d184a83e5cd8d621b832e918ec04158a2962d867785812c6c",
+          "skills/.curated/gh-fix-ci/LICENSE.txt": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+        },
+        "reviewed_not_vendored": [
+          "scripts/inspect_pr_checks.py",
+          "assets/github.png",
+          "assets/github-small.svg"
+        ]
+      },
+      "local_modifications": "SKILL.md rewritten around scripts/ci_triage.py (run ids, failed-job-only logs, step list, exact SHA, redaction, untrusted-data fencing, no create-plan dependency); upstream script re-implemented rather than vendored because it downloads the whole run log once per failing check, has no redaction, and cannot take a run id.",
+      "dependencies": [
+        "scripts/ci_triage.py",
+        "scripts/agent_text.py"
+      ],
+      "permissions": {
+        "reads": [
+          "GitHub Actions run and job metadata and failed-job logs (via gh)"
+        ],
+        "writes": [],
+        "commands": [
+          "gh pr view",
+          "gh pr checks",
+          "gh run view --json",
+          "gh api GET repos/{owner}/{repo}/actions/jobs/<id>/logs"
+        ],
+        "github_scopes": [
+          "repo (read use only; the active gh token also has write scopes, so read-only is by script design, not by credential)"
+        ],
+        "network": [
+          "api.github.com via the gh CLI only"
+        ]
+      },
+      "local_files": {
+        "agents/openai.yaml": "b1b1321285e6120ec46e744381761025e0a8e7e7c7b1ec3587497c1cd1eff130",
+        "LICENSE.txt": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
+        "SKILL.md": "9f3c9aec27bff23c7a7f60d7431be9cd34f4a298314fda1aaf03f87c73f77aff"
+      }
+    },
+    "issue-to-pr": {
+      "kind": "custom",
+      "invocation": "explicit",
+      "publisher": "this repository",
+      "upstream": null,
+      "local_modifications": "n/a (original thin wrapper over scripts/run_issue.py, docs/agents/briefs/, scripts/check_all.py)",
+      "dependencies": [
+        "scripts/issue_context.py",
+        "scripts/agent_text.py",
+        "scripts/run_issue.py",
+        "scripts/check_all.py"
+      ],
+      "permissions": {
+        "reads": [
+          "GitHub issue, newest comments, closing PR references (via gh)",
+          "docs/agents/briefs/*.md"
+        ],
+        "writes": [
+          "stage 2 only, after approval: work/agent-worktrees/*, work/agent-runs/*, branch issue/<selector>-<slug> (via scripts.run_issue)"
+        ],
+        "commands": [
+          "gh issue view",
+          "python -m scripts.run_issue (stage 2)",
+          "python -m scripts.check_all"
+        ],
+        "github_scopes": [
+          "repo (read use only in stage 1)"
+        ],
+        "network": [
+          "api.github.com via the gh CLI only; stage 2 launches the user's own claude or codex CLI"
+        ]
+      },
+      "local_files": {
+        "agents/openai.yaml": "7d859831b5766da5f8affc3590bdf8d910e4c64010b0954212441f19439c373d",
+        "SKILL.md": "33069d29374e51fb5ea45f231d4fdb96d22e019df0c1b73915d7a507a9f2215a"
+      }
+    },
+    "grill-me": {
+      "kind": "adapted-upstream",
+      "invocation": "explicit",
+      "publisher": "Matt Pocock",
+      "upstream": {
+        "repo": "https://github.com/mattpocock/skills",
+        "commit": "49dd158d1076134a641b33efb035946536778336",
+        "license": "MIT",
+        "files": {
+          "skills/productivity/grill-me/SKILL.md": "caaf8b8de1684f96e26b28f3c29189db5c89cce4b73e1c93d86164f66ef88637",
+          "skills/productivity/grill-me/agents/openai.yaml": "c061e39c3e0f9d865fb1b97556d485704af2a8a58f4b8221a8917a5c2074a32b",
+          "skills/productivity/grilling/SKILL.md": "befdff1e27a1dfe2a294d5871169ac1afe16d983911daa4f32627514a48c1e15",
+          "skills/productivity/grilling/agents/openai.yaml": "1411d7df7d99b7e621a1ff8283c8133cc2464be63d064e52d8ce169c6800ee9b",
+          "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5"
+        }
+      },
+      "local_modifications": "grilling method inlined into grill-me (no separate implicitly-invocable grilling skill, no cross-skill call); 1-3 questions per round; no sub-agents; explicitly read-only; optional local decision log.",
+      "dependencies": [
+        "docs/agents/templates/decision-log.md (optional)"
+      ],
+      "permissions": {
+        "reads": [
+          "repository files, read-only"
+        ],
+        "writes": [
+          "none by default; work/decisions/<slug>.md only if the user says yes"
+        ],
+        "commands": [],
+        "github_scopes": [],
+        "network": []
+      },
+      "local_files": {
+        "agents/openai.yaml": "8b884d9963177eec18d0460869664b5659e1724f93f8042c55a41ed3c45d11f3",
+        "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "SKILL.md": "42878511aa781b827fe9b9b0eb92561123ced381947aa87f90ae051635b595ac"
+      }
+    }
+  },
+  "rejected": {
+    "wayfinder": {
+      "reviewed": "mattpocock/skills 49dd158d skills/engineering/wayfinder/SKILL.md sha256 9be7b478c389605a24517d27752f278933588da97a1b5921b165f455edf4c5b7",
+      "reason": "Creates, assigns, labels, and closes tracker issues, pushes research branches, spawns sub-agents, and depends on unreviewed research and prototype skills plus domain-modeling (writes GLOSSARY.md and ADRs). Cannot be made local-only without a substantial fork. Replaced by grill-me plus docs/agents/templates/decision-log.md."
+    },
+    "grilling": {
+      "reviewed": "mattpocock/skills 49dd158d skills/productivity/grilling/SKILL.md",
+      "reason": "Implicitly invocable by description; asks a whole frontier per round. Method inlined into grill-me instead of shipped as its own skill."
+    },
+    "domain-modeling": {
+      "reviewed": "mattpocock/skills 49dd158d skills/engineering/domain-modeling/SKILL.md sha256 7b925d7b1e341a2eeae33ad68a8a8c0ab889a38ddd22a7598e4c240e5a7556a3",
+      "reason": "Only a wayfinder dependency; writes GLOSSARY.md and ADRs inline, overlapping the repository's own docs/adr conventions."
+    },
+    "caveman": {
+      "reviewed": "mattpocock/skills history: added ab45d5e6 (2026-04-17), removed 7d3ada97 (2026-06-12); last text at 221ffca9",
+      "reason": "Removed upstream with no stated reason or replacement; output-terseness only. Same-name repositories from other publishers are unverified and were not installed. Replaced by a concise-output guideline in AGENTS.md."
+    }
+  }
+}

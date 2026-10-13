@@ -7,6 +7,13 @@
 # Files executed inside Linux containers must keep LF line endings, even when checked
 # out on Windows, or the shell and Docker parsers fail.
 *.sh text eol=lf
+
+# Agent skills are hash-pinned in docs/agents/toolkit-manifest.json and mirrored byte-for-byte;
+# keep them LF on every platform so a Windows checkout does not look like drift.
+.agents/skills/** text eol=lf
+.claude/skills/** text eol=lf
+.claude/settings.json text eol=lf
+docs/agents/toolkit-manifest.json text eol=lf
 Dockerfile* text eol=lf
 .dockerignore text eol=lf
 compose.yaml text eol=lf
