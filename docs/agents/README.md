@@ -1,5 +1,8 @@
 # Working on roadmap issues with AI agents (Claude Code and Codex)
 
+Reusable agent skills (handoff, resume, CI triage, issue investigation, grill-me), their provenance,
+and their security limits are in [`toolkit.md`](toolkit.md).
+
 Goal: finish each issue in one short, bounded agent session. Most wasted usage comes from
 (1) full tool logs read back into context, (2) re-exploring the repository and re-reading long
 issue text, and (3) long sessions that re-send everything every turn. This folder removes all three.

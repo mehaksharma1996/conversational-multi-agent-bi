@@ -47,7 +47,17 @@ work/*.log
 work/*.pid
 
 # Local agent tooling and generated Archify validation evidence
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+# Developer agent toolkit skills (see docs/agents/toolkit-manifest.json); other local skills stay ignored
+!.agents/skills/handoff/
+!.agents/skills/resume/
+!.agents/skills/fix-ci/
+!.agents/skills/issue-to-pr/
+!.agents/skills/grill-me/
+.claude/settings.local.json
+.pytest-tmp/
 .archify/**/*.browser-check.json
 .archify/**/*.delivery.json
 .archify/**/*.finalize.json

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Resume"
+  short_description: "Resume from a handoff after checking live Git state"
+policy:
+  allow_implicit_invocation: false
