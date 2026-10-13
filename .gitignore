@@ -57,6 +57,7 @@ work/*.pid
 !.agents/skills/issue-to-pr/
 !.agents/skills/grill-me/
 .claude/settings.local.json
+.pytest-tmp/
 .archify/**/*.browser-check.json
 .archify/**/*.delivery.json
 .archify/**/*.finalize.json

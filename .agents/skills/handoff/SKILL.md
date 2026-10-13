@@ -19,7 +19,9 @@ recorded by a script, and the content is validated.
    - **Approval boundaries**: list only approvals the user actually gave. State that push, PR,
      merge, deploy, and any GitHub write need fresh approval unless the user says otherwise.
    - **Suggested skills**: name the skills the next session should invoke (normally `resume` first).
-3. Never include secrets, tokens, `.env` contents, uploaded or private data, personal information,
+3. Do not open unrelated or untracked files just to describe them; name them and say they were
+   not reviewed.
+4. Never include secrets, tokens, `.env` contents, uploaded or private data, personal information,
    absolute user paths, or conversation transcripts.
-4. Run `python -m scripts.agent_handoff check <path>` and fix every reported problem.
-5. Tell the user the path. Do not commit it: `work/` is git-ignored.
+5. Run `python -m scripts.agent_handoff check <path>` and fix every reported problem.
+6. Tell the user the path. Do not commit it: `work/` is git-ignored.
