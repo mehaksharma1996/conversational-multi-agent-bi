@@ -15,6 +15,15 @@ Methodology, gates, and the review process are in
   - `baseline.json`: committed results the gate compares against.
 - `baseline/cases.json` is the earlier characterization record of routing behavior at the start of the
   modernization. It is kept for history and is still checked by `tests/test_evaluation_baseline.py`.
+- `baseline/v2/` is the versioned workflow case set (Iteration 2, E1b):
+  - `manifest.json`: every live-demo case and investigation case, each with one category and one
+    coverage label (`measured`, `not_covered_by_script`, `requires_agent`, `requires_live_model`,
+    `unsupported`), plus pinned hashes of the retail CSV, policy PDF, ground truth, and both case
+    files. Validated by `packages/evaluation/workflow_cases.py` and `tests/test_workflow_cases.py`.
+  - `investigation_cases.json`: three multi-step investigation questions with oracle reference
+    queries checked against the committed CSV and ground truth. None is scored offline.
+  - Changing a pinned file, a case id, or a coverage label is a reviewed change: update the
+    manifest hash or entry in the same pull request and say why.
 - `results/` (git-ignored) receives generated JSON reports.
 
 ## Rules
