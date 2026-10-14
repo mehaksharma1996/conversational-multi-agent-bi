@@ -173,6 +173,35 @@ threshold or waiver, or routing policy must:
 4. get review from someone other than the author; and
 5. have a rollback path: revert the commit, which restores the previous baseline and fixtures together.
 
+## Versioned workflow cases and coverage
+
+`evals/baseline/v2/manifest.json` lists every retail live-demo case and every investigation case
+once, with a category and a **coverage** label that says what an offline scripted run can show:
+
+| Coverage | Meaning | Counted in pass rates |
+|---|---|---|
+| `measured` | The scripted model produces a correct output, so the case is graded | Yes |
+| `not_covered_by_script` | Supported by the product, but the scripted model has no correct output | No |
+| `requires_agent` | Defined as dependent steps; a limitation of current benchmark coverage, not proof that one query or one agent could never answer it | No |
+| `requires_live_model` | Only a person reading real model output can judge it | No |
+| `unsupported` | Outside the product's scope; a good answer declines or stays descriptive | No |
+
+Unmeasured cases are neither passes nor failures. A scripted run is evidence about the application
+path when the model output is correct; it is never evidence of model accuracy. The live safety
+probes are `not_covered_by_script` because the scripted model never attempts the attack; unsafe and
+injected model output is covered by the v1 gate above.
+
+The three investigation cases (`evals/baseline/v2/investigation_cases.json`) combine ranking, policy
+retrieval, and comparison. Their reference queries and descriptive facts run against the committed
+CSV and must agree with the ground truth: regional fulfillment breaches sum to 13, category
+review-rule breaches sum to 45, each ranking has a unique leader, and every policy threshold equals
+the ground truth's `policy_rules`. The October peak question has no reference cause: the data
+records transactions, not causes, so only its descriptive facts are checkable.
+
+The manifest pins the CSV, policy PDF, ground truth, and both case files by SHA-256 (text files with
+line endings normalised to LF, because Windows checkouts rewrite them). Any change to a pinned file
+fails `tests/test_workflow_cases.py` until the manifest is updated in the same reviewed change.
+
 ## Optional live evaluation
 
 ```powershell

@@ -1,0 +1,76 @@
+{
+  "schema": "workflow-case-manifest-v1",
+  "manifest_version": "2026-10-14.1",
+  "provenance": {
+    "issue": "Iteration 2 E1b-1",
+    "data": "Synthetic retail demo produced by scripts.generate_retail_demo (generator seed 20261011); no real customer data.",
+    "scope": "Case definitions, categories, and coverage only. This file contains no model output and makes no accuracy claim.",
+    "hashing": "sha256-lf hashes text with CRLF normalised to LF, because a Windows checkout rewrites line endings; sha256-raw hashes bytes as stored."
+  },
+  "coverage_labels": {
+    "measured": "The scripted model produces a correct output, so an offline run can grade the case.",
+    "not_covered_by_script": "The product supports the question, but the scripted model has no correct output for it; an offline run says nothing about it.",
+    "requires_agent": "The task is defined as dependent steps. A limitation of current benchmark coverage, not a claim that one SQL query or one agent could never answer it.",
+    "requires_live_model": "Only a person reading real model output can judge it.",
+    "unsupported": "Outside the product's scope by design; a good answer declines or stays descriptive."
+  },
+  "categories": {
+    "sql": "Answered from the uploaded table by guarded SQL.",
+    "rag": "Answered from the uploaded policy document.",
+    "hybrid": "A documented policy rule applied to table rows.",
+    "follow_up": "Depends on an earlier question in the same conversation.",
+    "interpretation": "Asks what a policy threshold means; more than one route can answer it.",
+    "safety": "A probe that must not mutate data or disclose secrets or prompts.",
+    "exploratory": "Recorded for human review; never scored.",
+    "investigation": "A multi-step question that combines ranking, policy retrieval, and comparison."
+  },
+  "fixtures": {
+    "retail_csv": {
+      "path": "sample_data/retail_operations.csv",
+      "hash": "sha256-lf",
+      "sha256": "fa09c4bc034b45fcba4c793324d403259e427d927ad2c028033b9b331b3890bd"
+    },
+    "policy_pdf": {
+      "path": "sample_data/retail_operations_policy.pdf",
+      "hash": "sha256-raw",
+      "sha256": "ef77aa1a2bbc4d05e6f5a48b1fa78ca27fd8ba694c009db6611864b56b8579d5"
+    },
+    "ground_truth": {
+      "path": "sample_data/retail_operations_ground_truth.json",
+      "hash": "sha256-lf",
+      "sha256": "233ea8a135bfc906e653a119bc23ade9973de10aab391c5b547244409cd29a45"
+    }
+  },
+  "sources": {
+    "live_cases": {
+      "path": "evals/live/v1/cases.json",
+      "hash": "sha256-lf",
+      "sha256": "9dfe86a78f8eac4c8c202add5236e20e0a248cf2ba6ca77d5c5aced51f7cce8c"
+    },
+    "investigation_cases": {
+      "path": "evals/baseline/v2/investigation_cases.json",
+      "hash": "sha256-lf",
+      "sha256": "10a53d019d64c597ef127584421af3095b8b6f1f5f435fb7526ff29eb95d2be9"
+    }
+  },
+  "cases": [
+    {"id": "total-revenue", "source": "live_cases", "category": "sql", "coverage": "measured", "rationale": "The scripted model returns the reference aggregate."},
+    {"id": "top-region-revenue", "source": "live_cases", "category": "sql", "coverage": "measured", "rationale": "The scripted model returns the full revenue ranking."},
+    {"id": "top-category-profit", "source": "live_cases", "category": "sql", "coverage": "measured", "rationale": "The scripted model returns the full gross-profit ranking."},
+    {"id": "peak-month-revenue", "source": "live_cases", "category": "sql", "coverage": "measured", "rationale": "The scripted model returns the full monthly ranking."},
+    {"id": "h1-year-comparison", "source": "live_cases", "category": "sql", "coverage": "measured", "rationale": "The scripted model returns both first-half totals."},
+    {"id": "missing-segments", "source": "live_cases", "category": "sql", "coverage": "measured", "rationale": "The scripted model counts null segments."},
+    {"id": "policy-return-rule", "source": "live_cases", "category": "rag", "coverage": "measured", "rationale": "The scripted model quotes the exact policy sentence with a citation."},
+    {"id": "fulfillment-escalation-count", "source": "live_cases", "category": "hybrid", "coverage": "measured", "rationale": "The scripted model extracts the documented predicate and the policy check verifies the SQL."},
+    {"id": "policy-review-count", "source": "live_cases", "category": "hybrid", "coverage": "measured", "rationale": "The scripted model extracts all three documented predicates and the policy check verifies the SQL."},
+    {"id": "followup-lowest-region", "source": "live_cases", "category": "follow_up", "coverage": "not_covered_by_script", "rationale": "The scripted model does not recognise the follow-up and falls back to a row count, which would be scored as a failure of the script, not the product."},
+    {"id": "policy-threshold-interpretation", "source": "live_cases", "category": "interpretation", "coverage": "not_covered_by_script", "rationale": "The scripted model routes it to SQL and returns a row count; the case needs real interpretation."},
+    {"id": "safety-write-request", "source": "live_cases", "category": "safety", "coverage": "not_covered_by_script", "rationale": "The scripted model never attempts the write, so a pass would prove nothing; the v1 offline gate covers unsafe model output."},
+    {"id": "safety-prompt-injection", "source": "live_cases", "category": "safety", "coverage": "not_covered_by_script", "rationale": "The scripted model never follows the injected instruction, so a pass would prove nothing; the v1 offline gate covers injected content."},
+    {"id": "exploratory-ambiguous", "source": "live_cases", "category": "exploratory", "coverage": "requires_live_model", "rationale": "Whether the model asks for clarification or picks a sensible reading needs a human reviewer of real output."},
+    {"id": "exploratory-unsupported", "source": "live_cases", "category": "exploratory", "coverage": "unsupported", "rationale": "The data supports no forecast; a good answer declines or limits itself to history."},
+    {"id": "investigation-top-region-fulfillment", "source": "investigation_cases", "category": "investigation", "coverage": "requires_agent", "rationale": "Ranking, policy retrieval, and a dependent count; the fixed workflow runs one SQL query per question and the scripted model has no output for it."},
+    {"id": "investigation-review-category-rate", "source": "investigation_cases", "category": "investigation", "coverage": "requires_agent", "rationale": "Three policy rules, a per-category ranking, and two rates to compare; graded once an agent or a live model produces output."},
+    {"id": "investigation-october-peak-explanation", "source": "investigation_cases", "category": "investigation", "coverage": "unsupported", "rationale": "The data cannot show causes; only descriptive facts are checkable, and judging the wording needs real model output."}
+  ]
+}
