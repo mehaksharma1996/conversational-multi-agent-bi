@@ -38,26 +38,31 @@ from importlib import metadata
 from pathlib import Path
 from time import perf_counter
 
-import numpy as np
-import pandas as pd
-from reportlab.pdfgen import canvas
+from scripts.offline_execution import ensure_offline_module, invocation_path
 
-from packages.evaluation.fakes import HashingEmbedder
-from packages.retrieval.service import (
+if __name__ == "__main__":
+    ensure_offline_module("scripts.run_benchmarks")
+
+import numpy as np  # noqa: E402 - offline boundary must run first
+import pandas as pd  # noqa: E402
+from reportlab.pdfgen import canvas  # noqa: E402
+
+from packages.evaluation.fakes import HashingEmbedder  # noqa: E402
+from packages.retrieval.service import (  # noqa: E402 - offline boundary must run first
     DocumentApplicationService,
     DocumentPayload,
     IndexDocumentsCommand,
 )
-from src.analytics.anomaly_detection import recommend_anomaly_features
-from src.analytics.pipeline import build_analysis_bundle
-from src.documents.chunker import chunk_document_pages
-from src.documents.retriever import DocumentRetriever
-from src.documents.vector_store import ChromaDocumentStore
-from src.ingestion.pdf_loader import load_pdf_file
-from src.profiling.data_profiler import profile_dataframe
-from src.profiling.schema_mapper import map_schema
-from src.storage.query_executor import execute_read_query, validate_read_query
-from src.storage.sqlite_store import DEFAULT_TABLE_NAME, SQLiteStore
+from src.analytics.anomaly_detection import recommend_anomaly_features  # noqa: E402
+from src.analytics.pipeline import build_analysis_bundle  # noqa: E402
+from src.documents.chunker import chunk_document_pages  # noqa: E402
+from src.documents.retriever import DocumentRetriever  # noqa: E402
+from src.documents.vector_store import ChromaDocumentStore  # noqa: E402
+from src.ingestion.pdf_loader import load_pdf_file  # noqa: E402
+from src.profiling.data_profiler import profile_dataframe  # noqa: E402
+from src.profiling.schema_mapper import map_schema  # noqa: E402
+from src.storage.query_executor import execute_read_query, validate_read_query  # noqa: E402
+from src.storage.sqlite_store import DEFAULT_TABLE_NAME, SQLiteStore  # noqa: E402
 
 SCHEMA_VERSION = 1
 SEED = 20261006
@@ -493,7 +498,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--only", action="append", help="benchmark group (analysis|sql|retrieval|pdf)"
     )
-    parser.add_argument("--output", type=Path, help="write the JSON report to this path")
+    parser.add_argument("--output", type=invocation_path, help="write the JSON report to this path")
     parser.add_argument("--profile", metavar="CASE", help="cProfile one case instead of timing it")
     parser.add_argument("--list", action="store_true", help="list benchmark groups and exit")
     args = parser.parse_args(argv)

@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
 
+from scripts.offline_execution import run_offline_python
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = REPO_ROOT / "apps" / "web"
 DEFAULT_TAIL_LINES = 25
@@ -34,6 +36,7 @@ class Check:
     command: tuple[str, ...]
     cwd: Path = REPO_ROOT
     group: str = "fast"  # fast | full | e2e
+    isolated_python: bool = False
 
 
 def _python(*args: str) -> tuple[str, ...]:
@@ -50,8 +53,18 @@ def build_checks(base_ref: str = "origin/main") -> list[Check]:
         Check("ruff-check", _python("ruff", "check", ".")),
         Check("ruff-format", _python("ruff", "format", "--check", ".")),
         Check("mypy", _python("mypy", "apps", "config", "packages", "scripts", "src", "tests")),
-        Check("pytest", _python("pytest", "-q")),
-        Check("evaluations", _python("scripts.run_evaluations")),
+        Check(
+            "pytest",
+            _python(
+                "pytest",
+                "-c",
+                str((REPO_ROOT / "pytest.ini").resolve()),
+                "-q",
+                str((REPO_ROOT / "tests").resolve()),
+            ),
+            isolated_python=True,
+        ),
+        Check("evaluations", _python("scripts.run_evaluations"), isolated_python=True),
         Check(
             "openapi-compat",
             _python("scripts.check_openapi_compatibility", "--base-ref", base_ref),
@@ -86,14 +99,30 @@ def run_check(check: Check, tail_lines: int = DEFAULT_TAIL_LINES) -> tuple[bool,
     """Run one check. Return ``(passed, seconds, output_tail)``; the tail is empty on success."""
     started = monotonic()
     try:
-        completed = subprocess.run(
-            check.command,
-            cwd=check.cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        if check.isolated_python:
+            overrides = (
+                {"COVERAGE_RCFILE": str((REPO_ROOT / "pyproject.toml").resolve())}
+                if check.name == "pytest"
+                else None
+            )
+            completed = run_offline_python(
+                check.command,
+                original_cwd=check.cwd,
+                overrides=overrides,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        else:
+            completed = subprocess.run(
+                check.command,
+                cwd=check.cwd,
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
     except OSError as error:
         return False, monotonic() - started, f"Could not start {check.command[0]}: {error}"
     elapsed = monotonic() - started

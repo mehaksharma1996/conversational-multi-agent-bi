@@ -7,9 +7,10 @@ The pytest suite runs it as the CI check (``tests/test_workflow_baseline.py``); 
     python -m tests.e2e.workflow_baseline_runner                       # compare; exit 1 on drift
     python -m tests.e2e.workflow_baseline_runner --update --justification "why this is right"
 
-Start it from a working directory that has no ``.env`` with ``PYTHON_DOTENV_DISABLED=1`` and the
-repository on ``PYTHONPATH``: ChromaDB reads ``.env`` from the working directory on its own, so
-disabling python-dotenv alone is not enough. The command refuses to run otherwise.
+The module entry point automatically re-execs from a temporary working directory with
+``PYTHON_DOTENV_DISABLED=1`` and the repository on ``PYTHONPATH``. ChromaDB reads ``.env`` from the
+working directory on its own, so disabling python-dotenv alone is not enough. The inner command
+still refuses to run if that isolation contract is missing.
 
 The harness adds instrumentation around the unchanged application; it changes no product code:
 
@@ -36,6 +37,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 from urllib.parse import parse_qs
+
+from scripts.offline_execution import ensure_offline_module, invocation_path
+
+if __name__ == "__main__":
+    ensure_offline_module("tests.e2e.workflow_baseline_runner")
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "evals" / "baseline" / "v2" / "manifest.json"
@@ -371,7 +377,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Scripted workflow baseline (development only).")
     parser.add_argument("--update", action="store_true", help="Write the baseline if allowed.")
     parser.add_argument("--justification", default="", help="Required for any accepted change.")
-    parser.add_argument("--output", type=Path, help="Also write the current baseline here.")
+    parser.add_argument(
+        "--output", type=invocation_path, help="Also write the current baseline here."
+    )
     args = parser.parse_args(argv)
 
     problems = isolation_problems()

@@ -231,8 +231,8 @@ closed when evidence is missing or a check cannot decide:
 The pytest check (`tests/test_workflow_baseline.py`) re-runs every case and requires an exact
 match. Provenance (manifest, fixtures, schemas), case set, coverage, outcomes, dimensions, metrics,
 and safety are critical; observations and safety-evidence counts are reported separately as
-noncritical. To update, start from a directory without `.env` with `PYTHON_DOTENV_DISABLED=1` and
-the repository on `PYTHONPATH`:
+noncritical. The runner automatically starts its application-importing process in a temporary
+working directory with dotenv loading disabled and the repository on `PYTHONPATH`:
 
 ```powershell
 python -m tests.e2e.workflow_baseline_runner --update --justification "why this change is right"

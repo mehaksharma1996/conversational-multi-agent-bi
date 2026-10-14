@@ -22,6 +22,37 @@ def test_check_all_selects_fast_by_default_and_groups_on_request() -> None:
     assert "web-e2e" in e2e
 
 
+def test_check_all_isolates_python_checks_that_import_application_code() -> None:
+    checks = {check.name: check for check in check_all.build_checks()}
+
+    assert checks["pytest"].isolated_python
+    assert checks["evaluations"].isolated_python
+    assert Path(checks["pytest"].command[-1]).is_absolute()
+    assert Path(checks["pytest"].command[-3]).is_absolute()
+    assert not checks["ruff-check"].isolated_python
+    assert not checks["openapi-compat"].isolated_python
+
+
+def test_run_check_uses_offline_boundary_for_isolated_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def run_offline(command, **kwargs):
+        observed.update(command=command, **kwargs)
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(check_all, "run_offline_python", run_offline)
+    check = check_all.Check("evaluations", (sys.executable, "-m", "x"), isolated_python=True)
+
+    passed, _, tail = check_all.run_check(check)
+
+    assert passed and tail == ""
+    assert observed["command"] == check.command
+    assert observed["original_cwd"] == check.cwd
+    assert observed["capture_output"] is True
+
+
 def test_check_all_only_rejects_unknown_names() -> None:
     with pytest.raises(ValueError, match="Unknown check"):
         check_all.select_checks(check_all.build_checks(), only=["nope"])

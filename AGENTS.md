@@ -113,13 +113,17 @@ python -m pip install -r requirements.lock
 Run quality checks with:
 
 ```powershell
-python -m pytest
+python -m scripts.run_pytest
 python -m ruff check .
 python -m ruff format --check .
 python -m mypy apps config packages scripts src tests
 python -m scripts.run_evaluations
 python -m scripts.check_openapi_compatibility --base-ref origin/main
 ```
+
+Offline Python entry points use the dotenv-isolated subprocess boundary described in
+`docs/operations/offline-tooling.md`. An arbitrary direct `python -m pytest` command is not
+protected; use `python -m scripts.run_pytest` (and `--target <path>` for focused tests).
 
 Indicative benchmarks (never a gate; see `docs/operations/benchmarks.md`):
 `python -m scripts.run_benchmarks [--quick] [--only <group>] [--profile <case>]`.
