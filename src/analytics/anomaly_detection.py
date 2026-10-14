@@ -28,9 +28,13 @@ class AnomalyReport:
     model_flagged_count: int = 0
     rule_flagged_count: int = 0
     score_percentiles: dict[str, float] = field(default_factory=dict)
+    # Unique rows flagged by the model, the rules, or both, counted before the review shortlist
+    # is capped at MAX_FLAGGED_ROWS. A row flagged by both mechanisms is counted once.
+    total_flagged_count: int = 0
 
     @property
     def flagged_count(self) -> int:
+        """Rows on the ranked review shortlist (at most MAX_FLAGGED_ROWS), not the total flagged."""
         return len(self.flagged_rows)
 
 
@@ -114,6 +118,7 @@ def detect_anomalies(
 
     model_flagged_count = int(result["is_model_anomaly"].sum())
     rule_flagged_count = int(result["is_rule_anomaly"].sum())
+    total_flagged_count = int(result["is_anomaly"].sum())
 
     flagged = result[result["is_anomaly"]].copy()
     if flagged.empty:
@@ -159,6 +164,7 @@ def detect_anomalies(
         model_flagged_count=model_flagged_count,
         rule_flagged_count=rule_flagged_count,
         score_percentiles=score_percentiles,
+        total_flagged_count=total_flagged_count,
     )
 
 

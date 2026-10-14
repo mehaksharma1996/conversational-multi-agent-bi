@@ -188,6 +188,7 @@ def analysis_response(record: AnalysisRecord) -> AnalysisResponse:
             flagged_count=anomaly.flagged_count,
             model_flagged_count=anomaly.model_flagged_count,
             rule_flagged_count=anomaly.rule_flagged_count,
+            total_flagged_count=anomaly.total_flagged_count,
             score_percentiles=anomaly.score_percentiles,
             flagged_rows=_records(anomaly.flagged_rows),
             limitations=anomaly.limitations,

@@ -765,6 +765,8 @@ export interface components {
             score_percentiles: {
                 [key: string]: number;
             };
+            /** Total Flagged Count */
+            total_flagged_count: number;
         };
         /**
          * AuthConfigResponse

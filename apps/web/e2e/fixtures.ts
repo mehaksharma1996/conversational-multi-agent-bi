@@ -167,6 +167,7 @@ export const analysisFixture = {
     flagged_count: 1,
     model_flagged_count: 1,
     rule_flagged_count: 0,
+    total_flagged_count: 1,
     score_percentiles: { p50: 0.1, p95: 0.8 },
     flagged_rows: [{ amount: 900, merchant: "North" }],
     limitations: ["Flags require human review."],
