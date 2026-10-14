@@ -20,7 +20,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from packages.evaluation import (
+from scripts.offline_execution import ensure_offline_module, invocation_path
+
+if __name__ == "__main__":
+    ensure_offline_module("scripts.run_evaluations")
+
+from packages.evaluation import (  # noqa: E402 - offline boundary must run first
     FixtureError,
     build_baseline,
     evaluate_gates,
@@ -28,9 +33,9 @@ from packages.evaluation import (
     plan_baseline_update,
     run_suite,
 )
-from packages.evaluation.fakes import CountingLLM, RecordingLLM
-from scripts.api_isolation_eval import run_api_isolation_suite
-from scripts.mcp_tool_eval import run_mcp_tool_suite
+from packages.evaluation.fakes import CountingLLM, RecordingLLM  # noqa: E402
+from scripts.api_isolation_eval import run_api_isolation_suite  # noqa: E402
+from scripts.mcp_tool_eval import run_mcp_tool_suite  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FIXTURES = REPO_ROOT / "evals" / "v1"
@@ -176,9 +181,11 @@ def _print_summary(report: dict[str, Any], label: str = "deterministic") -> None
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
-    parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
-    parser.add_argument("--output", type=Path, default=None, help="Write the JSON report here.")
+    parser.add_argument("--fixtures", type=invocation_path, default=DEFAULT_FIXTURES)
+    parser.add_argument("--baseline", type=invocation_path, default=DEFAULT_BASELINE)
+    parser.add_argument(
+        "--output", type=invocation_path, default=None, help="Write the JSON report here."
+    )
     parser.add_argument("--update-baseline", action="store_true")
     parser.add_argument(
         "--accept-regressions",
@@ -189,7 +196,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--live", action="store_true", help=f"Also run live cases ({LIVE_FLAG}=1).")
     parser.add_argument("--live-max-cases", type=int, default=8)
     parser.add_argument(
-        "--live-output", type=Path, default=REPO_ROOT / "evals" / "results" / "live.json"
+        "--live-output",
+        type=invocation_path,
+        default=REPO_ROOT / "evals" / "results" / "live.json",
     )
     return parser.parse_args(argv)
 

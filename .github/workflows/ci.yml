@@ -67,7 +67,7 @@ jobs:
       - name: Type check
         run: python -m mypy apps config packages scripts src tests
       - name: Tests and coverage
-        run: python -m pytest --cov --cov-report=term-missing
+        run: python -m scripts.run_pytest --cov --cov-report=term-missing
       - name: Offline AI evaluation gate
         # Deterministic and credential-free: scripted model, hashing embedder,
         # real guards. Fails on critical safety checks, regressions, or drift.
@@ -139,7 +139,11 @@ jobs:
           python -m scripts.migrate_postgres
           python -m scripts.migrate_postgres --verify
       - name: Document index contract, migrations, and retrieval parity on pgvector
-        run: python -m pytest tests/test_document_index_contract.py tests/test_pgvector_store.py -rs -v
+        run: >-
+          python -m scripts.run_pytest
+          --target tests/test_document_index_contract.py
+          --target tests/test_pgvector_store.py
+          -rs -v
 
   containers:
     # Builds the real images and exercises the Compose topology end to end. Runs in
