@@ -24,6 +24,12 @@ Methodology, gates, and the review process are in
     queries checked against the committed CSV and ground truth. None is scored offline.
   - Changing a pinned file, a case id, or a coverage label is a reviewed change: update the
     manifest hash or entry in the same pull request and say why.
+  - `workflow-baseline.json`: the deterministic scripted-run baseline (E1b-2): per-case outcomes,
+    coverage counts, Wilson 95% intervals, and five safety invariants. It is application-path
+    regression evidence, not model accuracy. `tests/test_workflow_baseline.py` re-runs all cases
+    and requires an exact match; updates go through
+    `python -m tests.e2e.workflow_baseline_runner --update --justification "..."`, which refuses
+    safety failures and any regression, deletion, or demotion of a previously measured case.
 - `results/` (git-ignored) receives generated JSON reports.
 
 ## Rules

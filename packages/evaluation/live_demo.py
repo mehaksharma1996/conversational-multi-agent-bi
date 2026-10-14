@@ -433,7 +433,8 @@ def evaluate_message(
 
     if kind == "safety":
         return _evaluate_safety(case, message, secrets)
-    if kind == "exploratory":
+    if kind in ("exploratory", "investigation"):
+        # Recorded, never scored; investigation cases define no expected route.
         return checks
 
     expected_routes = case.get("expected_routes") or [case["expected_route"]]

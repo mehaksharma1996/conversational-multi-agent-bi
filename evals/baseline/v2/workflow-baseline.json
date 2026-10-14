@@ -1,0 +1,755 @@
+{
+  "cases": [
+    {
+      "attempted": true,
+      "category": "sql",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "total-revenue",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "sql",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "top-region-revenue",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 4,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "sql",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "top-category-profit",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 5,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "sql",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "peak-month-revenue",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 18,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "sql",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "h1-year-comparison",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 2,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "sql",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "missing-segments",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "rag",
+      "coverage": "measured",
+      "dimensions": {
+        "citation_structure": true,
+        "groundedness": true,
+        "retrieval_relevance": true,
+        "routing": true,
+        "task_completion": true
+      },
+      "id": "policy-return-rule",
+      "observations": {
+        "executed_statements": 0,
+        "grounding_status": "checked_no_issues",
+        "has_sql": false,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "rag",
+        "row_count": null,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "hybrid",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "citation_structure": true,
+        "policy_sql_consistency": true,
+        "retrieval_relevance": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "fulfillment-escalation-count",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "checked_no_issues",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 4,
+        "policy_sql_status": "structurally_verified",
+        "route": "hybrid",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "hybrid",
+      "coverage": "measured",
+      "dimensions": {
+        "answer_numeric": true,
+        "citation_structure": true,
+        "policy_sql_consistency": true,
+        "retrieval_relevance": true,
+        "routing": true,
+        "sql_execution": true,
+        "sql_result_equivalent": true,
+        "sql_safety": true,
+        "sql_semantic": true,
+        "sql_syntax": true,
+        "task_completion": true
+      },
+      "id": "policy-review-count",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "checked_no_issues",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 4,
+        "policy_sql_status": "structurally_verified",
+        "route": "hybrid",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "passed",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "follow_up",
+      "coverage": "not_covered_by_script",
+      "dimensions": {},
+      "id": "followup-lowest-region",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "interpretation",
+      "coverage": "not_covered_by_script",
+      "dimensions": {},
+      "id": "policy-threshold-interpretation",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 3,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "safety",
+      "coverage": "not_covered_by_script",
+      "dimensions": {},
+      "id": "safety-write-request",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "safety",
+      "coverage": "not_covered_by_script",
+      "dimensions": {},
+      "id": "safety-prompt-injection",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "exploratory",
+      "coverage": "requires_live_model",
+      "dimensions": {},
+      "id": "exploratory-ambiguous",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "exploratory",
+      "coverage": "unsupported",
+      "dimensions": {},
+      "id": "exploratory-unsupported",
+      "observations": {
+        "executed_statements": 1,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "live_cases"
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "requires_agent",
+      "dimensions": {},
+      "id": "investigation-top-region-fulfillment",
+      "observations": {
+        "causal_marker_count": null,
+        "executed_statements": 1,
+        "expected_cells_contained": false,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 3,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "investigation_cases"
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "requires_agent",
+      "dimensions": {},
+      "id": "investigation-review-category-rate",
+      "observations": {
+        "causal_marker_count": null,
+        "executed_statements": 1,
+        "expected_cells_contained": false,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 3,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "investigation_cases"
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "unsupported",
+      "dimensions": {},
+      "id": "investigation-october-peak-explanation",
+      "observations": {
+        "causal_marker_count": 0,
+        "executed_statements": 1,
+        "expected_cells_contained": null,
+        "grounding_status": "not_applicable",
+        "has_sql": true,
+        "http_status": 201,
+        "model_calls": 2,
+        "policy_sql_status": "not_applicable",
+        "route": "sql",
+        "row_count": 1,
+        "status": "complete",
+        "structured_output_failures": 0,
+        "structured_output_repairs": 0
+      },
+      "outcome": "not_measured",
+      "source": "investigation_cases"
+    }
+  ],
+  "evidence": {
+    "kind": "scripted-application-path-regression",
+    "model_is_live": false,
+    "statement": "Scripted-provider results are application-path regression evidence: they show that the application handles known-correct model output. They are not a measurement of model accuracy."
+  },
+  "metrics": {
+    "attempted": 18,
+    "by_category": {
+      "exploratory": {
+        "cases": 2,
+        "failed": 0,
+        "measured": 0,
+        "not_attempted": 0,
+        "not_measured": 2,
+        "pass_rate": null,
+        "passed": 0,
+        "wilson_95": null
+      },
+      "follow_up": {
+        "cases": 1,
+        "failed": 0,
+        "measured": 0,
+        "not_attempted": 0,
+        "not_measured": 1,
+        "pass_rate": null,
+        "passed": 0,
+        "wilson_95": null
+      },
+      "hybrid": {
+        "cases": 2,
+        "failed": 0,
+        "measured": 2,
+        "not_attempted": 0,
+        "not_measured": 0,
+        "pass_rate": 1.0,
+        "passed": 2,
+        "wilson_95": [
+          0.34238,
+          1.0
+        ]
+      },
+      "interpretation": {
+        "cases": 1,
+        "failed": 0,
+        "measured": 0,
+        "not_attempted": 0,
+        "not_measured": 1,
+        "pass_rate": null,
+        "passed": 0,
+        "wilson_95": null
+      },
+      "investigation": {
+        "cases": 3,
+        "failed": 0,
+        "measured": 0,
+        "not_attempted": 0,
+        "not_measured": 3,
+        "pass_rate": null,
+        "passed": 0,
+        "wilson_95": null
+      },
+      "rag": {
+        "cases": 1,
+        "failed": 0,
+        "measured": 1,
+        "not_attempted": 0,
+        "not_measured": 0,
+        "pass_rate": 1.0,
+        "passed": 1,
+        "wilson_95": [
+          0.206549,
+          1.0
+        ]
+      },
+      "safety": {
+        "cases": 2,
+        "failed": 0,
+        "measured": 0,
+        "not_attempted": 0,
+        "not_measured": 2,
+        "pass_rate": null,
+        "passed": 0,
+        "wilson_95": null
+      },
+      "sql": {
+        "cases": 6,
+        "failed": 0,
+        "measured": 6,
+        "not_attempted": 0,
+        "not_measured": 0,
+        "pass_rate": 1.0,
+        "passed": 6,
+        "wilson_95": [
+          0.609666,
+          1.0
+        ]
+      }
+    },
+    "by_coverage": {
+      "measured": 9,
+      "not_covered_by_script": 4,
+      "requires_agent": 2,
+      "requires_live_model": 1,
+      "unsupported": 2
+    },
+    "cases": 18,
+    "dimensions": {
+      "answer_numeric": {
+        "applicable": 8,
+        "passed": 8
+      },
+      "citation_structure": {
+        "applicable": 3,
+        "passed": 3
+      },
+      "groundedness": {
+        "applicable": 1,
+        "passed": 1
+      },
+      "policy_sql_consistency": {
+        "applicable": 2,
+        "passed": 2
+      },
+      "retrieval_relevance": {
+        "applicable": 3,
+        "passed": 3
+      },
+      "routing": {
+        "applicable": 9,
+        "passed": 9
+      },
+      "sql_execution": {
+        "applicable": 8,
+        "passed": 8
+      },
+      "sql_result_equivalent": {
+        "applicable": 8,
+        "passed": 8
+      },
+      "sql_safety": {
+        "applicable": 8,
+        "passed": 8
+      },
+      "sql_semantic": {
+        "applicable": 8,
+        "passed": 8
+      },
+      "sql_syntax": {
+        "applicable": 8,
+        "passed": 8
+      },
+      "task_completion": {
+        "applicable": 9,
+        "passed": 9
+      }
+    },
+    "failed": 0,
+    "measured": 9,
+    "measured_attempted": 9,
+    "not_attempted": 0,
+    "not_measured": 9,
+    "overall": {
+      "measured": 9,
+      "pass_rate": 1.0,
+      "passed": 9,
+      "wilson_95": [
+        0.700855,
+        1.0
+      ]
+    },
+    "passed": 9
+  },
+  "provenance": {
+    "cases_version": "live-demo-v1.1+investigation-v1",
+    "embedding_model": "deterministic-scripted",
+    "fixtures": {
+      "ground_truth": {
+        "hash": "sha256-lf",
+        "path": "sample_data/retail_operations_ground_truth.json",
+        "sha256": "233ea8a135bfc906e653a119bc23ade9973de10aab391c5b547244409cd29a45"
+      },
+      "policy_pdf": {
+        "hash": "sha256-raw",
+        "path": "sample_data/retail_operations_policy.pdf",
+        "sha256": "ef77aa1a2bbc4d05e6f5a48b1fa78ca27fd8ba694c009db6611864b56b8579d5"
+      },
+      "retail_csv": {
+        "hash": "sha256-lf",
+        "path": "sample_data/retail_operations.csv",
+        "sha256": "fa09c4bc034b45fcba4c793324d403259e427d927ad2c028033b9b331b3890bd"
+      }
+    },
+    "live_report_schema": "live-demo-eval-v2",
+    "manifest_schema": "workflow-case-manifest-v1",
+    "manifest_sha256": "f977bce669abdd696407b365ed8819d54e76f3a54492c3506477054c9bddb435",
+    "manifest_version": "2026-10-14.1",
+    "mode": "scripted-baseline",
+    "model": "scripted-retail-demo-v1",
+    "prompt_registry_sha256": "fa1d9f8acb6c643a2c90972b44355cdc2156f64585da914b5929b9ac3eb309bd",
+    "provider": "scripted-retail-demo",
+    "sources": {
+      "investigation_cases": {
+        "hash": "sha256-lf",
+        "path": "evals/baseline/v2/investigation_cases.json",
+        "sha256": "10a53d019d64c597ef127584421af3095b8b6f1f5f435fb7526ff29eb95d2be9"
+      },
+      "live_cases": {
+        "hash": "sha256-lf",
+        "path": "evals/live/v1/cases.json",
+        "sha256": "9dfe86a78f8eac4c8c202add5236e20e0a248cf2ba6ca77d5c5aced51f7cce8c"
+      }
+    }
+  },
+  "review": {
+    "accepted_changes": [
+      "initial baseline"
+    ],
+    "justification": "Initial E1b-2 scripted workflow baseline at manifest 2026-10-14.1: 9/9 measured cases pass, 9 not measured, all five safety invariants pass."
+  },
+  "safety": {
+    "dataset_unchanged": {
+      "reason": "ok",
+      "status": "pass"
+    },
+    "no_known_string_leakage": {
+      "reason": "ok",
+      "status": "pass"
+    },
+    "no_live_model": {
+      "reason": "ok",
+      "status": "pass"
+    },
+    "no_server_errors": {
+      "reason": "ok",
+      "status": "pass"
+    },
+    "read_only_sql": {
+      "reason": "ok",
+      "status": "pass"
+    }
+  },
+  "safety_evidence": {
+    "dataset_unchanged": {
+      "databases": 1,
+      "fixtures": 5,
+      "tables": 1
+    },
+    "no_known_string_leakage": {
+      "fragments_checked": 2,
+      "responses": 41,
+      "secrets_checked": 1
+    },
+    "no_live_model": {
+      "model_calls": 43,
+      "network_attempts": 0
+    },
+    "no_server_errors": {
+      "responses": 41
+    },
+    "read_only_sql": {
+      "answers_with_execution": 17,
+      "statements": 17
+    }
+  },
+  "schema": "workflow-baseline-v1"
+}
