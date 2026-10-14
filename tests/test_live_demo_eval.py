@@ -320,6 +320,128 @@ def test_a_hybrid_answer_needs_the_policy_verification_not_just_the_number(oracl
     assert checks["task_completion"] is False
 
 
+def _rows(oracle: Any, sql: str, *columns: str) -> list[dict[str, Any]]:
+    """Reference rows re-keyed with different aliases, as the API would return them."""
+    return [dict(zip(columns, row, strict=True)) for row in reference_rows(oracle, sql)]
+
+
+def test_result_equivalence_ignores_aliases_and_credits_the_correct_answer(oracle: Any) -> None:
+    case = _case("top-region-revenue")
+    ranking = _rows(oracle, case["reference_sql"], "r", "revenue_total")
+
+    full = evaluate_message(case, _message(rows=ranking, answer="West: 533,933.01"), oracle)
+    top_row = evaluate_message(case, _message(rows=ranking[:1], answer="West: 533,933.01"), oracle)
+
+    assert full["sql_result_equivalent"] is True and full["task_completion"] is True
+    assert top_row["sql_result_equivalent"] is True and top_row["task_completion"] is True
+
+
+def test_containment_can_pass_where_equivalence_fails(oracle: Any) -> None:
+    case = _case("top-region-revenue")
+    ranking = _rows(oracle, case["reference_sql"], "region", "total")
+    answer = "West: 533,933.01"
+
+    two_rows = evaluate_message(case, _message(rows=ranking[:2], answer=answer), oracle)
+    reversed_rows = evaluate_message(case, _message(rows=ranking[::-1], answer=answer), oracle)
+    extra_column = evaluate_message(
+        case,
+        _message(rows=[{**row, "orders": 1} for row in ranking], answer=answer),
+        oracle,
+    )
+
+    for checks in (two_rows, reversed_rows, extra_column):
+        assert checks["sql_semantic"] is True  # the expected cells are all present
+        assert checks["sql_result_equivalent"] is False
+        assert checks["task_completion"] is False
+
+
+def test_wrong_grouped_values_fail_equivalence(oracle: Any) -> None:
+    case = _case("h1-year-comparison")
+    rows = _rows(oracle, case["reference_sql"], "year", "h1")
+    swapped = [
+        {"year": rows[0]["year"], "h1": rows[1]["h1"]},
+        {"year": rows[1]["year"], "h1": rows[0]["h1"]},
+    ]
+    answer = "503,347.58 and 529,303.93"
+
+    reordered = evaluate_message(case, _message(rows=rows[::-1], answer=answer), oracle)
+    wrong = evaluate_message(case, _message(rows=swapped, answer=answer), oracle)
+
+    assert reordered["sql_result_equivalent"] is True  # not an ordered case
+    assert wrong["sql_semantic"] is True and wrong["sql_result_equivalent"] is False
+    assert wrong["task_completion"] is False
+
+
+def test_a_hybrid_answer_needs_an_equivalent_result_as_well_as_verification(oracle: Any) -> None:
+    case = _case("fulfillment-escalation-count")
+    verified = {
+        "execution": {"retrieval_accepted": 2},
+        "invalid_citation_count": 0,
+        "unverified_quote_count": 0,
+        "policy_sql_status": "structurally_verified",
+        "grounding_status": "checked_no_issues",
+    }
+
+    def hybrid(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return _message(
+            route="hybrid",
+            sql='SELECT COUNT(*) AS n FROM "uploaded_data" WHERE "fulfillment_days" >= 10',
+            rows=rows,
+            answer="13 transactions.",
+            sources=[{"citation": "policy.pdf p.1"}],
+            provenance=verified,
+        )
+
+    correct = evaluate_message(case, hybrid([{"transactions": 13}]), oracle)
+    padded = evaluate_message(case, hybrid([{"n": 13}, {"n": 2387}]), oracle)
+
+    assert correct["sql_result_equivalent"] is True
+    assert correct["policy_sql_consistency"] is True and correct["task_completion"] is True
+    assert padded["sql_semantic"] is True and padded["sql_result_equivalent"] is False
+    assert padded["task_completion"] is False
+
+
+def test_document_only_cases_are_not_scored_on_result_equivalence(oracle: Any) -> None:
+    for case_id in ("policy-return-rule", "policy-threshold-interpretation"):
+        assert _case(case_id).get("reference_sql") is None
+    checks = evaluate_message(
+        _case("policy-return-rule"),
+        _message(route="rag", sql=None, rows=None, answer="", sources=[]),
+        oracle,
+    )
+    assert checks["sql_result_equivalent"] is None
+
+
+def test_an_incomplete_answer_is_never_result_equivalent(oracle: Any) -> None:
+    pending = evaluate_message(_case("total-revenue"), _message(status="pending_approval"), oracle)
+
+    assert pending["sql_result_equivalent"] is False
+
+
+def test_accepted_prefixes_require_an_ordered_case(oracle: Any) -> None:
+    case = {**_case("top-region-revenue"), "result_equivalence": {"accept_prefix_rows": [1]}}
+
+    with pytest.raises(ValueError, match="requires ordered results"):
+        evaluate_message(case, _message(rows=[{"r": "West", "t": 533933.01}]), oracle)
+
+
+def test_cases_with_ordered_equivalence_are_the_ranking_questions() -> None:
+    ordered = {
+        case["id"]
+        for case in load_cases(CASES)["cases"]
+        if (case.get("result_equivalence") or {}).get("ordered")
+    }
+
+    assert ordered == {
+        "top-region-revenue",
+        "top-category-profit",
+        "peak-month-revenue",
+        "followup-lowest-region",
+    }
+    assert load_cases(CASES)["version"] == "live-demo-v1.1"
+    assert live_demo.REPORT_SCHEMA == "live-demo-eval-v2"
+
+
 def test_document_answers_need_the_exact_policy_sentence_and_clean_structure(oracle: Any) -> None:
     case = _case("policy-return-rule")
     good = _message(
@@ -410,6 +532,10 @@ def test_the_scripted_model_passes_the_nine_questions_and_is_labelled_not_live()
     assert summary["stop_reason"] == "completed"
     assert summary["api_errors"] == 0
     assert summary["by_dimension"]["policy_sql_consistency"] == {"passed": 2, "total": 2}
+    # Six table and two hybrid questions have a reference query; the document one does not.
+    assert summary["by_dimension"]["sql_result_equivalent"] == {"passed": 8, "total": 8}
+    assert summary["by_dimension"]["sql_semantic"] == {"passed": 8, "total": 8}
+    assert report["schema"] == "live-demo-eval-v2"
     assert summary["by_dimension"]["groundedness"] == {"passed": 1, "total": 1}
     assert 9 * 2 <= summary["model_calls"] <= 9 * 6
     assert "scripted-not-a-credential" not in json.dumps(report)

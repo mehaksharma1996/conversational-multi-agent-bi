@@ -1,5 +1,5 @@
 {
-  "version": "live-demo-v1",
+  "version": "live-demo-v1.1",
   "dataset": "sample_data/retail_operations.csv",
   "policy": "sample_data/retail_operations_policy.pdf",
   "ground_truth": "sample_data/retail_operations_ground_truth.json",
@@ -25,6 +25,7 @@
       "expected_route": "sql",
       "truth_id": "top-region-revenue",
       "reference_sql": "SELECT region, ROUND(SUM(revenue), 2) AS total_revenue FROM uploaded_data GROUP BY region ORDER BY total_revenue DESC",
+      "result_equivalence": {"ordered": true, "accept_prefix_rows": [1]},
       "expected_cells": ["West", "533933.01"],
       "answer_values": ["West", "533933.01"]
     },
@@ -36,6 +37,7 @@
       "expected_route": "sql",
       "truth_id": "top-category-profit",
       "reference_sql": "SELECT category, ROUND(SUM(gross_profit), 2) AS gross_profit FROM uploaded_data GROUP BY category ORDER BY gross_profit DESC",
+      "result_equivalence": {"ordered": true, "accept_prefix_rows": [1]},
       "expected_cells": ["Electronics", "196361.54"],
       "answer_values": ["Electronics", "196361.54"]
     },
@@ -47,6 +49,7 @@
       "expected_route": "sql",
       "truth_id": "peak-month-revenue",
       "reference_sql": "SELECT substr(transaction_date, 1, 7) AS month, ROUND(SUM(revenue), 2) AS total_revenue FROM uploaded_data GROUP BY month ORDER BY total_revenue DESC",
+      "result_equivalence": {"ordered": true, "accept_prefix_rows": [1]},
       "expected_cells": ["2025-10", "113432.96"],
       "answer_values": ["2025-10", "113432.96"]
     },
@@ -117,6 +120,7 @@
       "question": "And which region has the lowest total revenue?",
       "expected_route": "sql",
       "reference_sql": "SELECT region, ROUND(SUM(revenue), 2) AS total_revenue FROM uploaded_data GROUP BY region ORDER BY total_revenue ASC",
+      "result_equivalence": {"ordered": true, "accept_prefix_rows": [1]},
       "expected_cells": ["Central", "292809.13"],
       "answer_values": ["Central", "292809.13"]
     },
