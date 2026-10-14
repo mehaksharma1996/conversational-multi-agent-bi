@@ -86,19 +86,43 @@ Passing one dimension is not evidence for another, so each is scored on its own:
 | sql_syntax | SQLite can plan the model's SQL against the real table |
 | sql_safety | The application's read-only validator accepts it |
 | sql_execution | The message completed with a result |
-| sql_semantic | Every value the ground truth requires appears among the returned cells |
+| sql_semantic | Containment: every value the ground truth requires appears among the returned cells |
+| sql_result_equivalent | Report schema v2: the returned rows equal the result of the case's oracle `reference_sql` (see below) |
 | answer_numeric | The same values appear in the answer text |
 | retrieval_relevance | At least one passage passed the distance filter |
 | citation_structure | No invalid citations or unverified quotes, and sources are present |
 | groundedness | Only for the policy-sentence question: the exact sentence is quoted and the structural check is clean |
 | policy_sql_consistency | Hybrid questions: the SQL was structurally verified against the policy criteria **and** returned the right count |
-| task_completion | Completed, and every applicable dimension above passed |
+| task_completion | Completed, and every applicable dimension above passed (from schema v2 this includes `sql_result_equivalent` wherever the case has a `reference_sql`) |
+
+### Result-set equivalence (`sql_result_equivalent`)
+
+Added in report schema `live-demo-eval-v2` because containment alone credits a query that returns
+the expected cells plus wrong ones. Implemented in `packages/evaluation/result_sets.py`:
+
+- Column counts must match, and columns are compared **by position**; column names (aliases) are
+  ignored. Extra columns or a different column order are not equivalent.
+- Row counts must match, and rows are paired one-to-one by a maximum matching, so duplicates must
+  occur the same number of times and one reference row never matches two returned rows.
+- Rows are unordered unless the case sets `result_equivalence.ordered`. Ranking questions
+  ("which region has the highest …") are ordered and set `accept_prefix_rows: [1]`, so either the
+  full ranking or its first row is accepted, and nothing else.
+- Numbers (integers, floats, decimals) match when they differ by **strictly less than 0.005**,
+  computed exactly in decimal arithmetic. Nulls match only nulls (NaN is null), booleans only
+  booleans (`true` is not `1`), and strings only identical strings (no trimming, case folding, or
+  numeric coercion).
+- It applies only to cases with a `reference_sql` and only to completed answers; document-only
+  cases are `not applicable`. `sql_semantic` is kept unchanged so the two can be compared.
+
+Reports with schema `live-demo-eval-v1` were scored on containment alone; their
+`task_completion` is not comparable with v2 reports.
 
 ### Limits of the method
 
 - One run of one model is a sample, not a rate.
-- "Semantic" correctness means the expected values are present in the result; a query can contain
-  them and still be wrong in another way.
+- `sql_semantic` means the expected values are present in the result; a query can contain them and
+  still be wrong in another way. `sql_result_equivalent` closes that gap but is strict about result
+  shape: a reasonable answer with extra columns or a different column order does not count.
 - Groundedness has no LLM judge; it is deterministic for one case only. The exploratory cases are
   never scored.
 - Token counts are provider-reported (Gemini thinking tokens are counted as output, as they are

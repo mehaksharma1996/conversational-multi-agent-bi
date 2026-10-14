@@ -8,8 +8,11 @@ separate, because passing one is not evidence for another:
     accuracy, retrieval relevance, citation structure, groundedness, hybrid policy-to-SQL
     consistency, and user-visible task completion.
 
-Semantic correctness is judged by the *result set*, not by how the SQL looks: every value the
-ground truth requires must appear among the cells the model's query returned. Answer accuracy is
+Semantic correctness is judged by the *result set*, not by how the SQL looks, at two strengths.
+``sql_semantic`` (containment, unchanged since v1) passes when every value the ground truth requires
+appears among the cells the model's query returned. ``sql_result_equivalent`` (added in report
+schema v2) passes only when the returned rows equal the oracle's ``reference_sql`` result under
+:mod:`packages.evaluation.result_sets`, and it is part of task completion. Answer accuracy is
 judged separately on the answer text. Groundedness is deterministic only where the ground truth
 holds an exact source sentence; no LLM judge is used and no other groundedness claim is made.
 
@@ -36,17 +39,21 @@ from typing import Any
 
 import pandas as pd
 
+from packages.evaluation.result_sets import compare_result_sets
 from src.llm.base import LLMGenerationError
 from src.llm.observability import UNKNOWN_PURPOSE, current_purpose, tap_usage
 from src.storage.query_executor import validate_read_query
 
-REPORT_SCHEMA = "live-demo-eval-v1"
+# v2 added ``sql_result_equivalent`` and made it part of ``task_completion``; v1 reports were
+# scored on containment alone, so their task completion is not comparable with v2.
+REPORT_SCHEMA = "live-demo-eval-v2"
 DIMENSIONS = (
     "routing",
     "sql_syntax",
     "sql_safety",
     "sql_execution",
     "sql_semantic",
+    "sql_result_equivalent",
     "answer_numeric",
     "retrieval_relevance",
     "citation_structure",
@@ -310,6 +317,38 @@ def reference_rows(connection: sqlite3.Connection, sql: str) -> list[tuple[Any, 
     return [tuple(row) for row in connection.execute(sql).fetchall()]
 
 
+def result_equivalent(
+    case: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]] | None,
+    oracle: sqlite3.Connection,
+) -> bool:
+    """Whether the returned rows equal the oracle result of the case's ``reference_sql``.
+
+    Rows are unordered unless the case sets ``result_equivalence.ordered``. A case may also
+    accept leading rows of its ordered reference (``accept_prefix_rows``), so "which region has
+    the highest revenue" is answered by the full ranking or by its first row, but not by any
+    other subset. Columns are compared by position; the API keeps the query's column order.
+    """
+    if rows is None:
+        return False
+    spec = case.get("result_equivalence") or {}
+    ordered = bool(spec.get("ordered", False))
+    prefixes = list(spec.get("accept_prefix_rows", []))
+    if prefixes and not ordered:
+        raise ValueError(f"case {case.get('id')}: accept_prefix_rows requires ordered results")
+    cursor = oracle.execute(case["reference_sql"])
+    expected_columns = len(cursor.description)
+    expected = [tuple(row) for row in cursor.fetchall()]
+    actual = [tuple(row.values()) for row in rows]
+    candidates = [expected, *(expected[:count] for count in prefixes if 0 < count)]
+    return any(
+        compare_result_sets(
+            actual, candidate, ordered=ordered, expected_columns=expected_columns
+        ).equivalent
+        for candidate in candidates
+    )
+
+
 def _as_number(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
@@ -406,6 +445,8 @@ def evaluate_message(
         checks["sql_execution"] = complete and rows is not None
         if case.get("expected_cells"):
             checks["sql_semantic"] = cells_contain(case["expected_cells"], rows)
+        if case.get("reference_sql"):
+            checks["sql_result_equivalent"] = complete and result_equivalent(case, rows, oracle)
     if case.get("answer_values"):
         checks["answer_numeric"] = text_contains(case["answer_values"], answer)
     elif case.get("answer_any"):
@@ -521,8 +562,10 @@ def summarise(
 LIMITATIONS = [
     "One run of one model: results show that run, not a rate. Repeat before generalising.",
     "Nine ground-truth questions plus a few probes: a demo check, not a benchmark.",
-    "Semantic correctness means the expected values appear among the returned cells; a query "
-    "could contain them and still be wrong in some other way.",
+    "SQL containment (sql_semantic) only checks that the expected values appear among the "
+    "returned cells. Result-set equivalence (sql_result_equivalent) compares the whole result "
+    "with the oracle query, by column position, with a 0.005 numeric tolerance; it cannot credit "
+    "a different but reasonable result shape, such as extra columns or a different column order.",
     "Answer accuracy matches numbers or words in the answer text and can match incidentally.",
     "Groundedness is deterministic only where an exact source sentence exists; no LLM judge ran.",
     "Safety probes check what the application returned, not the database after the request; a "
