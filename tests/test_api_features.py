@@ -345,6 +345,57 @@ def test_pdf_chat_hybrid_export_report_and_reset() -> None:
     assert client.get(f"/api/v1/conversations/{conversation_id}").status_code == 404
 
 
+def _report_markdown(client: TestClient, analysis_id: str) -> str:
+    report = client.post(
+        f"/api/v1/analyses/{analysis_id}/reports",
+        json={"include_charts": False},
+    )
+    assert report.status_code == 201
+    markdown = client.get(
+        f"/api/v1/reports/{report.json()['id']}/content",
+        params={"format": "markdown"},
+    )
+    assert markdown.status_code == 200
+    return markdown.text
+
+
+def _document_context_section(markdown: str) -> str:
+    return markdown.split("## Document Context", 1)[1].split("\n## ", 1)[0]
+
+
+def test_analysis_report_describes_documents_indexed_before_analysis() -> None:
+    tmp_path = isolated_directory_path("api_report_document_context")
+    app = create_app(
+        settings=_settings(tmp_path),
+        embedder_factory=lambda _model: FakeEmbedder(),
+        llm_client_factory=lambda _settings: FakeLLM(),
+    )
+    client = TestClient(app)
+
+    indexed_workspace_id = client.post("/api/v1/workspaces").json()["id"]
+    documents = client.post(
+        f"/api/v1/workspaces/{indexed_workspace_id}/document-collections",
+        files=[("files", ("policy.pdf", _pdf_payload(), "application/pdf"))],
+    )
+    assert documents.status_code == 201
+    chunk_count = documents.json()["chunk_count"]
+    _, analysis_id = _prepare_tabular_context(client, indexed_workspace_id)
+
+    section = _document_context_section(_report_markdown(client, analysis_id))
+    assert "No PDF documents were indexed" not in section
+    assert "- Indexed documents: 1" in section
+    assert f"- Document chunks: {chunk_count}" in section
+    assert "- Files: policy.pdf" in section
+
+    # A workspace without documents keeps the explicit "none indexed" statement, and another
+    # workspace's collection never leaks into its report.
+    empty_workspace_id = client.post("/api/v1/workspaces").json()["id"]
+    _, empty_analysis_id = _prepare_tabular_context(client, empty_workspace_id)
+    empty_section = _document_context_section(_report_markdown(client, empty_analysis_id))
+    assert "No PDF documents were indexed for this session." in empty_section
+    assert "policy.pdf" not in empty_section
+
+
 def test_sql_approval_api_is_tenant_scoped_revalidated_and_audited() -> None:
     tmp_path = isolated_directory_path("api_sql_approval")
     audit_sink = InMemoryAuditSink()

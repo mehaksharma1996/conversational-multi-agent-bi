@@ -421,24 +421,7 @@ def create_analysis(
         if command.anomaly_features is not None
         else dataset.recommended_anomaly_features
     )
-    try:
-        with observability.operation("analysis.run", identity) as operation:
-            bundle = service.analyze(
-                AnalyzeTabularCommand(
-                    dataframe=dataset.table.dataframe,
-                    profile=dataset.profile,
-                    schema_mapping=dataset.schema_mapping,
-                    anomaly_features=anomaly_features,
-                    anomaly_contamination=command.anomaly_contamination,
-                )
-            )
-            operation.set(
-                row_count=dataset.table.row_count,
-                mapping_version=dataset.mapping_version,
-                anomaly_flagged_count=bundle.anomaly_report.flagged_count,
-            )
-    except ValueError as exc:
-        raise ApiError(422, "invalid_analysis_configuration", str(exc)) from exc
+    # Resolved before analysis so the report and session memory describe the same documents.
     documents = repository.latest_document_collection_for_workspace(
         dataset.workspace_id,
         identity.tenant_id,
@@ -452,6 +435,25 @@ def create_analysis(
         if documents is not None
         else None
     )
+    try:
+        with observability.operation("analysis.run", identity) as operation:
+            bundle = service.analyze(
+                AnalyzeTabularCommand(
+                    dataframe=dataset.table.dataframe,
+                    profile=dataset.profile,
+                    schema_mapping=dataset.schema_mapping,
+                    anomaly_features=anomaly_features,
+                    anomaly_contamination=command.anomaly_contamination,
+                    document_status=document_status,
+                )
+            )
+            operation.set(
+                row_count=dataset.table.row_count,
+                mapping_version=dataset.mapping_version,
+                anomaly_flagged_count=bundle.anomaly_report.flagged_count,
+            )
+    except ValueError as exc:
+        raise ApiError(422, "invalid_analysis_configuration", str(exc)) from exc
     memory = build_session_memory(
         profile=dataset.profile,
         schema_mapping=dataset.schema_mapping,
