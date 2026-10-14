@@ -83,7 +83,7 @@ def _executive_summary(
     bullets = [
         f"Analyzed {profile.row_count:,} rows across {profile.column_count:,} columns.",
         f"Detected {len(available)} available analysis capability path(s).",
-        f"Flagged {anomaly_report.flagged_count:,} potential anomalous row(s).",
+        _anomaly_summary(anomaly_report),
     ]
     if profile.duplicate_row_count:
         bullets.append(f"Found {profile.duplicate_row_count:,} duplicate row(s).")
@@ -173,13 +173,35 @@ def _anomaly_section(anomaly_report: AnomalyReport) -> ReportSection:
     bullets = [
         f"Method: {anomaly_report.method}",
         f"Feature columns: {', '.join(anomaly_report.feature_columns) or 'None'}",
-        f"Flagged rows: {anomaly_report.flagged_count:,}",
+        f"Unique rows flagged (model or rules): {anomaly_report.total_flagged_count:,}",
+        f"Flagged by the model: {anomaly_report.model_flagged_count:,}; flagged by rules: "
+        f"{anomaly_report.rule_flagged_count:,} (a row can be flagged by both).",
     ]
+    if anomaly_report.flagged_count:
+        bullets.append(_shortlist_text(anomaly_report))
     if not anomaly_report.flagged_rows.empty:
         top_rows = anomaly_report.flagged_rows.head(5)
         for _, row in top_rows.iterrows():
             bullets.append(f"Row {row['source_row']} ranked {row['anomaly_rank']}: {row['reason']}")
     return ReportSection(title="Anomaly Findings", bullets=bullets)
+
+
+def _anomaly_summary(anomaly_report: AnomalyReport) -> str:
+    summary = (
+        f"Flagged {anomaly_report.total_flagged_count:,} unique row(s) for anomaly review "
+        f"({anomaly_report.model_flagged_count:,} by the model, "
+        f"{anomaly_report.rule_flagged_count:,} by rules; a row can be flagged by both)."
+    )
+    if anomaly_report.flagged_count:
+        summary += f" {_shortlist_text(anomaly_report)}"
+    return summary
+
+
+def _shortlist_text(anomaly_report: AnomalyReport) -> str:
+    return (
+        f"Review shortlist: the top {anomaly_report.flagged_count:,} of "
+        f"{anomaly_report.total_flagged_count:,} flagged row(s) by anomaly score."
+    )
 
 
 def _classification_section(

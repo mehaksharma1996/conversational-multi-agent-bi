@@ -5,8 +5,9 @@ from __future__ import annotations
 import pandas as pd
 
 from src.agents.report_agent import BusinessReport, ReportSection
-from src.analytics.anomaly_detection import detect_anomalies
+from src.analytics.anomaly_detection import detect_anomalies, recommend_anomaly_features
 from src.analytics.basic_analytics import run_basic_analytics
+from src.analytics.pipeline import build_analysis_bundle
 from src.memory.session_memory import (
     SessionMemory,
     answer_from_memory,
@@ -267,3 +268,37 @@ def test_build_session_memory_carries_forward_previous_conversation_state() -> N
     assert refreshed.last_sql == "SELECT 1"
     assert refreshed.last_sql_question == "Show top merchants"
     assert refreshed.recent_questions == ["Show top merchants"]
+
+
+def test_memory_answer_reports_the_flagged_total_not_the_shortlist_size() -> None:
+    amounts = [50 + ((index * 37) % 101) * 0.9 + (index % 7) * 0.13 for index in range(400)]
+    dataframe = pd.DataFrame(
+        {"amount": amounts, "merchant": [f"M{index % 9}" for index in range(400)]}
+    )
+    profile = profile_dataframe(dataframe)
+    mapping = map_schema(profile)
+    bundle = build_analysis_bundle(
+        dataframe=dataframe,
+        profile=profile,
+        schema_mapping=mapping,
+        anomaly_features=recommend_anomaly_features(profile, mapping),
+        anomaly_contamination=0.1,
+        document_status=None,
+    )
+    memory = build_session_memory(
+        profile=profile,
+        schema_mapping=mapping,
+        capability_report=bundle.capability_report,
+        analytics_report=bundle.analytics_report,
+        anomaly_report=bundle.anomaly_report,
+        chart_specs=bundle.chart_specs,
+        business_report=bundle.business_report,
+        document_status=None,
+    )
+
+    answer = answer_from_memory("Which anomalies were flagged?", memory)
+
+    assert answer is not None
+    assert "Unique rows flagged (model or rules): 40" in answer
+    assert "the top 20 of 40 flagged row(s)" in answer
+    assert "Flagged rows: 20" not in answer

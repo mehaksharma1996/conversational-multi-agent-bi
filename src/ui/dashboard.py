@@ -223,8 +223,8 @@ def _render_workflow_status(
     )
     status_cols[2].metric(
         "Anomalies",
-        anomaly_report.flagged_count,
-        help="Rows flagged by the current anomaly detector.",
+        anomaly_report.total_flagged_count,
+        help="Unique rows flagged by the anomaly model or rules.",
     )
     status_cols[3].metric(
         "PDF Chunks",

@@ -156,6 +156,52 @@ def test_tabular_vertical_slice_requires_review_before_analysis(client: TestClie
     assert fetched.json() == body
 
 
+def test_analysis_response_separates_flagged_total_from_review_shortlist() -> None:
+    client = TestClient(
+        create_app(
+            settings=_settings(
+                isolated_directory_path("api_anomaly_counts"),
+                max_tabular_upload_bytes=50_000,
+                max_tabular_rows=1_000,
+            )
+        )
+    )
+    rows = ["amount,merchant"]
+    rows.extend(
+        f"{50 + ((index * 37) % 101) * 0.9 + (index % 7) * 0.13:.2f},M{index % 9}"
+        for index in range(400)
+    )
+    upload = client.post(
+        f"/api/v1/workspaces/{_create_workspace(client)}/tabular-uploads",
+        files={"file": ("amounts.csv", ("\n".join(rows) + "\n").encode(), "text/csv")},
+    )
+    assert upload.status_code == 201
+    dataset_id = _create_dataset(client, str(upload.json()["id"]))
+    mapping = {field: None for field in _schema_mapping()} | {"amount": "amount"}
+    confirmed = client.put(f"/api/v1/datasets/{dataset_id}/schema-mapping", json=mapping)
+    assert confirmed.status_code == 200
+
+    analysis = client.post(
+        f"/api/v1/datasets/{dataset_id}/analyses",
+        json={"anomaly_contamination": 0.1},
+    )
+
+    assert analysis.status_code == 201
+    anomaly = analysis.json()["anomaly"]
+    assert anomaly["model_flagged_count"] == 40
+    assert anomaly["total_flagged_count"] == 40
+    assert anomaly["flagged_count"] == len(anomaly["flagged_rows"]) == 20
+    summary = next(
+        section
+        for section in analysis.json()["report"]["sections"]
+        if section["title"] == "Executive Summary"
+    )
+    assert any(
+        "Flagged 40 unique row(s)" in bullet and "the top 20 of 40" in bullet
+        for bullet in summary["bullets"]
+    )
+
+
 def test_excel_sheet_discovery_and_selection_are_exposed(client: TestClient) -> None:
     workbook = BytesIO()
     with pd.ExcelWriter(workbook) as writer:

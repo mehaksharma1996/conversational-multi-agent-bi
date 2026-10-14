@@ -215,7 +215,7 @@ def _anomaly_chart(
     return ChartSpec(
         title="Flagged Anomalies",
         chart_type="scatter",
-        description="Rows flagged by the anomaly detector.",
+        description="Top-ranked review candidates flagged by the anomaly detector.",
         figure=figure,
         metadata={
             "source": "anomaly_report.flagged_rows",

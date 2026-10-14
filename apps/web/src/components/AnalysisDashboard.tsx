@@ -68,6 +68,8 @@ export function AnalysisDashboard({
   downloadBusy,
   onDownloadReport,
 }: AnalysisDashboardProps) {
+  // The listed rows are a ranked shortlist capped by the API; the total counts every flagged row.
+  const shortlist = `${analysis.anomaly.flagged_count.toLocaleString()} of ${analysis.anomaly.total_flagged_count.toLocaleString()}`;
   return (
     <section className="panel analysis-panel" aria-labelledby="analysis-results-heading">
       <div className="section-heading">
@@ -98,7 +100,10 @@ export function AnalysisDashboard({
         ))}
         <div className="metric-card metric-card--accent">
           <span>Anomalies flagged</span>
-          <strong>{analysis.anomaly.flagged_count.toLocaleString()}</strong>
+          <strong>{analysis.anomaly.total_flagged_count.toLocaleString()}</strong>
+          {analysis.anomaly.flagged_count > 0 ? (
+            <small className="fine-print">Top {shortlist} listed for review</small>
+          ) : null}
         </div>
         {analysis.classification.metrics ? (
           <div className="metric-card metric-card--accent">
@@ -161,6 +166,7 @@ export function AnalysisDashboard({
           <h3>Anomaly review</h3>
           <dl className="definition-grid">
             <div><dt>Method</dt><dd>{analysis.anomaly.method}</dd></div>
+            <div><dt>Unique rows flagged</dt><dd>{analysis.anomaly.total_flagged_count}</dd></div>
             <div><dt>Model flagged</dt><dd>{analysis.anomaly.model_flagged_count}</dd></div>
             <div><dt>Rule flagged</dt><dd>{analysis.anomaly.rule_flagged_count}</dd></div>
             <div><dt>Features</dt><dd>{analysis.anomaly.feature_columns.join(", ") || "None"}</dd></div>
@@ -168,7 +174,13 @@ export function AnalysisDashboard({
           {analysis.anomaly.limitations.map((limitation) => (
             <p className="fine-print" key={limitation}>{limitation}</p>
           ))}
-          <RecordsTable caption="Rows flagged for review" records={analysis.anomaly.flagged_rows} />
+          <p className="fine-print">
+            A row can be flagged by both the model and the rules; it is counted once.
+          </p>
+          <RecordsTable
+            caption={`Review shortlist: top ${shortlist} flagged rows by anomaly score`}
+            records={analysis.anomaly.flagged_rows}
+          />
         </article>
 
         <article className="result-card">

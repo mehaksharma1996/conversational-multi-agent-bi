@@ -213,6 +213,7 @@ class AnomalyResponse(StrictModel):
     flagged_count: int
     model_flagged_count: int
     rule_flagged_count: int
+    total_flagged_count: int
     score_percentiles: dict[str, float]
     flagged_rows: list[dict[str, Any]]
     limitations: list[str]

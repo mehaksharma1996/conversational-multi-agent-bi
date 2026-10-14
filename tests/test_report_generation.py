@@ -10,8 +10,9 @@ from src.agents.report_agent import (
     generate_business_report,
     report_to_markdown,
 )
-from src.analytics.anomaly_detection import detect_anomalies
+from src.analytics.anomaly_detection import detect_anomalies, recommend_anomaly_features
 from src.analytics.basic_analytics import run_basic_analytics
+from src.analytics.pipeline import build_analysis_bundle
 from src.charts.chart_builder import build_charts
 from src.profiling.capability_detector import detect_capabilities
 from src.profiling.data_profiler import profile_dataframe
@@ -142,3 +143,41 @@ def test_build_report_pdf_renders_non_latin1_text() -> None:
 
     assert pdf_bytes.startswith(b"%PDF")
     assert len(pdf_bytes) > 1000
+
+
+def _bundle_with_more_flags_than_the_shortlist():
+    amounts = [50 + ((index * 37) % 101) * 0.9 + (index % 7) * 0.13 for index in range(400)]
+    dataframe = pd.DataFrame(
+        {"amount": amounts, "merchant": [f"M{index % 9}" for index in range(400)]}
+    )
+    profile = profile_dataframe(dataframe)
+    mapping = map_schema(profile)
+    return build_analysis_bundle(
+        dataframe=dataframe,
+        profile=profile,
+        schema_mapping=mapping,
+        anomaly_features=recommend_anomaly_features(profile, mapping),
+        anomaly_contamination=0.1,
+        document_status=None,
+    )
+
+
+def test_report_states_the_unique_flagged_total_and_the_capped_shortlist() -> None:
+    bundle = _bundle_with_more_flags_than_the_shortlist()
+    anomaly = bundle.anomaly_report
+    assert (anomaly.total_flagged_count, anomaly.flagged_count) == (40, 20)
+
+    sections = {section.title: section.bullets for section in bundle.business_report.sections}
+    summary = " ".join(sections["Executive Summary"])
+    assert "Flagged 40 unique row(s) for anomaly review (40 by the model, 0 by rules;" in summary
+    assert "a row can be flagged by both" in summary
+    assert "Review shortlist: the top 20 of 40 flagged row(s) by anomaly score." in summary
+    assert "Flagged 20" not in summary
+
+    findings = sections["Anomaly Findings"]
+    assert "Unique rows flagged (model or rules): 40" in findings
+    assert (
+        "Flagged by the model: 40; flagged by rules: 0 (a row can be flagged by both)." in findings
+    )
+    assert "Review shortlist: the top 20 of 40 flagged row(s) by anomaly score." in findings
+    assert not any(bullet.startswith("Flagged rows:") for bullet in findings)

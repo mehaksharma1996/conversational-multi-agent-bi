@@ -219,6 +219,10 @@
             },
             "title": "Score Percentiles",
             "type": "object"
+          },
+          "total_flagged_count": {
+            "title": "Total Flagged Count",
+            "type": "integer"
           }
         },
         "required": [
@@ -228,6 +232,7 @@
           "flagged_count",
           "model_flagged_count",
           "rule_flagged_count",
+          "total_flagged_count",
           "score_percentiles",
           "flagged_rows",
           "limitations"
