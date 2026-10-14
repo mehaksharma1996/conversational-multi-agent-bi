@@ -202,6 +202,58 @@ The manifest pins the CSV, policy PDF, ground truth, and both case files by SHA-
 line endings normalised to LF, because Windows checkouts rewrite them). Any change to a pinned file
 fails `tests/test_workflow_cases.py` until the manifest is updated in the same reviewed change.
 
+## Scripted workflow baseline
+
+`evals/baseline/v2/workflow-baseline.json` records one run of all manifest cases through the real
+API with the scripted model (`tests/e2e/retail_app.py`). It is **application-path regression
+evidence**: it shows the application still handles known-correct model output. It is not a
+measurement of model accuracy, and the file says so.
+
+- Every `measured` case is in the pass-rate denominator, including failures and cases the run
+  never reached (`not_attempted`). Other coverage labels are `not_measured`: run and observed,
+  never counted as a pass or a failure. Rates carry Wilson 95% intervals.
+- Investigation cases are run and recorded with non-sensitive observations (whether the expected
+  cells appeared, how many causal phrases the answer used); they define no expected route and are
+  never scored.
+- The file holds no timestamps, identifiers, latency, tokens, cost, answers, SQL text, or rows.
+
+Five safety invariants are judged from harness evidence, independently of the scores, and fail
+closed when evidence is missing or a check cannot decide:
+
+| Invariant | Evidence |
+|---|---|
+| `read_only_sql` | Every statement SQLite ran on a query-executor connection (trace callback), not only the displayed SQL. Each must come from a `mode=ro` connection and must prepare on an empty schema copy under an authorizer that allows only reads; an answer with executed SQL the trace did not see fails. |
+| `no_known_string_leakage` | Every response body is searched for the configured key and the known prompt fragments. It finds only those strings; it is not a general secret-disclosure detector. |
+| `no_server_errors` | Every request got a response, none was 5xx, and every attempted case has its message response. |
+| `dataset_unchanged` | Content digests of every dataset database (read-only connections) before the first question and after the last, plus the pinned fixture hashes. |
+| `no_live_model` | The run is labelled scripted, the provider and model are the scripted ones, every budgeted call reached the scripted model, and an audit hook saw no socket connection or name lookup to a non-loopback host. |
+
+The pytest check (`tests/test_workflow_baseline.py`) re-runs every case and requires an exact
+match. Provenance (manifest, fixtures, schemas), case set, coverage, outcomes, dimensions, metrics,
+and safety are critical; observations and safety-evidence counts are reported separately as
+noncritical. To update, start from a directory without `.env` with `PYTHON_DOTENV_DISABLED=1` and
+the repository on `PYTHONPATH`:
+
+```powershell
+python -m tests.e2e.workflow_baseline_runner --update --justification "why this change is right"
+```
+
+Previously measured cases never leave the measured denominator through an ordinary update. An
+update is refused, whatever the justification and with no override, when:
+
+- any safety invariant failed (also for a first baseline; a missing invariant counts as failed);
+- a previously measured case got worse: a newly failed or not-attempted outcome, or a check that
+  changed from true to false;
+- a previously measured case was deleted; or
+- a previously measured case was reclassified to any unmeasured coverage label.
+
+Additions (including a new case that fails, recorded as it is), improvements, provenance or
+definition changes, changes to unmeasured cases, and noncritical observation changes are accepted
+only with a written justification of at least 20 characters. It is stored in the file's `review`
+block with the accepted changes, so the diff shows what was accepted and why. Retiring a measured
+case on purpose is not an ordinary update; it needs a separate benchmark-maintenance process with
+explicit human review, which E1b-2 does not provide.
+
 ## Optional live evaluation
 
 ```powershell
