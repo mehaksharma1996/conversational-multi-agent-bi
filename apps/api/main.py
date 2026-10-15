@@ -496,6 +496,3 @@ def _workspace_lifecycle_listener(
         )
 
     return listener
-
-
-app = create_app()

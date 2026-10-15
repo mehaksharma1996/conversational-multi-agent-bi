@@ -4,15 +4,23 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-import streamlit as st
+from config.runtime import load_runtime_dotenv
 
-from config.settings import get_settings
-from src.memory.session_keys import SESSION_ID
-from src.storage.session_cleanup import maybe_run_periodic_cleanup, touch_session_heartbeat
-from src.ui.chat_panel import render_chat_panel
-from src.ui.dashboard import render_dashboard
-from src.ui.upload_panel import render_upload_panel
-from src.utils.identity import LOCAL_DEV_TENANT_ID, derive_tenant_id
+# Streamlit reruns this module. Loading is idempotent because existing process values win.
+load_runtime_dotenv()
+
+import streamlit as st  # noqa: E402 - runtime dotenv must load before framework imports
+
+from config.settings import get_settings  # noqa: E402
+from src.memory.session_keys import SESSION_ID  # noqa: E402
+from src.storage.session_cleanup import (  # noqa: E402
+    maybe_run_periodic_cleanup,
+    touch_session_heartbeat,
+)
+from src.ui.chat_panel import render_chat_panel  # noqa: E402
+from src.ui.dashboard import render_dashboard  # noqa: E402
+from src.ui.upload_panel import render_upload_panel  # noqa: E402
+from src.utils.identity import LOCAL_DEV_TENANT_ID, derive_tenant_id  # noqa: E402
 
 
 def configure_page() -> None:

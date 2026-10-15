@@ -63,8 +63,10 @@ def main(argv: list[str] | None = None) -> int:
 
     directory = args.directory
     if directory is None:
+        from config.runtime import load_runtime_dotenv
         from config.settings import get_settings
 
+        load_runtime_dotenv()
         directory = get_settings().audit_dir
     if not directory.is_dir():
         results: dict[str, dict[str, Any]] = {}

@@ -49,6 +49,9 @@ def main(
     if args.max_items is not None and args.max_items < 1:
         print("--max-items must be at least 1.", file=sys.stderr)
         return 2
+    from config.runtime import load_runtime_dotenv
+
+    load_runtime_dotenv()
     try:
         labelled: dict[str, Any] = json.loads(args.labelled.read_text(encoding="utf-8"))
         client, provider, model = (client_builder or _build_client)()

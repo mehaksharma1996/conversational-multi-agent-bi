@@ -9,8 +9,6 @@ from threading import Lock, RLock
 from typing import Any
 from uuid import uuid4
 
-import chromadb
-
 from src.documents.chunker import DocumentChunk
 from src.documents.embedding import TextEmbedder
 from src.documents.lexical import BM25Index
@@ -53,7 +51,18 @@ class ChromaDocumentStore:
         self._lexical_cache: tuple[tuple[str, int], BM25Index, list[tuple[str, dict]]] | None = None
         self.persist_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:
-            self._client: Any = chromadb.PersistentClient(path=str(self.persist_dir))
+            # ChromaDB 1.5.9 constructs a global Settings object during its initial import and
+            # may inspect a working-directory .env before repository code can configure it.
+            # Runtime entry points therefore import this module only after explicit configuration;
+            # S0a offline processes import it from an isolated working directory. Passing
+            # _env_file=None prevents the separate client Settings object from reading dotenv.
+            import chromadb
+            from chromadb.config import Settings as ChromaSettings
+
+            chroma_settings = ChromaSettings(_env_file=None)
+            self._client: Any = chromadb.PersistentClient(
+                path=str(self.persist_dir), settings=chroma_settings
+            )
             self._collection: Any = self._client.get_or_create_collection(
                 name=self.collection_name,
                 metadata={"hnsw:space": "cosine"},

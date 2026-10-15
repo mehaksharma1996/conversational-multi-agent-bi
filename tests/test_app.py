@@ -11,3 +11,7 @@ def test_initial_application_render_has_no_exceptions() -> None:
 
     assert not app.exception
     assert app.title[0].value == "Conversational Business Intelligence Workbench"
+
+    rerun = app.run(timeout=30)
+    assert not rerun.exception
+    assert rerun.title[0].value == "Conversational Business Intelligence Workbench"
