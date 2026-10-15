@@ -203,6 +203,8 @@ def test_api_image_runs_as_a_fixed_non_root_user_with_a_read_only_friendly_layou
     assert "HOME=/tmp" in DOCKERFILE_API
     cmd = _instructions(DOCKERFILE_API, "CMD")[0]
     assert cmd.startswith('CMD ["uvicorn"'), "exec form so signals reach the server"
+    assert '"--factory", "apps.api.runtime:create_runtime_app"' in cmd
+    assert "apps.api.main:app" not in DOCKERFILE_API
     assert "--timeout-graceful-shutdown" in cmd
 
 

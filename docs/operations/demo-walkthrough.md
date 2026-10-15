@@ -68,7 +68,8 @@ Ground-truth answers for every sample question are in
 ## Live-provider demo
 
 Set `GEMINI_API_KEY` (and accept the consent notice in the UI), start the normal API
-(`python -m uvicorn apps.api.main:app --port 8000`), and repeat the script. A live model may route,
+(`python -m uvicorn --factory apps.api.runtime:create_runtime_app --port 8000`), and repeat the
+script. A live model may route,
 write SQL, or quote differently from the script, so some sample questions can be answered
 differently or refused. That behavior has **not** been evaluated for this project; do not assume
 the scripted results transfer.

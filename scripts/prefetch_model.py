@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import sys
 
+from config.runtime import load_runtime_dotenv
 from config.settings import get_settings
 from src.documents.embedding import EmbeddingError, SentenceTransformerEmbedder
 
 
 def main() -> int:
+    load_runtime_dotenv()
     settings = get_settings()
     embedder = SentenceTransformerEmbedder(settings.embedding_model)
     try:

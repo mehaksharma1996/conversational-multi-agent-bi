@@ -17,7 +17,12 @@ Every result includes `provenance`: `route`, `request_id`, the executed `sql` or
 instructions. Errors are a fixed message plus a category (`unsafe_query`, `timeout`, `invalid_input`,
 `internal`).
 
-## Configuration (environment of the server process)
+## Configuration (runtime environment)
+
+The supported `python -m apps.mcp` entry point explicitly loads the repository-root `.env` before
+importing the server, without overriding variables already present in the process environment.
+`PYTHON_DOTENV_DISABLED=1` disables that file load. Importing `apps.mcp.server` only defines the
+server and never starts stdio processing.
 
 | Variable | Default | Meaning |
 |---|---|---|

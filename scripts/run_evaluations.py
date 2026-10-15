@@ -98,10 +98,12 @@ def _run_live(args: argparse.Namespace, fixtures: Any) -> int:
     if os.getenv(LIVE_FLAG) != "1":
         print(f"Live evaluation requires {LIVE_FLAG}=1.", file=sys.stderr)
         return 2
+    from config.runtime import load_runtime_dotenv
     from config.settings import get_settings
     from src.llm.gemini_client import build_gemini_client
     from src.llm.observability import LLMPricing, ObservedLLMClient
 
+    load_runtime_dotenv()
     settings = get_settings()
     if not settings.gemini_configured:
         print("Live evaluation requires a configured Gemini API key.", file=sys.stderr)

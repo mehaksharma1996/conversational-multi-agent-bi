@@ -72,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    from config.runtime import load_runtime_dotenv
+
+    load_runtime_dotenv()
     try:
         budget = _budget(args)
         client, api_key = _build_client(budget)

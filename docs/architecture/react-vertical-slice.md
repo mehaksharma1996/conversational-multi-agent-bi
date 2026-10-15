@@ -45,7 +45,7 @@ confirmed fraud or autonomous decisions.
 Start FastAPI from the repository root:
 
 ```powershell
-& ".\.venv\Scripts\python.exe" -m uvicorn apps.api.main:app --reload
+& ".\.venv\Scripts\python.exe" -m uvicorn --factory apps.api.runtime:create_runtime_app --reload
 ```
 
 Start the web client in a second terminal:

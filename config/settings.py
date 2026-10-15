@@ -10,10 +10,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 # Empirically measured with all-MiniLM-L6-v2 cosine distance: on-topic
 # questions (direct or loosely worded) against a small business-policy
 # corpus landed at 0.21-0.66; clearly off-topic questions landed at
