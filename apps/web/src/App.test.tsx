@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -55,6 +55,7 @@ vi.mock("./api/client", async (importOriginal) => {
 describe("tabular analysis journey", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    window.history.replaceState(null, "", "/");
     vi.mocked(listWorkspaces).mockResolvedValue([]);
     vi.mocked(listMessages).mockResolvedValue([]);
     vi.mocked(createWorkspace).mockResolvedValue(workspaceFixture);
@@ -83,12 +84,26 @@ describe("tabular analysis journey", () => {
     expect(screen.getByTestId("retention-notice")).toHaveTextContent(
       "deleted 24 hours after its last use",
     );
-    await user.click(screen.getByRole("button", { name: "Export my data" }));
+    await user.click(screen.getByRole("button", { name: "Export workspace" }));
 
     expect(downloadWorkspaceExport).toHaveBeenCalledWith("workspace-1");
     expect(createUrl).toHaveBeenCalledWith(blob);
     expect(revokeUrl).toHaveBeenCalledWith("blob:workspace-export");
     vi.unstubAllGlobals();
+  });
+
+  it("provides deep-linkable navigation with active state and focus management", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Local workspace ready");
+    expect(screen.getByRole("link", { name: /Overview/ })).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("link", { name: /Documents/ }));
+    expect(window.location.hash).toBe("#documents");
+    expect(screen.getByRole("link", { name: /Documents/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ground answers");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).parentElement).toHaveFocus());
   });
 
   it("shows a safe error when the export fails", async () => {
@@ -97,10 +112,10 @@ describe("tabular analysis journey", () => {
     render(<App />);
 
     await screen.findByText("Local workspace ready");
-    await user.click(screen.getByRole("button", { name: "Export my data" }));
+    await user.click(screen.getByRole("button", { name: "Export workspace" }));
 
     expect(await screen.findByRole("alert")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Export my data" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Export workspace" })).toBeEnabled();
   });
 
   it("moves from upload through schema confirmation to deterministic results", async () => {
@@ -108,6 +123,7 @@ describe("tabular analysis journey", () => {
     render(<App />);
 
     await screen.findByText("Local workspace ready");
+    await user.click(screen.getByRole("link", { name: /Data/ }));
     await user.upload(
       screen.getByLabelText("CSV or Excel file"),
       new File(["amount,merchant\n25,North"], "transactions.csv", { type: "text/csv" }),
@@ -138,6 +154,7 @@ describe("tabular analysis journey", () => {
     render(<App />);
 
     await screen.findByText("Local workspace ready");
+    await user.click(screen.getByRole("link", { name: /Documents/ }));
     await user.upload(
       screen.getByLabelText("PDF documents"),
       new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
@@ -145,6 +162,7 @@ describe("tabular analysis journey", () => {
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
 
     expect(await screen.findByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+    await user.click(screen.getByRole("link", { name: /Ask/ }));
     await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
 
     await user.type(
@@ -176,11 +194,13 @@ describe("tabular analysis journey", () => {
     render(<App />);
 
     await screen.findByText("Local workspace ready");
+    await user.click(screen.getByRole("link", { name: /Documents/ }));
     await user.upload(
       screen.getByLabelText("PDF documents"),
       new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
+    await user.click(screen.getByRole("link", { name: /Ask/ }));
     await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
     await user.click(
       screen.getByRole("checkbox", { name: "Require approval before hybrid SQL runs" }),

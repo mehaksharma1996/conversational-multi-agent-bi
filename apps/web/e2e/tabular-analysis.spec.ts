@@ -52,6 +52,7 @@ test("analyst reviews the schema before running deterministic analysis", async (
 
   await page.goto("/");
   await expect(page.getByText("Local workspace ready")).toBeVisible();
+  await page.getByRole("link", { name: /Data/ }).click();
   await page.getByLabel("CSV or Excel file").setInputFiles({
     name: "transactions.csv",
     mimeType: "text/csv",
@@ -118,6 +119,7 @@ test("analyst indexes a PDF and receives a consented cited answer", async ({ pag
 
   await page.goto("/");
   await expect(page.getByText("Local workspace ready")).toBeVisible();
+  await page.getByRole("link", { name: /Documents/ }).click();
   await page.getByLabel("PDF documents").setInputFiles({
     name: "policy.pdf",
     mimeType: "application/pdf",
@@ -126,6 +128,7 @@ test("analyst indexes a PDF and receives a consented cited answer", async ({ pag
   await page.getByRole("button", { name: "Upload and index PDFs" }).click();
 
   await expect(page.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+  await page.getByRole("link", { name: /Ask/ }).click();
   await page.getByRole("button", { name: "I understand, enable Gemini" }).click();
   await page.getByLabel("Business question").fill(messageFixture.question);
   await page.getByRole("button", { name: "Ask workbench" }).click();

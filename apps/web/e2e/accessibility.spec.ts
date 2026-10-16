@@ -67,6 +67,7 @@ async function routeTabularJourney(page: Page, includeChart = false) {
 
 async function reachSchemaReview(page: Page) {
   await page.goto("/");
+  await page.getByRole("link", { name: /Data/ }).click();
   await page.getByLabel("CSV or Excel file").setInputFiles({
     name: "transactions.csv",
     mimeType: "text/csv",
@@ -80,6 +81,47 @@ test("axe baseline: workspace ready", async ({ page }) => {
   await routeWorkspace(page);
   await page.goto("/");
   await expect(page.getByText("Local workspace ready")).toBeVisible();
+  await expectNoAxeViolations(page);
+});
+
+test("workbench navigation is deep-linkable, announces selection, and manages focus", async ({ page }) => {
+  await routeWorkspace(page);
+  await page.goto("/#documents");
+
+  const documents = page.getByRole("link", { name: /Documents/ });
+  await expect(documents).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Ground answers");
+
+  await page.getByRole("link", { name: /Data/ }).click();
+  await expect(page).toHaveURL(/#data$/);
+  await expect(page.getByRole("link", { name: /Data/ })).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("[data-section-heading]")).toBeFocused();
+
+  await page.getByRole("button", { name: "Collapse navigation" }).click();
+  await expect(page.getByRole("button", { name: "Expand navigation" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Analysis", exact: true })).toBeVisible();
+  await expectNoAxeViolations(page);
+});
+
+test("phone navigation opens as a labelled drawer and closes after selection", async ({ page }) => {
+  await routeWorkspace(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+
+  // While the modal drawer is open the toggle is inert and named for closing, so locate it directly.
+  const toggle = page.locator(".mobile-nav-toggle");
+  await expect(toggle).toHaveAccessibleName("Open navigation");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("dialog", { name: "Workbench navigation" })).toHaveCSS(
+    "transform",
+    "matrix(1, 0, 0, 1, 0, 0)",
+  );
+  await page.getByRole("link", { name: /Ask/ }).click();
+  await expect(page).toHaveURL(/#ask$/);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Ask across");
   await expectNoAxeViolations(page);
 });
 
@@ -129,12 +171,14 @@ test("axe baseline: chat answer and provenance warning", async ({ page }) => {
     }
   });
   await page.goto("/");
+  await page.getByRole("link", { name: /Documents/ }).click();
   await page.getByLabel("PDF documents").setInputFiles({
     name: "policy.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF policy"),
   });
   await page.getByRole("button", { name: "Upload and index PDFs" }).click();
+  await page.getByRole("link", { name: /Ask/ }).click();
   await page.getByLabel("Business question").fill(messageFixture.question);
   await page.getByRole("button", { name: "Ask workbench" }).click();
   await expect(page.getByText("Grounding warning:", { exact: false })).toBeVisible();
@@ -173,12 +217,14 @@ test("axe baseline: pending SQL approval controls", async ({ page }) => {
     }
   });
   await page.goto("/");
+  await page.getByRole("link", { name: /Documents/ }).click();
   await page.getByLabel("PDF documents").setInputFiles({
     name: "policy.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF policy"),
   });
   await page.getByRole("button", { name: "Upload and index PDFs" }).click();
+  await page.getByRole("link", { name: /Ask/ }).click();
   await page.getByLabel("Business question").fill(messageFixture.question);
   await page.getByRole("button", { name: "Ask workbench" }).click();
 
@@ -218,18 +264,18 @@ test("keyboard-only journey reaches content in order with visible focus and no t
   await page.keyboard.press("Enter");
   await expect(page.locator("#main-content")).toBeFocused();
 
-  // The guided demo is the first thing in the page, then its two links, then the upload form.
+  // The overview presents the active workspace before the optional guided demo.
   await page.keyboard.press("Tab");
+  const dataSummary = page.getByRole("button", { name: /Dataset\s+Not added/ });
+  await expect(dataSummary).toBeFocused();
+  await expect(dataSummary).toHaveCSS("outline-width", "3px");
   const demoButton = page.getByRole("button", { name: "Load demo data and policy" });
-  await expect(demoButton).toBeFocused();
-  await expect(demoButton).toHaveCSS("outline-width", "3px");
-  const fileInput = page.getByLabel("CSV or Excel file");
-  const focusedCsvInput = page.locator('input[accept=".csv,.xls,.xlsx"]:focus');
-  for (let step = 0; step < 6 && (await focusedCsvInput.count()) === 0; step += 1) {
+  // The remaining workspace summaries precede the guided-demo control in DOM order.
+  for (let step = 0; step < 4; step += 1) {
     await page.keyboard.press("Tab");
   }
-  await expect(fileInput).toBeFocused();
-  await expect(fileInput).toHaveCSS("outline-width", "3px");
+  await expect(demoButton).toBeFocused();
+  await expect(demoButton).toHaveCSS("outline-width", "3px");
 
   const focused: string[] = [];
   for (let index = 0; index < 12; index += 1) {

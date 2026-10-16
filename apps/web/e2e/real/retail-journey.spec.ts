@@ -6,11 +6,12 @@
  * therefore verify the application and its UI, not the quality of any live model.
  *
  * Run with: npm run test:e2e:real   (E2E_REAL_STACK=scripted)
- * Set E2E_CAPTURE=1 to refresh the screenshots under docs/assets/demo.
+ * Set E2E_CAPTURE=1 to refresh screenshots. E2E_CAPTURE_DIR may select a repo-relative output
+ * directory; it defaults to docs/assets/demo.
  */
 import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "../test";
@@ -20,8 +21,9 @@ test.skip(process.env.E2E_REAL_STACK !== "scripted", "requires E2E_REAL_STACK=sc
 test.describe.configure({ mode: "serial" });
 
 const repoRoot = path.resolve(import.meta.dirname, "../../../..");
-const screenshotDir = path.join(repoRoot, "docs/assets/demo");
+const screenshotDir = path.resolve(repoRoot, process.env.E2E_CAPTURE_DIR ?? "docs/assets/demo");
 const capture = process.env.E2E_CAPTURE === "1";
+if (capture) mkdirSync(screenshotDir, { recursive: true });
 
 const REGION = "Which region has the highest total revenue?";
 const TOTAL = "What is total revenue across the dataset?";
@@ -45,15 +47,22 @@ const TABLE_EXPECTATIONS: [string, string[]][] = [
 
 async function shot(target: Page | Locator, name: string) {
   if (!capture) return;
-  // A sticky header would overlay element captures, so make it part of the normal flow.
+  // A sticky context bar would overlay element captures, so make it part of the normal flow.
   const page = "page" in target && typeof target.page === "function" ? target.page() : (target as Page);
   await page.addStyleTag({
-    content: ".site-header{position:static!important}.skip-link{display:none!important}",
+    content: ".context-bar{position:static!important}.skip-link{display:none!important}",
   });
   await target.screenshot({ path: path.join(screenshotDir, `${name}.png`) });
 }
 
 const latest = (page: Page) => page.locator(".message-pair").last();
+
+async function goTo(page: Page, section: "Overview" | "Data" | "Analysis" | "Documents" | "Ask") {
+  if ((page.viewportSize()?.width ?? 1280) <= 760) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+  }
+  await page.getByRole("link", { name: new RegExp(`^${section}`) }).click();
+}
 
 /** Sends the typed question and waits for its answer card, so `latest` never points at the previous one. */
 async function submit(page: Page) {
@@ -63,6 +72,9 @@ async function submit(page: Page) {
 }
 
 async function ask(page: Page, question: string, options: { approval?: boolean } = {}) {
+  if ((await page.getByRole("textbox", { name: "Business question" }).count()) === 0) {
+    await goTo(page, "Ask");
+  }
   const box = page.getByRole("textbox", { name: "Business question" });
   await expect(box).toBeEnabled();
   await box.fill(question);
@@ -73,6 +85,9 @@ async function ask(page: Page, question: string, options: { approval?: boolean }
 }
 
 async function pickSample(page: Page, question: string) {
+  if ((await page.getByRole("textbox", { name: "Business question" }).count()) === 0) {
+    await goTo(page, "Ask");
+  }
   await page.getByRole("button", { name: question }).click();
   await expect(page.getByRole("textbox", { name: "Business question" })).toHaveValue(question);
 }
@@ -123,7 +138,9 @@ test("demo ingestion goes through schema review; data questions wait for confirm
   await page.getByRole("button", { name: "Load demo data and policy" }).click();
 
   await expect(page.getByRole("heading", { name: "Confirm the canonical schema" })).toBeVisible();
+  await goTo(page, "Documents");
   await expect(page.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+  await goTo(page, "Data");
   // The real mapper's suggestions for this table: the measure, date, and region are mapped;
   // "customer_segment" is a grouping rather than an ID, and "status" is a derived flag, so the
   // customer ID and label stay unmapped (with the reason shown for the label).
@@ -133,6 +150,8 @@ test("demo ingestion goes through schema review; data questions wait for confirm
   await expect(page.getByLabel("customer id")).toHaveValue("");
   await expect(page.getByLabel("label")).toHaveValue("");
   await expect(page.getByText("label is left unmapped for the demo:")).toBeVisible();
+  await shot(page.locator("#data-workspace"), "02-schema-review");
+  await goTo(page, "Ask");
   const samples = page.getByRole("region", { name: /Sample questions/ });
   await expect(samples.getByRole("button", { name: REGION })).toBeDisabled();
   // Nothing model-backed is enabled until the data-sharing notice is accepted.
@@ -140,24 +159,27 @@ test("demo ingestion goes through schema review; data questions wait for confirm
   await page.getByRole("button", { name: "I understand, enable Gemini" }).click();
   await expect(samples.getByRole("button", { name: RETURN_RULE })).toBeEnabled();
   await expect(samples.getByRole("button", { name: REGION })).toBeDisabled();
-  await shot(page.locator("#step-data"), "02-schema-review");
 
+  await goTo(page, "Data");
   await page.getByRole("button", { name: "Confirm schema" }).click();
   await expect(page.getByRole("heading", { name: "Configure anomaly review" })).toBeVisible();
+  await goTo(page, "Ask");
   await expect(samples.getByRole("button", { name: REGION })).toBeEnabled();
+  await goTo(page, "Overview");
   await expect(page.getByRole("button", { name: "Demo data loaded" })).toBeDisabled();
 });
 
 test("deterministic analysis runs on the demo table", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Your workspace was restored.")).toBeVisible();
+  await goTo(page, "Analysis");
   await page.getByRole("button", { name: "Run deterministic analysis" }).click();
   // 2,400 rows: anomaly scoring and the classifier take a few seconds.
   await expect(page.getByRole("heading", { name: "Analysis dashboard" })).toBeVisible({
     timeout: 60_000,
   });
   await expect(page.getByText("Anomalies flagged")).toBeVisible();
-  await shot(page.locator("#step-data"), "03-deterministic-analysis");
+  await shot(page.locator("#analysis-workspace"), "03-deterministic-analysis");
 });
 
 test("natural-language SQL answers match the ground truth and show their SQL and rows", async ({ page }) => {
@@ -259,6 +281,7 @@ test("the review-rule count applies all three documented conditions", async ({ p
 
 test("rejecting a pending approval never executes the SQL", async ({ page }) => {
   await open(page);
+  await goTo(page, "Ask");
   const before = await messageCount(page);
   await ask(page, REVIEW, { approval: true });
   const card = latest(page);
@@ -355,6 +378,7 @@ test("large, empty, and failing answers are handled without hanging", async ({ p
 
 test("network failures and slow answers: the question is kept, and repeats are not sent", async ({ page }) => {
   await open(page);
+  await goTo(page, "Ask");
   const messages = "**/api/v1/conversations/*/messages";
 
   await page.route(messages, (route) => route.abort("failed"));
@@ -387,6 +411,7 @@ test("network failures and slow answers: the question is kept, and repeats are n
 
 test("an unsupported upload fails with a clear message and the page stays usable", async ({ page }) => {
   await open(page);
+  await goTo(page, "Data");
   await page.getByLabel("CSV or Excel file").setInputFiles({
     name: "notes.txt",
     mimeType: "text/plain",
@@ -400,9 +425,14 @@ test("an unsupported upload fails with a clear message and the page stays usable
 test("a reload restores the workspace, its data, and the conversation", async ({ page }) => {
   await open(page);
   await expect(page.getByText("Your workspace was restored.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Analysis\s+Complete/ })).toBeVisible();
+  await goTo(page, "Analysis");
   await expect(page.getByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
+  await goTo(page, "Documents");
   await expect(page.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+  await goTo(page, "Ask");
   expect(await messageCount(page)).toBeGreaterThan(8);
+  await goTo(page, "Overview");
   await expect(page.getByRole("button", { name: "Demo data loaded" })).toBeDisabled();
   await shot(page, "08-restored-workspace");
 
@@ -479,6 +509,19 @@ test("the layout holds at tablet and phone widths", async ({ page }) => {
     await page.setViewportSize({ width, height });
     await open(page);
     await expect(page.getByText("Your workspace was restored.")).toBeVisible();
+    if (width === 375) {
+      await page.evaluate("window.scrollTo(0, 0)");
+      await shot(page, "09-phone-layout");
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      await expect(page.getByRole("dialog", { name: "Workbench navigation" })).toHaveCSS(
+        "transform",
+        "matrix(1, 0, 0, 1, 0, 0)",
+      );
+      await shot(page, "10-phone-navigation");
+      await page.getByRole("link", { name: /^Ask/ }).click();
+    } else {
+      await goTo(page, "Ask");
+    }
     const overflow = await page.evaluate(
       "document.documentElement.scrollWidth - document.documentElement.clientWidth",
     );
@@ -490,7 +533,7 @@ test("the layout holds at tablet and phone widths", async ({ page }) => {
     expect(overflow, `${width}px page overflow; offenders: ${offenders.join(" | ")}`).toBeLessThanOrEqual(1);
     await page.getByRole("textbox", { name: "Business question" }).scrollIntoViewIfNeeded();
     await expect(page.getByRole("button", { name: "Ask workbench" })).toBeVisible();
-    if (width === 375) await shot(page, "09-phone-layout");
+    if (width === 375) await shot(page, "11-phone-ask-composer");
   }
 });
 
@@ -515,7 +558,13 @@ test("axe finds no violations in the loaded workspace, with answers, at desktop 
 test("resetting deletes the workspace; an expired reference gets a clear explanation", async ({ page, request }) => {
   await open(page);
   page.once("dialog", (dialog) => void dialog.accept());
+  const replacementWorkspace = page.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === "/api/v1/workspaces" &&
+    response.status() === 201,
+  );
   await page.getByRole("button", { name: "Reset workspace" }).click();
+  await replacementWorkspace;
   await expect(page.getByText("Local workspace ready")).toBeVisible();
   await expect(page.locator(".message-pair")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Analysis dashboard" })).toHaveCount(0);

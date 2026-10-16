@@ -36,6 +36,10 @@ import { ProductOverview } from "./components/ProductOverview";
 import { SchemaReview } from "./components/SchemaReview";
 import { StatusBanner } from "./components/StatusBanner";
 import { UploadStep } from "./components/UploadStep";
+import { WorkbenchShell } from "./components/WorkbenchShell";
+import { WorkspaceOverview } from "./components/WorkspaceOverview";
+import { conversationLabel, countConversation } from "./components/conversationStatus";
+import { sectionForHash, type WorkbenchSection } from "./components/workbenchNavigation";
 import {
   DEMO_DATA_FILE,
   DEMO_DATA_FILENAME,
@@ -43,6 +47,7 @@ import {
   DEMO_POLICY_FILENAME,
   fetchDemoFile,
 } from "./demo/retailDemo";
+import { useWorkflowDrafts } from "./workspace/drafts";
 import {
   recoverWorkspace,
   writeWorkspaceHint,
@@ -89,6 +94,36 @@ export default function App() {
   const [error, setError] = useState<ApiClientError | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   const [startFailed, setStartFailed] = useState(false);
+  const [activeSection, setActiveSection] = useState<WorkbenchSection>(
+    () => sectionForHash(window.location.hash) ?? "overview",
+  );
+  const { drafts, updateDraft, resetDrafts } = useWorkflowDrafts();
+
+  // An intentional section change moves focus to the section heading, including a reselection of
+  // the current section (for example from the phone drawer, whose links are about to go inert).
+  const navigate = useCallback((section: WorkbenchSection) => {
+    if (window.location.hash !== `#${section}`) {
+      window.history.pushState(null, "", `#${section}`);
+    }
+    setActiveSection(section);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-section-heading]")?.focus();
+    });
+  }, []);
+
+  // Back, Forward, and typed fragments restore the section; a non-route fragment keeps the current one.
+  useEffect(() => {
+    const syncSection = () => {
+      const section = sectionForHash(window.location.hash);
+      if (section) setActiveSection(section);
+    };
+    window.addEventListener("hashchange", syncSection);
+    window.addEventListener("popstate", syncSection);
+    return () => {
+      window.removeEventListener("hashchange", syncSection);
+      window.removeEventListener("popstate", syncSection);
+    };
+  }, []);
 
   const applyRecovered = useCallback((recovered: RecoveredWorkspace) => {
     setWorkspace(recovered.workspace);
@@ -101,7 +136,10 @@ export default function App() {
     setConversation(recovered.conversation);
     setMessages(recovered.messages);
     setSheets([]);
-  }, []);
+    if (recovered.messages.some((message) => message.status === "pending_approval")) {
+      navigate("ask");
+    }
+  }, [navigate]);
 
   // Rediscover the caller's own workspace before creating one, so a reload does not strand work.
   // Only a definite "none" creates a new workspace; any other failure is shown, not papered over.
@@ -141,15 +179,23 @@ export default function App() {
     void initializeWorkspace();
   }, [initializeWorkspace]);
 
+  // Emptying the conversation also drops approval edits that belonged to its messages.
+  const clearConversation = () => {
+    setConversation(null);
+    setMessages([]);
+    updateDraft("approvals", {});
+  };
+
   const handleUpload = async (file: File): Promise<boolean> => {
     if (!workspace) return false;
+    navigate("data");
     setTask("upload");
     setError(null);
     setDataset(null);
     setAnalysis(null);
-    setConversation(null);
-    setMessages([]);
+    clearConversation();
     setSheets([]);
+    updateDraft("sheet", "");
     try {
       const upload = await uploadTabular(workspace.id, file);
       setUploadId(upload.id);
@@ -179,8 +225,8 @@ export default function App() {
       setDataset(profiled);
       setSelectedFeatures(profiled.recommended_anomaly_features);
       setSheets([]);
-      setConversation(null);
-      setMessages([]);
+      updateDraft("sheet", "");
+      clearConversation();
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -194,8 +240,9 @@ export default function App() {
     setError(null);
     try {
       setDataset(await confirmSchema(dataset.id, mapping));
-      setConversation(null);
-      setMessages([]);
+      updateDraft("schema", null);
+      clearConversation();
+      navigate("analysis");
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -206,6 +253,7 @@ export default function App() {
   const handleAnalysis = async () => {
     if (!dataset) return;
     setTask("analysis");
+    navigate("analysis");
     setError(null);
     try {
       const result = await runAnalysis(dataset.id, {
@@ -213,8 +261,7 @@ export default function App() {
         anomaly_features: selectedFeatures.length > 0 ? selectedFeatures : null,
       });
       setAnalysis(result);
-      setConversation(null);
-      setMessages([]);
+      clearConversation();
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -224,12 +271,12 @@ export default function App() {
 
   const handleDocuments = async (files: File[]): Promise<boolean> => {
     if (!workspace) return false;
+    navigate("documents");
     setTask("documents");
     setError(null);
     try {
       setDocuments(await uploadDocuments(workspace.id, files));
-      setConversation(null);
-      setMessages([]);
+      clearConversation();
       return true;
     } catch (caught) {
       setError(normalizeError(caught));
@@ -243,6 +290,7 @@ export default function App() {
   // still waits for the schema to be confirmed by a person.
   const handleLoadDemo = async () => {
     if (!workspace) return;
+    navigate("data");
     setError(null);
     let data: File;
     let policy: File;
@@ -260,7 +308,10 @@ export default function App() {
       );
       return;
     }
-    if (await handleUpload(data)) await handleDocuments([policy]);
+    if (await handleUpload(data)) {
+      await handleDocuments([policy]);
+      navigate("data");
+    }
   };
 
   const handleConsent = async () => {
@@ -282,6 +333,7 @@ export default function App() {
     requireSqlApproval: boolean,
   ): Promise<boolean> => {
     if (!workspace || task !== null) return false;
+    navigate("ask");
     setTask("conversation");
     setError(null);
     try {
@@ -329,6 +381,9 @@ export default function App() {
       const resolved = await decideSqlApproval(message.id, decision, sql ?? null);
       setMessages((current) =>
         current.map((item) => (item.id === resolved.id ? resolved : item)),
+      );
+      updateDraft("approvals", (current) =>
+        Object.fromEntries(Object.entries(current).filter(([id]) => id !== message.id)),
       );
     } catch (caught) {
       setError(normalizeError(caught));
@@ -406,8 +461,10 @@ export default function App() {
       setMessages([]);
       setSelectedFeatures([]);
       setRecovery(null);
+      resetDrafts();
       writeWorkspaceHint(null);
       workspaceKey.current = crypto.randomUUID();
+      navigate("overview");
       await initializeWorkspace();
     } catch (caught) {
       setError(normalizeError(caught));
@@ -417,127 +474,162 @@ export default function App() {
   };
 
   const numericColumns = dataset?.profile.numeric_columns ?? [];
+  const workspaceStatus = workspace
+    ? "Local workspace ready"
+    : task === "workspace"
+      ? "Restoring or starting workspace…"
+      : "Workspace unavailable";
+  const datasetLabel = dataset
+    ? dataset.status === "ready"
+      ? dataset.filename
+      : "Schema review"
+    : "Not added";
+  const documentLabel = documents
+    ? `${documents.document_count} indexed`
+    : "Not added";
+  const analysisLabel = analysis ? "Complete" : dataset?.status === "ready" ? "Available" : "Not available";
+  const conversationCounts = countConversation(messages);
+
+  const globalNotices = (
+    <>
+      {error ? (
+        <StatusBanner kind="error" requestId={error.requestId}>
+          <strong>{error.message}</strong>
+          {startFailed ? (
+            <button
+              className="button button--link"
+              type="button"
+              disabled={task !== null}
+              onClick={() => void initializeWorkspace()}
+            >
+              Retry workspace
+            </button>
+          ) : null}
+        </StatusBanner>
+      ) : null}
+
+      {recovery?.kind === "restored" ? (
+        <StatusBanner kind="info">
+          <strong>Your workspace was restored.</strong> It was created{" "}
+          {new Date(recovery.createdAt).toLocaleString()}
+          {recovery.hasData
+            ? `; your uploaded data${recovery.messageCount > 0 ? ` and ${recovery.messageCount} message(s)` : ""} are available in the workbench.`
+            : "; it has no uploads yet."}{" "}
+          Use <em>Reset</em> to delete it and start fresh.
+          <button className="button button--link" type="button" onClick={() => setRecovery(null)}>
+            Dismiss
+          </button>
+        </StatusBanner>
+      ) : null}
+      {recovery?.kind === "expired" ? (
+        <StatusBanner kind="info">
+          <strong>Your earlier workspace is no longer available.</strong> It may have expired
+          under the retention policy or been deleted, so a new empty workspace was started.
+          <button className="button button--link" type="button" onClick={() => setRecovery(null)}>
+            Dismiss
+          </button>
+        </StatusBanner>
+      ) : null}
+    </>
+  );
 
   return (
-    <>
-      <header className="site-header">
-        <a className="brand" href="#main-content">
-          <span className="brand-mark" aria-hidden="true" />
-          <span>Conversational BI Workbench</span>
-        </a>
-        <nav className="site-nav" aria-label="Workflow sections">
-          <a href="#demo">Demo</a>
-          <a href="#step-data">Data</a>
-          <a href="#step-documents">Documents</a>
-          <a href="#step-ask">Ask</a>
-        </nav>
-        <div className="header-actions">
-          <div className={`workspace-status ${workspace ? "is-ready" : ""}`} role="status">
-            <span aria-hidden="true" />
-            {workspace
-              ? "Local workspace ready"
-              : task === "workspace"
-                ? "Restoring or starting workspace…"
-                : "Workspace unavailable"}
-          </div>
-          <button
-            className="button button--secondary button--compact"
-            type="button"
-            disabled={!workspace || task !== null}
-            onClick={() => void handleWorkspaceExport()}
-          >
-            {task === "download" ? "Preparing…" : "Export my data"}
-          </button>
-          <button
-            className="button button--secondary button--compact"
-            type="button"
-            disabled={!workspace || task !== null}
-            onClick={() => void handleReset()}
-          >
-            {task === "reset" ? "Resetting…" : "Reset workspace"}
-          </button>
+    <WorkbenchShell
+      activeSection={activeSection}
+      onNavigate={navigate}
+      workspaceStatus={workspaceStatus}
+      workspaceReady={workspace !== null}
+      datasetLabel={datasetLabel}
+      documentLabel={documentLabel}
+      analysisLabel={analysisLabel}
+      messageLabel={conversationLabel(conversationCounts)}
+      actionsDisabled={!workspace || task !== null}
+      exportBusy={task === "download"}
+      resetBusy={task === "reset"}
+      onExport={() => void handleWorkspaceExport()}
+      onReset={() => void handleReset()}
+      retentionNotice={
+        <>
+          <span>Local workbench · Workspace data is isolated. </span>
+          {workspace ? (
+            <span data-testid="retention-notice">
+              It is deleted {workspace.retention_hours} hours after its last use (currently{" "}
+              {new Date(workspace.expires_at).toLocaleString()}). You can export or delete it at any time.
+            </span>
+          ) : (
+            "It is kept for a bounded period, and you can export or delete it at any time."
+          )}
+        </>
+      }
+    >
+      {globalNotices}
+
+      {activeSection === "overview" ? (
+        <div className="section-stack" id="overview-workspace">
+          <WorkspaceOverview
+            workspace={workspace}
+            dataset={dataset}
+            analysis={analysis}
+            documents={documents}
+            conversation={conversationCounts}
+            onNavigate={navigate}
+          />
+          <ProductOverview />
+          <DemoGuide
+            workspaceReady={workspace !== null}
+            busy={task !== null}
+            loading={task === "upload" || task === "dataset" || task === "documents"}
+            dataLoaded={dataset?.filename === DEMO_DATA_FILENAME}
+            dataConfirmed={dataset?.filename === DEMO_DATA_FILENAME && dataset.status === "ready"}
+            policyLoaded={documents?.filenames.includes(DEMO_POLICY_FILENAME) ?? false}
+            analysisRun={analysis !== null}
+            consentNeeded={workspace !== null && workspace.consent_required && !workspace.consent_accepted}
+            onLoad={handleLoadDemo}
+          />
         </div>
-      </header>
+      ) : null}
 
-      <main id="main-content" tabIndex={-1}>
-        <ProductOverview />
-
-        {error ? (
-          <StatusBanner kind="error" requestId={error.requestId}>
-            <strong>{error.message}</strong>
-            {startFailed ? (
-              <button
-                className="button button--link"
-                type="button"
-                disabled={task !== null}
-                onClick={() => void initializeWorkspace()}
-              >
-                Retry workspace
-              </button>
-            ) : null}
-          </StatusBanner>
-        ) : null}
-
-        {recovery?.kind === "restored" ? (
-          <StatusBanner kind="info">
-            <strong>Your workspace was restored.</strong> It was created{" "}
-            {new Date(recovery.createdAt).toLocaleString()}
-            {recovery.hasData
-              ? `; your uploaded data${recovery.messageCount > 0 ? ` and ${recovery.messageCount} message(s)` : ""} are shown below.`
-              : "; it has no uploads yet."}{" "}
-            Use <em>Reset workspace</em> to delete it and start fresh.
-            <button
-              className="button button--link"
-              type="button"
-              onClick={() => setRecovery(null)}
-            >
-              Dismiss
-            </button>
-          </StatusBanner>
-        ) : null}
-        {recovery?.kind === "expired" ? (
-          <StatusBanner kind="info">
-            <strong>Your earlier workspace is no longer available.</strong> It may have expired
-            under the retention policy or been deleted, so a new empty workspace was started.
-            <button
-              className="button button--link"
-              type="button"
-              onClick={() => setRecovery(null)}
-            >
-              Dismiss
-            </button>
-          </StatusBanner>
-        ) : null}
-
-        <DemoGuide
-          workspaceReady={workspace !== null}
-          busy={task !== null}
-          loading={task === "upload" || task === "dataset" || task === "documents"}
-          dataLoaded={dataset?.filename === DEMO_DATA_FILENAME}
-          dataConfirmed={dataset?.filename === DEMO_DATA_FILENAME && dataset.status === "ready"}
-          policyLoaded={documents?.filenames.includes(DEMO_POLICY_FILENAME) ?? false}
-          analysisRun={analysis !== null}
-          consentNeeded={workspace !== null && workspace.consent_required && !workspace.consent_accepted}
-          onLoad={handleLoadDemo}
-        />
-
-        <div className="workflow" id="step-data">
+      {activeSection === "data" ? (
+        <div className="section-stack" id="data-workspace">
           <UploadStep
             disabled={!workspace || task !== null}
             busy={task === "upload" || task === "dataset"}
             sheets={sheets}
+            file={drafts.datasetFile}
+            sheet={drafts.sheet}
+            onFileChange={(file) => updateDraft("datasetFile", file)}
+            onSheetChange={(sheet) => updateDraft("sheet", sheet)}
             onUpload={handleUpload}
             onSelectSheet={handleSheet}
           />
 
           {dataset?.status === "review_required" ? (
-            <SchemaReview dataset={dataset} busy={task !== null} onConfirm={handleSchema} />
+            <SchemaReview
+              dataset={dataset}
+              busy={task !== null}
+              draft={drafts.schema?.datasetId === dataset.id ? drafts.schema.mapping : null}
+              onDraftChange={(mapping) => updateDraft("schema", { datasetId: dataset.id, mapping })}
+              onConfirm={handleSchema}
+            />
           ) : null}
+          {dataset?.status === "ready" ? (
+            <section className="panel compact-completion" aria-labelledby="data-ready-heading">
+              <div>
+                <p className="eyebrow">Setup complete</p>
+                <h2 id="data-ready-heading">{dataset.filename} is ready for analysis</h2>
+                <p className="section-copy">{dataset.row_count.toLocaleString()} rows and {dataset.column_count.toLocaleString()} columns are available in this workspace.</p>
+              </div>
+              <button className="button button--primary" type="button" onClick={() => navigate("analysis")}>Open analysis</button>
+            </section>
+          ) : null}
+        </div>
+      ) : null}
 
+      {activeSection === "analysis" ? (
+        <div className="section-stack" id="analysis-workspace">
           {dataset?.status === "ready" ? (
             <section className="panel" aria-labelledby="analysis-heading">
               <div className="section-heading">
-                <span className="step-number" aria-hidden="true">3</span>
                 <div>
                   <p className="eyebrow">Analysis controls</p>
                   <h2 id="analysis-heading">Configure anomaly review</h2>
@@ -603,18 +695,33 @@ export default function App() {
               onDownloadReport={handleReportDownload}
             />
           ) : null}
+          {dataset?.status !== "ready" ? (
+            <section className="empty-workspace-state" aria-labelledby="analysis-empty-heading">
+              <p className="eyebrow">Data required</p>
+              <h2 id="analysis-empty-heading">Confirm a dataset before running analysis</h2>
+              <p>Analysis remains unavailable until the uploaded table has a reviewed canonical schema.</p>
+              <button className="button button--primary" type="button" onClick={() => navigate("data")}>Go to data</button>
+            </section>
+          ) : null}
+        </div>
+      ) : null}
 
-          <div id="step-documents">
+      {activeSection === "documents" ? (
+        <div className="section-stack" id="documents-workspace">
           <DocumentUpload
             disabled={!workspace || task !== null}
             busy={task === "documents"}
             collection={documents}
+            files={drafts.documentFiles}
+            onFilesChange={(files) => updateDraft("documentFiles", files)}
             onUpload={handleDocuments}
           />
-          </div>
+        </div>
+      ) : null}
 
+      {activeSection === "ask" ? (
+        <div className="section-stack" id="ask-workspace">
           {workspace ? (
-            <div id="step-ask">
             <ConversationPanel
               workspace={workspace}
               messages={messages}
@@ -625,27 +732,24 @@ export default function App() {
                   dataset?.filename === DEMO_DATA_FILENAME && dataset.status === "ready",
                 policyReady: documents?.filenames.includes(DEMO_POLICY_FILENAME) ?? false,
               }}
+              question={drafts.question}
+              requireSqlApproval={drafts.requireSqlApproval}
+              approvalDrafts={drafts.approvals}
+              onQuestionChange={(question) => updateDraft("question", question)}
+              onRequireSqlApprovalChange={(required) => updateDraft("requireSqlApproval", required)}
+              onApprovalDraftChange={(messageId, draft) =>
+                updateDraft("approvals", (current) => ({ ...current, [messageId]: draft }))
+              }
               onAcceptConsent={handleConsent}
               onAsk={handleQuestion}
               onApproval={handleApproval}
               onExport={handleResultExport}
             />
-            </div>
-          ) : null}
+          ) : (
+            <section className="empty-workspace-state"><h2>Workspace unavailable</h2><p>Retry workspace initialization before asking a question.</p></section>
+          )}
         </div>
-      </main>
-      <footer>
-        Local workbench · Workspace data is isolated.{" "}
-        {workspace ? (
-          <span data-testid="retention-notice">
-            It is deleted {workspace.retention_hours} hours after its last use (currently{" "}
-            {new Date(workspace.expires_at).toLocaleString()}). You can export it or delete it at
-            any time.
-          </span>
-        ) : (
-          "It is kept for a bounded period, and you can export or delete it at any time."
-        )}
-      </footer>
-    </>
+      ) : null}
+    </WorkbenchShell>
   );
 }

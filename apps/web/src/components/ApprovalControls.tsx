@@ -1,10 +1,14 @@
-import { forwardRef, useId, useState } from "react";
+import { forwardRef, useId } from "react";
 
 import type { Message } from "../api/client";
+import type { ApprovalDraft } from "../workspace/drafts";
 
 interface ApprovalControlsProps {
   message: Message;
   busy: boolean;
+  /** Edit state held by the parent, so it survives the section being unmounted. */
+  draft: ApprovalDraft | null;
+  onDraftChange: (draft: ApprovalDraft) => void;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
 }
 
@@ -14,11 +18,11 @@ interface ApprovalControlsProps {
  * request rejected with nothing executed.
  */
 export const ApprovalControls = forwardRef<HTMLDivElement, ApprovalControlsProps>(
-  function ApprovalControls({ message, busy, onApproval }, ref) {
+  function ApprovalControls({ message, busy, draft: saved, onDraftChange, onApproval }, ref) {
     const editId = useId();
     const hintId = useId();
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState(message.sql ?? "");
+    const editing = saved?.editing ?? false;
+    const draft = saved?.sql ?? message.sql ?? "";
     const changed = draft.trim() !== (message.sql ?? "").trim();
 
     return (
@@ -43,7 +47,7 @@ export const ApprovalControls = forwardRef<HTMLDivElement, ApprovalControlsProps
               value={draft}
               aria-describedby={hintId}
               disabled={busy}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => onDraftChange({ editing, sql: event.target.value })}
             />
             <span id={hintId} className="field-hint">
               Edited SQL is validated again against the same read-only rules before it runs. An
@@ -66,10 +70,7 @@ export const ApprovalControls = forwardRef<HTMLDivElement, ApprovalControlsProps
                 className="button button--secondary"
                 type="button"
                 disabled={busy}
-                onClick={() => {
-                  setEditing(false);
-                  setDraft(message.sql ?? "");
-                }}
+                onClick={() => onDraftChange({ editing: false, sql: message.sql ?? "" })}
               >
                 Cancel edit
               </button>
@@ -88,7 +89,7 @@ export const ApprovalControls = forwardRef<HTMLDivElement, ApprovalControlsProps
                 className="button button--secondary"
                 type="button"
                 disabled={busy}
-                onClick={() => setEditing(true)}
+                onClick={() => onDraftChange({ editing: true, sql: draft })}
               >
                 Edit SQL
               </button>

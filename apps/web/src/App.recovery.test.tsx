@@ -85,18 +85,24 @@ function mockOwnedWorkspace(messages: Message[] = [messageFixture]) {
 describe("workspace continuity", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    window.history.replaceState(null, "", "/");
     vi.mocked(createWorkspace).mockResolvedValue(workspaceFixture);
     vi.mocked(listWorkspaces).mockResolvedValue([]);
     vi.mocked(listMessages).mockResolvedValue([]);
   });
 
   it("restores an existing workspace after a reload instead of creating a new one", async () => {
+    const user = userEvent.setup();
     mockOwnedWorkspace();
     render(<App />);
 
     expect(await screen.findByText("Your workspace was restored.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /AnalysisComplete/ })).toBeVisible();
+    await user.click(screen.getByRole("link", { name: /Analysis/ }));
     expect(screen.getByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
+    await user.click(screen.getByRole("link", { name: /Documents/ }));
     expect(screen.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+    await user.click(screen.getByRole("link", { name: /Ask/ }));
     expect(screen.getByText(messageFixture.answer)).toBeVisible();
     expect(createWorkspace).not.toHaveBeenCalled();
   });
@@ -139,6 +145,7 @@ describe("workspace continuity", () => {
 describe("sample questions", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    window.history.replaceState(null, "", "/");
     vi.mocked(createWorkspace).mockResolvedValue(accepted);
     vi.mocked(listWorkspaces).mockResolvedValue([]);
     vi.mocked(listMessages).mockResolvedValue([]);
@@ -180,6 +187,7 @@ describe("sample questions", () => {
       "retail_operations_policy.pdf",
     );
     // Data questions wait for the confirmed schema; the policy question is already available.
+    await user.click(screen.getByRole("link", { name: /Ask/ }));
     const samples = screen.getByRole("region", { name: /Sample questions/ });
     expect(
       within(samples).getByRole("button", { name: /Which region has the highest total revenue/ }),
@@ -214,6 +222,7 @@ describe("sample questions", () => {
 describe("human approval", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    window.history.replaceState(null, "", "/");
     mockOwnedWorkspace([pending]);
   });
 
@@ -287,12 +296,14 @@ describe("human approval", () => {
 describe("failed questions", () => {
   it("puts the question back so it can be sent again", async () => {
     const user = userEvent.setup();
+    window.history.replaceState(null, "", "/");
     mockOwnedWorkspace([]);
     vi.mocked(askQuestion).mockRejectedValue(
       new ApiClientError("Could not reach the server.", "network_error"),
     );
     render(<App />);
 
+    await user.click(await screen.findByRole("link", { name: /Ask/ }));
     const box = await screen.findByLabelText("Business question");
     await user.type(box, "Which region is largest?");
     await user.click(screen.getByRole("button", { name: "Ask workbench" }));

@@ -64,7 +64,6 @@ export function DemoGuide({
   return (
     <section className="panel demo-guide" id="demo" aria-labelledby="demo-heading">
       <div className="section-heading">
-        <span className="step-number" aria-hidden="true">★</span>
         <div>
           <p className="eyebrow">Guided demo</p>
           <h2 id="demo-heading">Retail operations review</h2>

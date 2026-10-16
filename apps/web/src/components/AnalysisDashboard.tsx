@@ -73,7 +73,6 @@ export function AnalysisDashboard({
   return (
     <section className="panel analysis-panel" aria-labelledby="analysis-results-heading">
       <div className="section-heading">
-        <span className="step-number" aria-hidden="true">4</span>
         <div>
           <p className="eyebrow">Deterministic results</p>
           <h2 id="analysis-results-heading">Analysis dashboard</h2>

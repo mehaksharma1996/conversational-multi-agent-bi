@@ -1,9 +1,14 @@
-import { useId, useState } from "react";
+import { useId, useRef } from "react";
 
 interface UploadStepProps {
   disabled: boolean;
   busy: boolean;
   sheets: string[];
+  /** Selected file held by the parent, so it survives the section being unmounted. */
+  file: File | null;
+  sheet: string;
+  onFileChange: (file: File | null) => void;
+  onSheetChange: (sheet: string) => void;
   onUpload: (file: File) => Promise<unknown>;
   onSelectSheet: (sheet: string) => Promise<void>;
 }
@@ -12,20 +17,21 @@ export function UploadStep({
   disabled,
   busy,
   sheets,
+  file,
+  sheet,
+  onFileChange,
+  onSheetChange,
   onUpload,
   onSelectSheet,
 }: UploadStepProps) {
   const fileId = useId();
+  const selectionId = useId();
   const sheetId = useId();
-  const [file, setFile] = useState<File | null>(null);
-  const [sheet, setSheet] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <section className="panel upload-panel" aria-labelledby="upload-heading">
       <div className="section-heading">
-        <span className="step-number" aria-hidden="true">
-          1
-        </span>
         <div>
           <p className="eyebrow">Source data</p>
           <h2 id="upload-heading">Upload a business dataset</h2>
@@ -40,12 +46,32 @@ export function UploadStep({
         <label htmlFor={fileId}>CSV or Excel file</label>
         <input
           id={fileId}
+          ref={inputRef}
           type="file"
           accept=".csv,.xls,.xlsx"
+          aria-describedby={file ? selectionId : undefined}
           disabled={disabled || busy}
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
         />
         <span className="field-hint">Accepted formats: .csv, .xls, .xlsx</span>
+        {/* A browser cannot put a file back into a remounted file input, so the kept selection is
+            named here instead. Choosing a file replaces it. */}
+        {file ? (
+          <span className="selected-files" id={selectionId}>
+            Selected file: <strong>{file.name}</strong>
+            <button
+              className="button button--link"
+              type="button"
+              disabled={disabled || busy}
+              onClick={() => {
+                onFileChange(null);
+                if (inputRef.current) inputRef.current.value = "";
+              }}
+            >
+              Clear selection
+            </button>
+          </span>
+        ) : null}
       </div>
 
       <button
@@ -65,7 +91,7 @@ export function UploadStep({
               id={sheetId}
               value={sheet}
               disabled={busy}
-              onChange={(event) => setSheet(event.target.value)}
+              onChange={(event) => onSheetChange(event.target.value)}
             >
               <option value="">Select a sheet</option>
               {sheets.map((name) => (

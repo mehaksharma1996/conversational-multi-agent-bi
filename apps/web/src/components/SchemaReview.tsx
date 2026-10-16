@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import type { Dataset, SchemaMappingUpdate } from "../api/client";
 import { DEMO_DATA_FILENAME, DEMO_UNMAPPED_FIELDS } from "../demo/retailDemo";
@@ -14,7 +14,7 @@ const CANONICAL_FIELDS = [
 ] as const;
 
 type CanonicalField = (typeof CANONICAL_FIELDS)[number];
-type MappingDraft = Record<CanonicalField, string>;
+export type MappingDraft = Record<CanonicalField, string>;
 
 const REQUIRED_TYPES: Record<CanonicalField, string[]> = {
   amount: ["numeric"],
@@ -45,11 +45,15 @@ function initialMapping(dataset: Dataset): MappingDraft {
 interface SchemaReviewProps {
   dataset: Dataset;
   busy: boolean;
+  /** Edits held by the parent for this dataset; null starts from the suggested mapping. */
+  draft: MappingDraft | null;
+  onDraftChange: (mapping: MappingDraft) => void;
   onConfirm: (mapping: SchemaMappingUpdate) => Promise<void>;
 }
 
-export function SchemaReview({ dataset, busy, onConfirm }: SchemaReviewProps) {
-  const [mapping, setMapping] = useState<MappingDraft>(() => initialMapping(dataset));
+export function SchemaReview({ dataset, busy, draft, onDraftChange, onConfirm }: SchemaReviewProps) {
+  const suggested = useMemo(() => initialMapping(dataset), [dataset]);
+  const mapping = draft ?? suggested;
   const unmapped = useMemo(() => intentionallyUnmapped(dataset), [dataset]);
   const lowConfidenceFields = useMemo(
     () =>
@@ -72,9 +76,6 @@ export function SchemaReview({ dataset, busy, onConfirm }: SchemaReviewProps) {
   return (
     <section className="panel" aria-labelledby="schema-heading">
       <div className="section-heading">
-        <span className="step-number" aria-hidden="true">
-          2
-        </span>
         <div>
           <p className="eyebrow">Human review</p>
           <h2 id="schema-heading">Confirm the canonical schema</h2>
@@ -135,7 +136,7 @@ export function SchemaReview({ dataset, busy, onConfirm }: SchemaReviewProps) {
                 value={mapping[field]}
                 disabled={busy}
                 onChange={(event) =>
-                  setMapping((current) => ({ ...current, [field]: event.target.value }))
+                  onDraftChange({ ...mapping, [field]: event.target.value })
                 }
               >
                 <option value="">Not mapped</option>

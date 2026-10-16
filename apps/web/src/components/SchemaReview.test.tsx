@@ -22,7 +22,7 @@ describe("SchemaReview", () => {
       },
     } satisfies Dataset;
 
-    render(<SchemaReview dataset={dataset} busy={false} onConfirm={vi.fn()} />);
+    render(<SchemaReview dataset={dataset} busy={false} draft={null} onDraftChange={vi.fn()} onConfirm={vi.fn()} />);
 
     expect(screen.getByLabelText("amount")).toHaveValue("");
     expect(screen.getByText("Low-confidence suggestions are not selected automatically", { exact: false })).toBeVisible();
@@ -47,7 +47,7 @@ describe("SchemaReview", () => {
 
   it("leaves the label unmapped for the bundled demo file and says why", () => {
     render(
-      <SchemaReview dataset={withSuggestedLabel("retail_operations.csv")} busy={false} onConfirm={vi.fn()} />,
+      <SchemaReview dataset={withSuggestedLabel("retail_operations.csv")} busy={false} draft={null} onDraftChange={vi.fn()} onConfirm={vi.fn()} />,
     );
 
     expect(screen.getByLabelText("label")).toHaveValue("");
@@ -56,7 +56,7 @@ describe("SchemaReview", () => {
   });
 
   it("keeps a confident label suggestion for any other file", () => {
-    render(<SchemaReview dataset={withSuggestedLabel("my_data.csv")} busy={false} onConfirm={vi.fn()} />);
+    render(<SchemaReview dataset={withSuggestedLabel("my_data.csv")} busy={false} draft={null} onDraftChange={vi.fn()} onConfirm={vi.fn()} />);
 
     expect(screen.getByLabelText("label")).toHaveValue("merchant");
     expect(screen.queryByText("label is left unmapped for the demo:")).toBeNull();

@@ -12,6 +12,12 @@ function renderPanel(workspace: Workspace) {
       messages={[]}
       busy={false}
       hasContext
+      question=""
+      requireSqlApproval={false}
+      approvalDrafts={{}}
+      onQuestionChange={vi.fn()}
+      onRequireSqlApprovalChange={vi.fn()}
+      onApprovalDraftChange={vi.fn()}
       onAcceptConsent={vi.fn()}
       onAsk={vi.fn()}
       onApproval={vi.fn()}

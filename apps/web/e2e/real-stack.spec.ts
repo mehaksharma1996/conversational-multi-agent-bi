@@ -64,6 +64,7 @@ async function uploadConfirmAndAnalyze(
   consentRequired: boolean,
 ): Promise<WorkspacePayload> {
   const workspace = await openIsolatedWorkspace(page, consentRequired);
+  await page.getByRole("link", { name: /Data/ }).click();
   await page.getByLabel("CSV or Excel file").setInputFiles(sampleData);
   await page.getByRole("button", { name: "Upload and profile" }).click();
   await expect(page.getByRole("heading", { name: "Confirm the canonical schema" })).toBeVisible();
@@ -81,10 +82,12 @@ test("real local-only stack: tabular analysis, memory, reports, and reset", asyn
   const workspace = await uploadConfirmAndAnalyze(page, false);
   expect(workspace.local_only_mode).toBe(true);
   expect(workspace.gemini_configured).toBe(false);
+  await page.getByRole("link", { name: /Ask/ }).click();
   await page.getByLabel("Business question").fill("What analysis was possible?");
   await page.getByRole("button", { name: "Ask workbench" }).click();
   await expect(page.getByText("memory route", { exact: true })).toBeVisible();
 
+  await page.getByRole("link", { name: /Analysis/ }).click();
   const markdownDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download Markdown report" }).click();
   expect((await markdownDownload).suggestedFilename()).toBe("business-intelligence-report.md");
@@ -103,6 +106,7 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
   const workspace = await uploadConfirmAndAnalyze(page, true);
   expect(workspace.local_only_mode).toBe(false);
   expect(workspace.gemini_configured).toBe(true);
+  await page.getByRole("link", { name: /Documents/ }).click();
   await page.getByLabel("PDF documents").setInputFiles(samplePolicy);
   await page.getByRole("button", { name: "Upload and index PDFs" }).click();
   await expect(page.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
@@ -136,6 +140,7 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
   expect(blocked.status()).toBe(409);
   expect(((await blocked.json()) as ErrorPayload).error.code).toBe("gemini_consent_required");
 
+  await page.getByRole("link", { name: /Ask/ }).click();
   await expect(page.getByRole("button", { name: "I understand, enable Gemini" })).toBeVisible();
   const consentResponse = page.waitForResponse(
     (response) =>
@@ -174,6 +179,7 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
   const excelDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download Excel" }).click();
   expect((await excelDownload).suggestedFilename()).toMatch(/\.xlsx$/);
+  await page.getByRole("link", { name: /Analysis/ }).click();
   const reportDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download Markdown report" }).click();
   expect((await reportDownload).suggestedFilename()).toBe("business-intelligence-report.md");

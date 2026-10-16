@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { Message, Workspace } from "../api/client";
+import type { ApprovalDraft } from "../workspace/drafts";
 import { DEMO_QUESTIONS, type DemoQuestion } from "../demo/retailDemo";
 import { MessageCard } from "./MessageCard";
 import { StatusBanner } from "./StatusBanner";
@@ -18,6 +19,13 @@ interface ConversationPanelProps {
   busy: boolean;
   hasContext: boolean;
   demo?: DemoContext;
+  /** Composer and approval drafts held by the parent, so they survive the section being unmounted. */
+  question: string;
+  requireSqlApproval: boolean;
+  approvalDrafts: Record<string, ApprovalDraft>;
+  onQuestionChange: (update: string | ((current: string) => string)) => void;
+  onRequireSqlApprovalChange: (required: boolean) => void;
+  onApprovalDraftChange: (messageId: string, draft: ApprovalDraft) => void;
   onAcceptConsent: () => Promise<void>;
   /** Resolves true when the question was answered, so a failed one can be put back for retry. */
   onAsk: (question: string, requireSqlApproval: boolean) => Promise<boolean>;
@@ -43,13 +51,17 @@ export function ConversationPanel({
   busy,
   hasContext,
   demo,
+  question,
+  requireSqlApproval,
+  approvalDrafts,
+  onQuestionChange: setQuestion,
+  onRequireSqlApprovalChange: setRequireSqlApproval,
+  onApprovalDraftChange,
   onAcceptConsent,
   onAsk,
   onApproval,
   onExport,
 }: ConversationPanelProps) {
-  const [question, setQuestion] = useState("");
-  const [requireSqlApproval, setRequireSqlApproval] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const consentBlocked = workspace.consent_required && !workspace.consent_accepted;
   const approvalPending = messages.some((message) => message.status === "pending_approval");
@@ -97,7 +109,6 @@ export function ConversationPanel({
   return (
     <section className="panel conversation-panel" aria-labelledby="conversation-heading">
       <div className="section-heading">
-        <span className="step-number" aria-hidden="true">6</span>
         <div>
           <p className="eyebrow">Bounded agent workflows</p>
           <h2 id="conversation-heading">Ask across data and documents</h2>
@@ -146,6 +157,8 @@ export function ConversationPanel({
             message={message}
             position={index + 1}
             busy={busy}
+            approvalDraft={approvalDrafts[message.id] ?? null}
+            onApprovalDraftChange={(draft) => onApprovalDraftChange(message.id, draft)}
             onApproval={onApproval}
             onExport={onExport}
           />
