@@ -1,0 +1,128 @@
+{
+  "cases": [
+    {
+      "category": "investigation",
+      "coverage": "not_covered_by_script",
+      "id": "churn-sql-quarter-change",
+      "rationale": "The current product path supports this capability, but no scripted output is included in the public fixture.",
+      "source": "public_cases"
+    },
+    {
+      "category": "investigation",
+      "coverage": "not_covered_by_script",
+      "id": "churn-document-pricing",
+      "rationale": "The current product path supports this capability, but no scripted output is included in the public fixture.",
+      "source": "public_cases"
+    },
+    {
+      "category": "investigation",
+      "coverage": "not_covered_by_script",
+      "id": "churn-hybrid-pricing",
+      "rationale": "The current product path supports this capability, but no scripted output is included in the public fixture.",
+      "source": "public_cases"
+    },
+    {
+      "category": "investigation",
+      "coverage": "requires_agent",
+      "id": "churn-full-investigation",
+      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "source": "public_cases"
+    },
+    {
+      "category": "investigation",
+      "coverage": "requires_agent",
+      "id": "churn-contradictory-enterprise",
+      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "source": "public_cases"
+    },
+    {
+      "category": "investigation",
+      "coverage": "requires_agent",
+      "id": "churn-unsupported-causation",
+      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "source": "public_cases"
+    },
+    {
+      "category": "investigation",
+      "coverage": "requires_agent",
+      "id": "churn-insufficient-retention",
+      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "source": "public_cases"
+    },
+    {
+      "category": "investigation",
+      "coverage": "requires_agent",
+      "id": "churn-safety-injection",
+      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "source": "public_cases"
+    }
+  ],
+  "categories": {
+    "exploratory": "Recorded for human review and not scored.",
+    "follow_up": "Depends on an earlier conversation question.",
+    "hybrid": "Document evidence applied to table rows.",
+    "interpretation": "Asks what a documented threshold means.",
+    "investigation": "Combines one or more investigation capabilities.",
+    "rag": "Answered from uploaded documents.",
+    "safety": "Must not mutate data or disclose protected content.",
+    "sql": "Answered from the uploaded table by guarded SQL."
+  },
+  "coverage_labels": {
+    "measured": "The scripted model produces a correct output and the case is graded.",
+    "not_covered_by_script": "The current product supports the capability, but this fixture supplies no scripted answer.",
+    "requires_agent": "Dependent steps require future investigation-agent milestones.",
+    "requires_live_model": "Only review of live-model output can judge the case.",
+    "unsupported": "Outside the product scope; a good answer declines or stays descriptive."
+  },
+  "fixtures": {
+    "document_1": {
+      "hash": "sha256-raw",
+      "path": "sample_data/subscription_churn_pricing_change_notice.pdf",
+      "sha256": "1afa1de5cdff1980efd86c8ab31d440e89e3ea018fc6d83bd421ec9ffcd7fff0"
+    },
+    "document_2": {
+      "hash": "sha256-raw",
+      "path": "sample_data/subscription_churn_support_operations_update.pdf",
+      "sha256": "1728cc622279506c60d2116889cf261851a8055b9f964bf9a4c0e18e6fc718b1"
+    },
+    "document_3": {
+      "hash": "sha256-raw",
+      "path": "sample_data/subscription_churn_retention_playbook.pdf",
+      "sha256": "acb18097a0c04e81213757e8198c701d3f98a4cb1e60eb9d7939732c3ec81103"
+    },
+    "document_4": {
+      "hash": "sha256-raw",
+      "path": "sample_data/subscription_churn_draft_board_memo.pdf",
+      "sha256": "41084707cd6caf74f844bf4a4c951f8b339e9fb1a74fdd9ece99e1325d13d845"
+    },
+    "oracle": {
+      "hash": "sha256-lf",
+      "path": "evals/investigation/v1/oracle.json",
+      "sha256": "520dc795e0d0df8db6ec5874c2ae9a3cdf8fcf9b0ed93c5257d2c4a4d4a956bf"
+    },
+    "reference_sql": {
+      "hash": "sha256-lf",
+      "path": "evals/investigation/v1/reference.sql",
+      "sha256": "ed3a838d8e5a5cbe68330509aa3a617f07a8cc6a248f0958e8cbe57b1b4804a1"
+    },
+    "subscription_csv": {
+      "hash": "sha256-lf",
+      "path": "sample_data/subscription_churn.csv",
+      "sha256": "b462ac4775019d2f58fbfaa17a3f71326795b26b1080ad61cb30571b2128f8b7"
+    }
+  },
+  "manifest_version": "investigation-v1.0.0",
+  "provenance": {
+    "data": "Entirely synthetic; generated with seed 20261013.",
+    "issue": "INV-2 #135",
+    "scope": "Fixture definitions only. The committed oracle is public, evaluator-only, and never model input. This manifest is not part of the v2 scripted baseline."
+  },
+  "schema": "workflow-case-manifest-v1",
+  "sources": {
+    "public_cases": {
+      "hash": "sha256-lf",
+      "path": "evals/investigation/v1/public_cases.json",
+      "sha256": "025ab70b0c5e537d9ec7979d1700a1601d6db119086510d42cbf7325f2ff15d5"
+    }
+  }
+}

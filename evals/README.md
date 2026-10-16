@@ -30,6 +30,17 @@ Methodology, gates, and the review process are in
     and requires an exact match; updates go through
     `python -m tests.e2e.workflow_baseline_runner --update --justification "..."`, which refuses
     safety failures and any regression, deletion, or demotion of a previously measured case.
+- `investigation/v1/` is the INV-2 churn fixture package. It reuses the workflow manifest schema,
+  hash conventions, and coverage labels but is intentionally not part of the v2 scripted baseline:
+  - `public_cases.json` contains eight answer-free questions and capability requirements.
+  - `oracle.json` and `reference.sql` are evaluator-only and must never be model inputs.
+  - `manifest.json` pins the CSV, four PDFs, oracle, SQL, and public cases. Current single-route
+    cases are `not_covered_by_script`; multi-step cases are `requires_agent`.
+  - Tenure standardization is descriptive: Q1 SMB Basic tenure weights are applied to Q2
+    within-tenure rates. The standardized change is not a causal attribution, and the fixture does
+    not force a tenure-confounding narrative when the lifecycle-derived composition effect is small.
+  - A committed oracle is publicly inspectable in GitHub. “Evaluator-only” means isolated from
+    prompts and retrieval, not secret or suitable as a hidden benchmark.
 - `results/` (git-ignored) receives generated JSON reports.
 
 ## Rules
