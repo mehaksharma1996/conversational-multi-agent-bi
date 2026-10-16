@@ -10,6 +10,9 @@ the nginx image in the container job.
 `apps/web/e2e/accessibility.spec.ts` requires zero axe violations for:
 
 - a ready workspace and empty workflow;
+- deep-linked workbench navigation with an announced active destination and focus moved to the
+  selected section heading;
+- the phone navigation drawer before and after selecting a destination;
 - schema review, including its profile table and canonical-field controls;
 - an analysis dashboard containing a Plotly chart, anomaly caveat, tables, and report actions;
 - a chat answer with sources and a grounding warning;
@@ -19,10 +22,17 @@ the nginx image in the container job.
 - the safe API error banner with its request ID.
 
 The keyboard-only journey proves the skip link is first, becomes visible on focus, moves focus into
-`main`, then reaches controls in document order. It verifies the three-pixel focus indicator and
-tabs repeatedly through multiple control types without a trap. Semantic headings, landmarks,
-labels, table headers/captions, live regions, alert roles, and color contrast outside Plotly are
-covered by axe.
+`main`, then reaches the workspace summaries and guided-demo control in document order. It verifies
+the three-pixel focus indicator and tabs repeatedly through multiple control types without a trap.
+Semantic headings, landmarks, labels, active navigation, table headers/captions, live regions,
+alert roles, and color contrast outside Plotly are covered by axe.
+
+`apps/web/e2e/workbench-shell.spec.ts` adds keyboard-only phone-width coverage: the closed drawer is
+inert and skipped by Tab; opening it focuses the active link, keeps focus inside the modal drawer
+(with zero axe violations while open), and Escape or the close button returns focus to the toggle;
+viewport changes never leave focus hidden; workspace export is reachable and invokable from the
+keyboard. It also proves citation activation focuses the cited passage without changing the URL or
+history, and that Back, Forward, and reload restore the correct section.
 
 ## Accepted limits
 

@@ -5,17 +5,20 @@
  */
 export function ProductOverview() {
   return (
-    <section className="hero" aria-labelledby="page-title">
-      <p className="eyebrow">Review-first analytics</p>
-      <h1 id="page-title">Ask your own data direct questions, with the evidence in view.</h1>
-      <p className="hero-lede">
-        Upload a table and policy PDFs, then ask questions about both. Numbers come from
-        validated read-only SQL and deterministic analysis, and every answer shows the query,
-        the rows, and the sources it relied on, so a person can check it before acting.
-      </p>
+    <section className="product-overview" aria-labelledby="product-overview-heading">
+      <div className="section-title-row">
+        <div>
+          <p className="eyebrow">Review-first analytics</p>
+          <h2 id="product-overview-heading">Evidence stays attached to the answer</h2>
+        </div>
+        <p className="section-lede">
+          Numbers come from validated read-only SQL and deterministic analysis. Model-backed
+          answers retain their query, result rows, sources, and review limits.
+        </p>
+      </div>
       <div className="overview-grid">
         <article className="overview-card">
-          <h2>What it solves</h2>
+          <h3>What it solves</h3>
           <p>
             Analysts spend time writing queries, cross-reading policy documents, and explaining
             where a figure came from. This workbench drafts the query, retrieves the policy
@@ -23,28 +26,28 @@ export function ProductOverview() {
           </p>
         </article>
         <article className="overview-card">
-          <h2>What it analyzes</h2>
+          <h3>What it analyzes</h3>
           <p>
             CSV and Excel tables (profiled, schema-reviewed by you) and text-based PDFs. Try the
             built-in synthetic retail data below; nothing in it is real customer data.
           </p>
         </article>
         <article className="overview-card">
-          <h2>What you can ask</h2>
+          <h3>What you can ask</h3>
           <p>
             Rankings, comparisons, trends, and counts over the table; what a policy says; and
             hybrid questions such as how many transactions meet a documented rule.
           </p>
         </article>
         <article className="overview-card">
-          <h2>How answers are grounded</h2>
+          <h3>How answers are grounded</h3>
           <p>
             Figures are computed from the query result by code, not written by a model. Document
             answers cite retrieved passages and quotations are checked against them.
           </p>
         </article>
         <article className="overview-card">
-          <h2>Safety controls</h2>
+          <h3>Safety controls</h3>
           <p>
             One read-only SELECT, allowlisted tables and functions, a row cap and time limit,
             optional approval before SQL runs, consent before data reaches a hosted model, and
@@ -52,7 +55,7 @@ export function ProductOverview() {
           </p>
         </article>
         <article className="overview-card overview-card--limits">
-          <h2>Limits to keep in mind</h2>
+          <h3>Limits to keep in mind</h3>
           <p>
             A model drafts the SQL, so it can answer a slightly different question than you
             meant: read the query. Citation checks confirm structure, not truth. Results show

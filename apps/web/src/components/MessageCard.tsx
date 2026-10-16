@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import type { Message } from "../api/client";
+import type { ApprovalDraft } from "../workspace/drafts";
 import { AnswerProvenance } from "./AnswerProvenance";
 import { ApprovalControls } from "./ApprovalControls";
 import { ResultTable } from "./ResultTable";
@@ -11,6 +12,8 @@ interface MessageCardProps {
   /** 1-based position in the conversation; makes each result table's accessible name unique. */
   position: number;
   busy: boolean;
+  approvalDraft: ApprovalDraft | null;
+  onApprovalDraftChange: (draft: ApprovalDraft) => void;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
   onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
 }
@@ -20,13 +23,36 @@ const STATUS_TEXT: Partial<Record<Message["status"], string>> = {
   rejected: "Not executed",
 };
 
+function sourceElementId(messageId: string, sourceNumber: number): string {
+  return `source-${messageId}-${sourceNumber}`;
+}
+
+/**
+ * Reveals and focuses the cited passage without following the fragment. The URL fragment is the
+ * workbench's section route, so a citation must not add a history entry or replace the section.
+ */
+function revealSource(event: MouseEvent<HTMLAnchorElement>, targetId: string) {
+  event.preventDefault();
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  const disclosure = target.closest("details");
+  if (disclosure) disclosure.open = true;
+  target.focus();
+}
+
 /** Turns "Source 2" markers in an answer into links to the passage they cite. */
 function withCitationLinks(text: string, messageId: string, known: Set<number>): ReactNode[] {
   return text.split(/(Source \d+)/g).map((part, index) => {
     const match = /^Source (\d+)$/.exec(part);
     if (match && known.has(Number(match[1]))) {
+      const targetId = sourceElementId(messageId, Number(match[1]));
       return (
-        <a key={index} className="citation-link" href={`#source-${messageId}-${match[1]}`}>
+        <a
+          key={index}
+          className="citation-link"
+          href={`#${targetId}`}
+          onClick={(event) => revealSource(event, targetId)}
+        >
           {part}
         </a>
       );
@@ -35,7 +61,15 @@ function withCitationLinks(text: string, messageId: string, known: Set<number>):
   });
 }
 
-export function MessageCard({ message, position, busy, onApproval, onExport }: MessageCardProps) {
+export function MessageCard({
+  message,
+  position,
+  busy,
+  approvalDraft,
+  onApprovalDraftChange,
+  onApproval,
+  onExport,
+}: MessageCardProps) {
   const sources = message.sources.map((source) => parseSource(source.citation));
   const known = new Set(
     sources.flatMap((source) => (source.number === null ? [] : [source.number])),
@@ -124,6 +158,8 @@ export function MessageCard({ message, position, busy, onApproval, onExport }: M
             key={message.id}
             message={message}
             busy={busy}
+            draft={approvalDraft}
+            onDraftChange={onApprovalDraftChange}
             onApproval={onApproval}
           />
         ) : null}
@@ -165,7 +201,8 @@ export function MessageCard({ message, position, busy, onApproval, onExport }: M
               {sources.map((source, index) => (
                 <li
                   key={source.raw}
-                  id={source.number !== null ? `source-${message.id}-${source.number}` : undefined}
+                  id={source.number !== null ? sourceElementId(message.id, source.number) : undefined}
+                  tabIndex={source.number !== null ? -1 : undefined}
                 >
                   <p className="source-heading">
                     {source.filename ? (
