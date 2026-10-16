@@ -3,7 +3,18 @@
 How the multi-agent investigation fits beside the existing question graph. The decisions are in
 [ADR 0024](../adr/0024-multi-agent-investigation.md), and delivery is tracked by
 [#131](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/131). Status
-today: only the contracts in `packages/investigation/` exist (INV-0). Nothing below runs yet.
+today: the contracts in `packages/investigation/` exist (INV-0). The question graph runs its SQL and
+document steps through `GuardedSQLService` (`src/orchestration/guarded_sql.py`) and
+`DocumentResearchService` (`src/orchestration/document_research.py`), which specialists will reuse
+(INV-1). Nothing else below runs yet.
+
+These services are not access controls. The API authorizes the caller, enforces consent, and
+resolves the tenant's table and documents before building them. For investigations, the INV-3 tool
+gateway must apply tenant binding, consent, capability, budget, and cancellation before any call
+reaches them. Approval interrupts, the correction count, and hybrid fallback stay in the graph.
+The extraction preserves behaviour exactly, with one intentional exception: resuming an approval
+when the orchestrator has no table now fails with `SQLAgentError` before execution, instead of an
+assertion error (see the #134 brief).
 
 ## Topology
 

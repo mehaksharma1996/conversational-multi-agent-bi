@@ -17,21 +17,18 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
-from src.agents.rag_agent import RAGAnswer, answer_with_documents
+from src.agents.rag_agent import RAGAnswer
 from src.agents.sql_agent import (
     SQLAgentError,
-    build_sql_prompt,
-    build_sql_retry_prompt,
     execute_sql,
-    generate_sql,
     summarize_sql_result,
-    validate_generated_sql,
 )
 from src.documents.retriever import Retriever
 from src.llm.base import LLMClient, SchemaT
 from src.llm.observability import QuestionUsage, collect_question_usage, llm_purpose
 from src.llm.structured import HybridCriteria, RouteDecision
 from src.memory.session_memory import SessionMemory, answer_from_memory
+from src.orchestration.document_research import DocumentResearchService
 from src.orchestration.graph_state import (
     AnswerDiagnostics,
     CriteriaProvenance,
@@ -39,11 +36,9 @@ from src.orchestration.graph_state import (
     QuestionGraphState,
     RouteName,
 )
-from src.orchestration.policy_grounding import (
-    sanitize_policy_predicates,
-    verify_policy_sql,
-)
-from src.storage.query_executor import QueryTimeoutError, UnsafeQueryError
+from src.orchestration.guarded_sql import GuardedSQLService
+from src.orchestration.policy_grounding import sanitize_policy_predicates
+from src.storage.query_executor import UnsafeQueryError
 from src.storage.sqlite_store import StoredTable
 from src.utils.pii_redaction import redact_pii
 
@@ -135,6 +130,15 @@ def _route_dependency_conflict(
     if route == "rag" and _ROW_AGGREGATION_CUES.search(question) and _is_data_question(question):
         return "row_aggregation"
     return None
+
+
+def _execute_through_module(stored_table: StoredTable, safe_sql: str) -> pd.DataFrame:
+    """Executor for ``GuardedSQLService`` that resolves ``execute_sql`` from this module per call.
+
+    Tests and evaluation controls patch ``langgraph_orchestrator.execute_sql``; looking it up at
+    call time keeps that seam working after the SQL steps moved into the service.
+    """
+    return execute_sql(stored_table, safe_sql)
 
 
 def build_checkpoint_serializer() -> JsonPlusSerializer:
@@ -368,6 +372,18 @@ class QuestionOrchestrator:
         graph.add_edge("hybrid_fallback", END)
         return graph.compile(checkpointer=self._checkpointer)
 
+    # The services hold no state, so they are bound to the current table, retriever, and client
+    # per step. Approval interrupts, the correction count, and hybrid fallback stay in this graph.
+    def _sql_service(self) -> GuardedSQLService:
+        if self.stored_table is None:
+            raise SQLAgentError("No uploaded table is available.")
+        return GuardedSQLService(
+            self.stored_table, self.llm_client, executor=_execute_through_module
+        )
+
+    def _document_service(self, retriever: Retriever) -> DocumentResearchService:
+        return DocumentResearchService(retriever, self.llm_client)
+
     def _route_node(self, state: QuestionGraphState) -> QuestionGraphState:
         question = state["question"]
         memory_answer_available = (
@@ -547,11 +563,7 @@ Return JSON only: {{"route": "route_name", "confidence": 0.0}}
     def _retrieve_documents_node(self, state: QuestionGraphState) -> QuestionGraphState:
         if self.document_retriever is None:
             return self._unsupported_node(state)
-        result = answer_with_documents(
-            question=state["question"],
-            retriever=self.document_retriever,
-            llm_client=self.llm_client,
-        )
+        result = self._document_service(self.document_retriever).research(state["question"]).answer
         return {
             **state,
             "document_result": result,
@@ -598,11 +610,11 @@ Return matching or highest-priority rows identifiable from the table columns.
             context = None
         else:
             context = self._sql_conversation_context()
-        prompt = build_sql_prompt(question, self.stored_table, context)
+        prompt = self._sql_service().prompt(question, context)
         return {**state, "sql_question": question, "sql_prompt": prompt}
 
     def _generate_sql_node(self, state: QuestionGraphState) -> QuestionGraphState:
-        sql, model_text = generate_sql(state["sql_prompt"], self.llm_client)
+        sql, model_text = self._sql_service().generate(state["sql_prompt"])
         return {
             **state,
             "sql_candidate": sql,
@@ -611,8 +623,9 @@ Return matching or highest-priority rows identifiable from the table columns.
         }
 
     def _validate_sql_node(self, state: QuestionGraphState) -> QuestionGraphState:
+        sql_service = self._sql_service()
         try:
-            validated = validate_generated_sql(state["sql_candidate"])
+            validated = sql_service.validate(state["sql_candidate"])
         except UnsafeQueryError:
             if state.get("approval_resumed", False):
                 raise
@@ -626,10 +639,10 @@ Return matching or highest-priority rows identifiable from the table columns.
         }
         if state.get("route") != "hybrid":
             return updated
-        verification = verify_policy_sql(
+        verification = sql_service.verify_policy(
             validated,
             state.get("criteria", {}),
-            user_question=state.get("question"),
+            question=state.get("question"),
         )
         diagnostics = replace(
             state.get("diagnostics", AnswerDiagnostics()),
@@ -707,36 +720,34 @@ Return matching or highest-priority rows identifiable from the table columns.
 
     def _execute_sql_node(self, state: QuestionGraphState) -> QuestionGraphState:
         assert self.stored_table is not None
-        started_at = monotonic()
-        try:
-            dataframe = execute_sql(self.stored_table, state["validated_sql"])
-        except (UnsafeQueryError, QueryTimeoutError):
+        attempts = state.get("sql_correction_attempts", 0)
+        outcome = self._sql_service().execute(state["validated_sql"], corrections_used=attempts)
+        if outcome.status == "refused":
             if state.get("route") == "hybrid":
                 return {**state, "sql_terminal_failure": True}
-            raise
-        except Exception as exc:
-            elapsed = state.get("sql_execution_seconds", 0.0) + monotonic() - started_at
-            attempts = state.get("sql_correction_attempts", 0)
-            if attempts >= 1:
-                if state.get("route") == "hybrid":
-                    return {
-                        **state,
-                        "sql_execution_seconds": elapsed,
-                        "sql_terminal_failure": True,
-                    }
-                raise SQLAgentError(
-                    "The generated SQL could not be executed after one correction attempt."
-                ) from exc
+            assert outcome.error is not None
+            raise outcome.error
+        elapsed = state.get("sql_execution_seconds", 0.0) + outcome.elapsed_seconds
+        if outcome.status == "exhausted":
+            if state.get("route") == "hybrid":
+                return {
+                    **state,
+                    "sql_execution_seconds": elapsed,
+                    "sql_terminal_failure": True,
+                }
+            raise SQLAgentError(
+                "The generated SQL could not be executed after one correction attempt."
+            ) from outcome.error
+        if outcome.status == "retryable":
             return {
                 **state,
-                "sql_error": str(exc)[:500],
+                "sql_error": outcome.error_text,
                 "sql_correction_attempts": attempts + 1,
                 "sql_execution_seconds": elapsed,
             }
-        elapsed = state.get("sql_execution_seconds", 0.0) + monotonic() - started_at
         return {
             **state,
-            "dataframe": dataframe,
+            "dataframe": outcome.dataframe,
             "sql": state["validated_sql"],
             "sql_error": "",
             "sql_terminal_failure": False,
@@ -751,12 +762,13 @@ Return matching or highest-priority rows identifiable from the table columns.
         return "hybrid" if state.get("route") == "hybrid" else "sql"
 
     def _correct_sql_node(self, state: QuestionGraphState) -> QuestionGraphState:
-        prompt = build_sql_retry_prompt(
+        sql_service = self._sql_service()
+        prompt = sql_service.correction_prompt(
             state["sql_prompt"],
             state["validated_sql"],
             state["sql_error"],
         )
-        sql, model_text = generate_sql(prompt, self.llm_client, "sql_correction")
+        sql, model_text = sql_service.generate(prompt, "sql_correction")
         return {
             **state,
             "sql_candidate": sql,
@@ -873,11 +885,7 @@ Return matching or highest-priority rows identifiable from the table columns.
                 "answer": "Upload PDF documents before asking document questions.",
             }
 
-        result = answer_with_documents(
-            question=state["question"],
-            retriever=self.document_retriever,
-            llm_client=self.llm_client,
-        )
+        result = self._document_service(self.document_retriever).research(state["question"]).answer
         return {
             **state,
             "answer": result.answer,

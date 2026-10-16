@@ -1,0 +1,2168 @@
+{
+  "pending_checkpoint": {
+    "next": [
+      "approval"
+    ],
+    "values": {
+      "criteria": "dict",
+      "criteria_dropped_values": "int",
+      "criteria_provenance": "str",
+      "criteria_rejected_keys": "int",
+      "diagnostics": "AnswerDiagnostics",
+      "document_result": "RAGAnswer",
+      "policy_sql_issues": "list",
+      "policy_sql_status": "str",
+      "question": "str",
+      "require_sql_approval": "bool",
+      "route": "str",
+      "sources": "list",
+      "sql_candidate": "str",
+      "sql_correction_attempts": "int",
+      "sql_error": "str",
+      "sql_execution_seconds": "float",
+      "sql_model_text": "str",
+      "sql_prompt": "str",
+      "sql_question": "str",
+      "sql_terminal_failure": "bool",
+      "status": "str",
+      "validated_sql": "str"
+    }
+  },
+  "scenarios": {
+    "hybrid_approval_safe_edit": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "pending_approval"
+        },
+        {
+          "answer": "Applied the extracted document guidance to the uploaded table.\n\nThe query returned 1 row across 1 column.\nKey observations:\n- Metric result: merchant=B.\n\nReview the source excerpts and generated SQL before acting on the result.\n\nPolicy-to-SQL structural check matched the source-attributed field, operator, value, unit, null behavior, and predicate join. This does not prove that the extracted policy is complete or semantically correct.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": 1,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": {
+            "columns": [
+              "merchant"
+            ],
+            "data": [
+              [
+                "B"
+              ]
+            ],
+            "index": [
+              0
+            ]
+          },
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant FROM uploaded_data WHERE \"amount\" > 20",
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_approval_then_approve": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "pending_approval"
+        },
+        {
+          "answer": "Applied the extracted document guidance to the uploaded table.\n\nThe query returned 1 row across 2 columns.\nKey observations:\n- Metric result: merchant=B; amount=30.\nLimits:\n- No currency or unit was inferred for amount; values are shown exactly as represented in the query result.\n\nReview the source excerpts and generated SQL before acting on the result.\n\nPolicy-to-SQL structural check matched the source-attributed field, operator, value, unit, null behavior, and predicate join. This does not prove that the extracted policy is complete or semantically correct.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": 1,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": {
+            "columns": [
+              "merchant",
+              "amount"
+            ],
+            "data": [
+              [
+                "B",
+                30.0
+              ]
+            ],
+            "index": [
+              0
+            ]
+          },
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_approval_then_reject": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "pending_approval"
+        },
+        {
+          "answer": "SQL execution was rejected. No table query was executed.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "rejected"
+        }
+      ]
+    },
+    "hybrid_approval_unjustified_edit": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "pending_approval"
+        },
+        {
+          "answer": "Transactions with amount over 20 dollars require review. Source 1\n\nThe hybrid table query was refused because its policy-to-SQL predicate validation failed. No policy query was executed.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "rag",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": true,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 2,
+            "policy_issue_count": 1,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "mismatch",
+            "policy_unjustified_predicate_count": 1,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "rag",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_approval_unsafe_edit": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "pending_approval"
+        },
+        {
+          "error_message": "Only SELECT queries and read-only CTEs are allowed.",
+          "error_type": "UnsafeQueryError"
+        }
+      ]
+    },
+    "hybrid_corrected_sql_needs_second_approval": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "c18ca3b8ad21030dd6af7238d80604e960dbab6b6ed31861878d7c6f7d37f2cf"
+        ],
+        [
+          "sql_correction",
+          "c478ef7b7aab61ce791660a95e45d8ef6a5226f19bdd3b1354b231fa88cdaccb"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "no_structured_criteria",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_evaluated",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT missing_column FROM uploaded_data",
+          "status": "pending_approval"
+        },
+        {
+          "answer": "",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "no_structured_criteria",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_evaluated",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant FROM uploaded_data ORDER BY merchant",
+          "status": "pending_approval"
+        },
+        {
+          "answer": "Applied the extracted document guidance to the uploaded table.\n\nThe query returned 3 rows across 1 column.\nLimits:\n- The returned rows do not contain comparable numeric values; inspect the result table for categorical or row-level details.\n\nReview the source excerpts and generated SQL before acting on the result.\n\n(Policy-to-SQL check: no source-attributed structured predicates were available, so semantic correspondence was not evaluated.)",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "no_structured_criteria",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_evaluated",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": true,
+            "sql_row_count": 3,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": {
+            "columns": [
+              "merchant"
+            ],
+            "data": [
+              [
+                "A"
+              ],
+              [
+                "A"
+              ],
+              [
+                "B"
+              ]
+            ],
+            "index": [
+              0,
+              1,
+              2
+            ]
+          },
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant FROM uploaded_data ORDER BY merchant",
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_correction_exhausted_falls_back": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "c18ca3b8ad21030dd6af7238d80604e960dbab6b6ed31861878d7c6f7d37f2cf"
+        ],
+        [
+          "sql_correction",
+          "c478ef7b7aab61ce791660a95e45d8ef6a5226f19bdd3b1354b231fa88cdaccb"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Transactions with amount over 20 dollars require review. Source 1\n\nI could not safely translate the document guidance into a table query, so no policy query was executed.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "no_structured_criteria",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "rag",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": true,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_evaluated",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": true,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "rag",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_keyword_criteria_unreferenced": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "14cf146fff18c6fe86c46545f653027078ea3797811fb1061ab53729e7264ce3"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Applied the extracted document guidance to the uploaded table.\n\nThe query returned 3 rows across 2 columns.\nKey observations:\n- Within the returned rows, amount is highest for merchant=B at 30 and lowest for merchant=A at 10; the difference is 20 (200.0% relative to the lowest value).\nLimits:\n- No currency or unit was inferred for amount; values are shown exactly as represented in the query result.\n\nReview the source excerpts and generated SQL before acting on the result.\n\n(Policy-to-SQL check: no source-attributed structured predicates were available, so semantic correspondence was not evaluated.)\n\n(Provenance check: the generated SQL does not appear to reference any of the extracted document criteria, so it may not actually implement the requested filter. This checks for literal value overlap, not query semantics; verify the SQL before relying on it.)",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "keywords"
+            ],
+            "criteria_provenance": "unreferenced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_evaluated",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": 3,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": {
+            "columns": [
+              "merchant",
+              "amount"
+            ],
+            "data": [
+              [
+                "B",
+                30.0
+              ],
+              [
+                "A",
+                20.0
+              ],
+              [
+                "A",
+                10.0
+              ]
+            ],
+            "index": [
+              0,
+              1,
+              2
+            ]
+          },
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data ORDER BY amount DESC",
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_policy_mismatch_falls_back": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Transactions with amount over 20 dollars require review. Source 1\n\nThe hybrid table query was refused because its policy-to-SQL predicate validation failed. No policy query was executed.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "rag",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": true,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 1,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "mismatch",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "rag",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_timeout_falls_back": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Transactions with amount over 20 dollars require review. Source 1\n\nI could not safely translate the document guidance into a table query, so no policy query was executed.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "rag",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": true,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "rag",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_unsafe_generated_falls_back": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "c18ca3b8ad21030dd6af7238d80604e960dbab6b6ed31861878d7c6f7d37f2cf"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Transactions with amount over 20 dollars require review. Source 1\n\nI could not safely translate the document guidance into a table query, so no policy query was executed.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "no_structured_criteria",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "rag",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": true,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "rag",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "hybrid_verified": {
+      "calls": [
+        [
+          "rag_answer",
+          "27f7d49f4cc76a6cecb53c53e939d0d8843da4bc5a84076fd8869039bf885b92"
+        ],
+        [
+          "criteria_extraction",
+          "5494ac7192a96c03ac965f953ddea9d7c1b96ba6820c7c725762e23cfea259dc"
+        ],
+        [
+          "sql_generation",
+          "74b2b9368b3b9ba3d552a148512673773addd53f222f48df632996111623754a"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Applied the extracted document guidance to the uploaded table.\n\nThe query returned 1 row across 2 columns.\nKey observations:\n- Metric result: merchant=B; amount=30.\nLimits:\n- No currency or unit was inferred for amount; values are shown exactly as represented in the query result.\n\nReview the source excerpts and generated SQL before acting on the result.\n\nPolicy-to-SQL structural check matched the source-attributed field, operator, value, unit, null behavior, and predicate join. This does not prove that the extracted policy is complete or semantically correct.",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [
+              "predicate_join",
+              "predicates"
+            ],
+            "criteria_provenance": "traced",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "hybrid",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 1,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 1,
+            "policy_sql_status": "structurally_verified",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": 1,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "hybrid",
+          "rows": {
+            "columns": [
+              "merchant",
+              "amount"
+            ],
+            "data": [
+              [
+                "B",
+                30.0
+              ]
+            ],
+            "index": [
+              0
+            ]
+          },
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": "SELECT merchant, amount FROM uploaded_data WHERE \"amount\" > 20 ORDER BY amount DESC",
+          "status": "complete"
+        }
+      ]
+    },
+    "memory_answer": {
+      "calls": [],
+      "steps": [
+        {
+          "answer": "SQL used for 'Show rows':\n\n```sql\nSELECT * FROM uploaded_data LIMIT 5\n```",
+          "diagnostics": {
+            "citation_count": 0,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "not_applicable",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [],
+            "final_route": "memory",
+            "final_route_confidence": null,
+            "grounding_status": "not_applicable",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": null,
+            "retrieval_candidates": null,
+            "retrieval_duplicates_skipped": null,
+            "retrieval_lexical_candidates": null,
+            "retrieval_lexical_only_accepted": null,
+            "retrieval_rejected_distance": null,
+            "retrieval_rerank_failed": null,
+            "retrieval_reranked": null,
+            "route_reconsideration_triggered": false,
+            "source_count": 0,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "memory",
+          "rows": null,
+          "sources": null,
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "rag_answer": {
+      "calls": [
+        [
+          "rag_answer",
+          "5e5988fc1caf6abc3f2201d744de0fce0690bd6851b80603640afc24bb573a86"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Transactions with amount over 20 dollars require review. Source 1",
+          "diagnostics": {
+            "citation_count": 1,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "not_applicable",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "VERIFIED_REFERENCE",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "rag",
+            "final_route_confidence": null,
+            "grounding_status": "checked_no_issues",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "rag",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "rag_no_evidence": {
+      "calls": [],
+      "steps": [
+        {
+          "error_message": "No relevant document chunks were found (3 candidate(s) considered but none were similar enough to the question).",
+          "error_type": "RAGAgentError"
+        }
+      ]
+    },
+    "rag_uncited_answer": {
+      "calls": [
+        [
+          "rag_answer",
+          "5e5988fc1caf6abc3f2201d744de0fce0690bd6851b80603640afc24bb573a86"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "Amounts over 20 need review.\n\n(Grounding check: 1 factual statement(s) did not include a valid source reference. Review before relying on this answer.)",
+          "diagnostics": {
+            "citation_count": 0,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "not_applicable",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [
+              "MISSING_EVIDENCE",
+              "UNVERIFIED_CLAIM",
+              "NOT_EVALUATED"
+            ],
+            "final_route": "rag",
+            "final_route_confidence": null,
+            "grounding_status": "uncited",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": 1,
+            "retrieval_candidates": 2,
+            "retrieval_duplicates_skipped": 0,
+            "retrieval_lexical_candidates": 0,
+            "retrieval_lexical_only_accepted": 0,
+            "retrieval_rejected_distance": 1,
+            "retrieval_rerank_failed": 0,
+            "retrieval_reranked": 0,
+            "route_reconsideration_triggered": false,
+            "source_count": 1,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 1,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "rag",
+          "rows": null,
+          "sources": [
+            "Source 1 - policy.pdf, page 1, chunk 0, relevance 0.90: Transactions with amount over 20 dollars require review...."
+          ],
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    },
+    "sql_answer": {
+      "calls": [
+        [
+          "sql_generation",
+          "b3725b823647afe7bdada7f9185c5e160c352c896dd5a1607826a9a1121fb5e3"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "The query returned 3 rows across 2 columns.\nKey observations:\n- Within the returned rows, amount is highest for merchant=B at 30 and lowest for merchant=A at 10; the difference is 20 (200.0% relative to the lowest value).\nLimits:\n- No currency or unit was inferred for amount; values are shown exactly as represented in the query result.",
+          "diagnostics": {
+            "citation_count": 0,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "not_applicable",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [],
+            "final_route": "sql",
+            "final_route_confidence": null,
+            "grounding_status": "not_applicable",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": null,
+            "retrieval_candidates": null,
+            "retrieval_duplicates_skipped": null,
+            "retrieval_lexical_candidates": null,
+            "retrieval_lexical_only_accepted": null,
+            "retrieval_rejected_distance": null,
+            "retrieval_rerank_failed": null,
+            "retrieval_reranked": null,
+            "route_reconsideration_triggered": false,
+            "source_count": 0,
+            "sql_correction_attempted": false,
+            "sql_row_count": 3,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "sql",
+          "rows": {
+            "columns": [
+              "merchant",
+              "amount"
+            ],
+            "data": [
+              [
+                "B",
+                30.0
+              ],
+              [
+                "A",
+                20.0
+              ],
+              [
+                "A",
+                10.0
+              ]
+            ],
+            "index": [
+              0,
+              1,
+              2
+            ]
+          },
+          "sources": null,
+          "sql": "SELECT merchant, amount FROM uploaded_data ORDER BY amount DESC",
+          "status": "complete"
+        }
+      ]
+    },
+    "sql_correction_exhausted": {
+      "calls": [
+        [
+          "sql_generation",
+          "2d16700d0393ecf5d7199a0c6836ac461fb52da6aa063f0a39912dfcaad89202"
+        ],
+        [
+          "sql_correction",
+          "04ec00b7862aa7e408fe388a72688002fe54bb16d92a7a53cbdb5933a7b42c40"
+        ]
+      ],
+      "steps": [
+        {
+          "error_message": "The generated SQL could not be executed after one correction attempt.",
+          "error_type": "SQLAgentError"
+        }
+      ]
+    },
+    "sql_correction_succeeds": {
+      "calls": [
+        [
+          "sql_generation",
+          "2d16700d0393ecf5d7199a0c6836ac461fb52da6aa063f0a39912dfcaad89202"
+        ],
+        [
+          "sql_correction",
+          "04ec00b7862aa7e408fe388a72688002fe54bb16d92a7a53cbdb5933a7b42c40"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "The query returned 3 rows across 1 column.\nLimits:\n- The returned rows do not contain comparable numeric values; inspect the result table for categorical or row-level details.",
+          "diagnostics": {
+            "citation_count": 0,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "not_applicable",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [],
+            "final_route": "sql",
+            "final_route_confidence": null,
+            "grounding_status": "not_applicable",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": null,
+            "retrieval_candidates": null,
+            "retrieval_duplicates_skipped": null,
+            "retrieval_lexical_candidates": null,
+            "retrieval_lexical_only_accepted": null,
+            "retrieval_rejected_distance": null,
+            "retrieval_rerank_failed": null,
+            "retrieval_reranked": null,
+            "route_reconsideration_triggered": false,
+            "source_count": 0,
+            "sql_correction_attempted": true,
+            "sql_row_count": 3,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "sql",
+          "rows": {
+            "columns": [
+              "merchant"
+            ],
+            "data": [
+              [
+                "A"
+              ],
+              [
+                "A"
+              ],
+              [
+                "B"
+              ]
+            ],
+            "index": [
+              0,
+              1,
+              2
+            ]
+          },
+          "sources": null,
+          "sql": "SELECT merchant FROM uploaded_data ORDER BY merchant",
+          "status": "complete"
+        }
+      ]
+    },
+    "sql_require_approval_flag_is_ignored": {
+      "calls": [
+        [
+          "sql_generation",
+          "2d16700d0393ecf5d7199a0c6836ac461fb52da6aa063f0a39912dfcaad89202"
+        ]
+      ],
+      "steps": [
+        {
+          "answer": "The query returned 3 rows across 2 columns.\nKey observations:\n- Within the returned rows, amount is highest for merchant=B at 30 and lowest for merchant=A at 10; the difference is 20 (200.0% relative to the lowest value).\nLimits:\n- No currency or unit was inferred for amount; values are shown exactly as represented in the query result.",
+          "diagnostics": {
+            "citation_count": 0,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "not_applicable",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [],
+            "final_route": "sql",
+            "final_route_confidence": null,
+            "grounding_status": "not_applicable",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": null,
+            "retrieval_candidates": null,
+            "retrieval_duplicates_skipped": null,
+            "retrieval_lexical_candidates": null,
+            "retrieval_lexical_only_accepted": null,
+            "retrieval_rejected_distance": null,
+            "retrieval_rerank_failed": null,
+            "retrieval_reranked": null,
+            "route_reconsideration_triggered": false,
+            "source_count": 0,
+            "sql_correction_attempted": false,
+            "sql_row_count": 3,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "sql",
+          "rows": {
+            "columns": [
+              "merchant",
+              "amount"
+            ],
+            "data": [
+              [
+                "B",
+                30.0
+              ],
+              [
+                "A",
+                20.0
+              ],
+              [
+                "A",
+                10.0
+              ]
+            ],
+            "index": [
+              0,
+              1,
+              2
+            ]
+          },
+          "sources": null,
+          "sql": "SELECT merchant, amount FROM uploaded_data ORDER BY amount DESC",
+          "status": "complete"
+        }
+      ]
+    },
+    "sql_timeout": {
+      "calls": [
+        [
+          "sql_generation",
+          "2d16700d0393ecf5d7199a0c6836ac461fb52da6aa063f0a39912dfcaad89202"
+        ]
+      ],
+      "steps": [
+        {
+          "error_message": "Query exceeded the 5-second execution limit.",
+          "error_type": "QueryTimeoutError"
+        }
+      ]
+    },
+    "sql_unsafe_generated": {
+      "calls": [
+        [
+          "sql_generation",
+          "2d16700d0393ecf5d7199a0c6836ac461fb52da6aa063f0a39912dfcaad89202"
+        ]
+      ],
+      "steps": [
+        {
+          "error_message": "Only SELECT queries and read-only CTEs are allowed.",
+          "error_type": "UnsafeQueryError"
+        }
+      ]
+    },
+    "unsupported": {
+      "calls": [],
+      "steps": [
+        {
+          "answer": "I need uploaded table data for data questions or uploaded PDF documents for document questions.",
+          "diagnostics": {
+            "citation_count": 0,
+            "criteria_dropped_values": 0,
+            "criteria_keys": [],
+            "criteria_provenance": "not_applicable",
+            "criteria_rejected_keys": 0,
+            "deterministic_route_fallback": true,
+            "evidence_statuses": [],
+            "final_route": "unsupported",
+            "final_route_confidence": null,
+            "grounding_status": "not_applicable",
+            "hybrid_fell_back_to_documents": false,
+            "initial_model_route": null,
+            "initial_route_confidence": null,
+            "invalid_citation_count": 0,
+            "llm_calls": 0,
+            "llm_estimated_cost_usd": null,
+            "llm_failures": 0,
+            "llm_fallbacks": 0,
+            "llm_output_tokens": null,
+            "llm_prompt_tokens": null,
+            "policy_business_predicate_count": 0,
+            "policy_issue_count": 0,
+            "policy_predicate_count": 0,
+            "policy_sql_status": "not_applicable",
+            "policy_unjustified_predicate_count": 0,
+            "retrieval_accepted": null,
+            "retrieval_candidates": null,
+            "retrieval_duplicates_skipped": null,
+            "retrieval_lexical_candidates": null,
+            "retrieval_lexical_only_accepted": null,
+            "retrieval_rejected_distance": null,
+            "retrieval_rerank_failed": null,
+            "retrieval_reranked": null,
+            "route_reconsideration_triggered": false,
+            "source_count": 0,
+            "sql_correction_attempted": false,
+            "sql_row_count": null,
+            "structured_output_failures": 0,
+            "structured_output_repairs": 0,
+            "uncited_claim_count": 0,
+            "unverified_quote_count": 0
+          },
+          "error": null,
+          "route": "unsupported",
+          "rows": null,
+          "sources": null,
+          "sql": null,
+          "status": "complete"
+        }
+      ]
+    }
+  },
+  "topology": {
+    "edges": [
+      [
+        "__start__",
+        "route",
+        false,
+        null
+      ],
+      [
+        "approval",
+        "__end__",
+        true,
+        "rejected"
+      ],
+      [
+        "approval",
+        "validate_sql",
+        true,
+        "validate"
+      ],
+      [
+        "correct_sql",
+        "validate_sql",
+        false,
+        null
+      ],
+      [
+        "execute_sql",
+        "correct_sql",
+        true,
+        "correct"
+      ],
+      [
+        "execute_sql",
+        "finalize_hybrid",
+        true,
+        "hybrid"
+      ],
+      [
+        "execute_sql",
+        "finalize_sql",
+        true,
+        "sql"
+      ],
+      [
+        "execute_sql",
+        "hybrid_fallback",
+        true,
+        "fallback"
+      ],
+      [
+        "extract_criteria",
+        "prepare_sql",
+        false,
+        null
+      ],
+      [
+        "finalize_hybrid",
+        "__end__",
+        false,
+        null
+      ],
+      [
+        "finalize_sql",
+        "__end__",
+        false,
+        null
+      ],
+      [
+        "generate_sql",
+        "validate_sql",
+        false,
+        null
+      ],
+      [
+        "hybrid_fallback",
+        "__end__",
+        false,
+        null
+      ],
+      [
+        "memory",
+        "__end__",
+        true,
+        "memory"
+      ],
+      [
+        "memory",
+        "prepare_sql",
+        true,
+        "sql"
+      ],
+      [
+        "memory",
+        "rag",
+        true,
+        null
+      ],
+      [
+        "memory",
+        "unsupported",
+        true,
+        null
+      ],
+      [
+        "prepare_sql",
+        "generate_sql",
+        false,
+        null
+      ],
+      [
+        "rag",
+        "__end__",
+        false,
+        null
+      ],
+      [
+        "retrieve_documents",
+        "extract_criteria",
+        false,
+        null
+      ],
+      [
+        "route",
+        "memory",
+        true,
+        null
+      ],
+      [
+        "route",
+        "prepare_sql",
+        true,
+        "sql"
+      ],
+      [
+        "route",
+        "rag",
+        true,
+        null
+      ],
+      [
+        "route",
+        "retrieve_documents",
+        true,
+        "hybrid"
+      ],
+      [
+        "route",
+        "unsupported",
+        true,
+        null
+      ],
+      [
+        "unsupported",
+        "__end__",
+        false,
+        null
+      ],
+      [
+        "validate_sql",
+        "approval",
+        true,
+        null
+      ],
+      [
+        "validate_sql",
+        "execute_sql",
+        true,
+        "execute"
+      ],
+      [
+        "validate_sql",
+        "hybrid_fallback",
+        true,
+        "fallback"
+      ]
+    ],
+    "nodes": [
+      "__end__",
+      "__start__",
+      "approval",
+      "correct_sql",
+      "execute_sql",
+      "extract_criteria",
+      "finalize_hybrid",
+      "finalize_sql",
+      "generate_sql",
+      "hybrid_fallback",
+      "memory",
+      "prepare_sql",
+      "rag",
+      "retrieve_documents",
+      "route",
+      "unsupported",
+      "validate_sql"
+    ]
+  }
+}
