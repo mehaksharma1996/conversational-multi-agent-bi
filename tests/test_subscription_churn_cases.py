@@ -23,6 +23,12 @@ SAMPLE_ROOT = ROOT / "sample_data"
 MANIFEST = EVAL_ROOT / "manifest.json"
 PUBLIC_CASES = EVAL_ROOT / "public_cases.json"
 ORACLE = EVAL_ROOT / "oracle.json"
+ORACLE_PATHS = (
+    "evals/investigation/v1/oracle.json",
+    "evals/investigation/v1/reference.sql",
+)
+SOURCE_SUFFIXES = frozenset({".py", ".ts", ".tsx", ".js", ".jsx"})
+DEPENDENCY_DIRS = frozenset({"node_modules"})
 
 
 class _TermEmbedder:
@@ -193,15 +199,46 @@ def test_oracle_is_publicly_inspectable_but_evaluator_only() -> None:
         "H3": "untestable",
         "H4": "refuted",
     }
-    forbidden = (
-        "evals/investigation/v1/oracle.json",
-        "evals/investigation/v1/reference.sql",
-    )
-    for source_root in (ROOT / "apps", ROOT / "src", ROOT / "packages"):
-        for extension in ("*.py", "*.ts", "*.tsx", "*.js", "*.jsx"):
-            for path in source_root.rglob(extension):
+    assert _oracle_references(ROOT / "apps", ROOT / "src", ROOT / "packages") == []
+
+
+def _oracle_references(*source_roots: Path) -> list[Path]:
+    """Application source files that name an oracle path, skipping installed dependencies."""
+    found = []
+    for source_root in source_roots:
+        for directory, subdirectories, filenames in source_root.walk():
+            subdirectories[:] = [name for name in subdirectories if name not in DEPENDENCY_DIRS]
+            for filename in filenames:
+                path = directory / filename
+                if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
+                    continue
                 contents = path.read_text(encoding="utf-8")
-                assert not any(value in contents for value in forbidden), path
+                if any(value in contents for value in ORACLE_PATHS):
+                    found.append(path)
+    return found
+
+
+def test_oracle_scan_skips_dependencies_and_directories_named_like_source(tmp_path: Path) -> None:
+    # Packages such as gl-matrix ship a directory named types.d.ts; reading it fails on Windows.
+    (tmp_path / "web" / "node_modules" / "gl-matrix" / "types.d.ts").mkdir(parents=True)
+    (tmp_path / "web" / "node_modules" / "vendor.js").write_text(ORACLE_PATHS[0], encoding="utf-8")
+    (tmp_path / "web" / "src" / "types.d.ts").mkdir(parents=True)
+    (tmp_path / "web" / "src" / "App.tsx").write_text("export {};", encoding="utf-8")
+
+    assert _oracle_references(tmp_path) == []
+
+
+def test_oracle_scan_still_reports_application_source_that_names_the_oracle(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "web" / "src").mkdir(parents=True)
+    leak = tmp_path / "web" / "src" / "grader.ts"
+    leak.write_text(f'const answers = "{ORACLE_PATHS[0]}";', encoding="utf-8")
+    (tmp_path / "pkg").mkdir()
+    sql_leak = tmp_path / "pkg" / "loader.py"
+    sql_leak.write_text(f'REFERENCE = "{ORACLE_PATHS[1]}"', encoding="utf-8")
+
+    assert sorted(_oracle_references(tmp_path)) == sorted([leak, sql_leak])
 
 
 def test_model_accessible_manifest_entries_cannot_resolve_to_oracle_files() -> None:
