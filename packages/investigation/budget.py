@@ -7,6 +7,8 @@ Planning and execution each get their own ``BudgetLedger`` with their own limits
 - records actual usage when the work settles, counting every attempt, so retries and follow-up
   rounds accumulate and nothing is ever reset;
 - charges the full reservation when a model call reports no token usage (worst case, never zero);
+- charges the provider calls actually metered when a reservation covers several (fallbacks and
+  retries), never more than were reserved;
 - measures elapsed time with a monotonic clock, and treats a clock that goes backwards, returns a
   non-number, or raises as a fault;
 - settles only reservations it issued, exactly as issued;
@@ -62,6 +64,8 @@ CloseReason = Literal[
     "clock_fault",
     "cancelled",
     "completed",
+    # A security, authority, or scope refusal by the investigation tool gateway (#136).
+    "policy_refused",
 ]
 
 
@@ -239,12 +243,18 @@ class BudgetLedger:
         *,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        model_calls: int | None = None,
     ) -> BudgetUsage:
         """Record what the reserved work consumed. Allowed after closing, so in-flight work counts.
 
         Token counts apply only to model calls. A missing count is charged at its full reservation.
         A count above the reservation is charged as reported and closes the ledger if it passes a
         limit. A malformed settlement charges the full reservation, closes the ledger, and raises.
+
+        ``model_calls`` is the number of provider calls actually metered for a reservation that may
+        cover several (fallbacks and retries of one logical call). It must lie between 1 and the
+        reserved call count: a reservation is the most the work may do, so a higher count is
+        malformed. Omitted, every reserved call is charged.
         """
         with self._lock:
             issued = (
@@ -267,12 +277,18 @@ class BudgetLedger:
                 value is not None and (type(value) is not int or value < 0)
                 for value in reported.values()
             ) or (not request.model_calls and any(v is not None for v in reported.values()))
+            malformed = malformed or (
+                model_calls is not None
+                and (type(model_calls) is not int or not 1 <= model_calls <= request.model_calls)
+            )
             if not malformed and request.model_calls:
                 if input_tokens is None or output_tokens is None:
                     self._unmetered += 1
                 for name, value in reported.items():
                     if value is not None:
                         charge[name] = value
+                if model_calls is not None:
+                    charge["model_calls"] = model_calls
             for name, value in charge.items():
                 self._consumed[name] += value
 

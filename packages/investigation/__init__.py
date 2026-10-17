@@ -18,6 +18,7 @@ from packages.investigation.budget import (
     estimate_cost,
 )
 from packages.investigation.contracts import (
+    OUTCOME_CATEGORIES,
     SCHEMA_VERSION,
     TASK_EXECUTORS,
     TASK_PROPOSERS,
@@ -42,6 +43,15 @@ from packages.investigation.lifecycle import (
     is_terminal,
     transition,
 )
+from packages.investigation.refusals import (
+    LIFECYCLE_TARGET,
+    REFUSAL_CATEGORY,
+    SEVERITY,
+    RefusalCode,
+    RefusalSeverity,
+    is_investigation_terminal,
+    severity_of,
+)
 from packages.investigation.validation import (
     PlanViolation,
     ResourceContext,
@@ -52,9 +62,13 @@ from packages.investigation.validation import (
 
 __all__ = [
     "EXECUTION_LIMITS",
+    "LIFECYCLE_TARGET",
+    "OUTCOME_CATEGORIES",
     "PLANNING_LIMITS",
     "PLAN_APPROVAL_TTL",
+    "REFUSAL_CATEGORY",
     "SCHEMA_VERSION",
+    "SEVERITY",
     "TASK_EXECUTORS",
     "TASK_PROPOSERS",
     "TERMINAL_STATUSES",
@@ -79,6 +93,8 @@ __all__ = [
     "PlanTask",
     "PlanViolation",
     "ProviderCostProfile",
+    "RefusalCode",
+    "RefusalSeverity",
     "Reservation",
     "ResourceContext",
     "SQLAnalysisInput",
@@ -88,7 +104,9 @@ __all__ = [
     "approval_deadline",
     "approval_expired",
     "estimate_cost",
+    "is_investigation_terminal",
     "is_terminal",
+    "severity_of",
     "transition",
     "validate_follow_ups",
     "validate_plan",
