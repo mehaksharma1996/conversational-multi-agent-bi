@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -304,6 +304,9 @@ describe("failed questions", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("link", { name: /Ask/ }));
+    // Navigation focuses the section heading on the next frame; typing before it lands loses the
+    // keystrokes when that frame moves focus away from the question box.
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).parentElement).toHaveFocus());
     const box = await screen.findByLabelText("Business question");
     await user.type(box, "Which region is largest?");
     await user.click(screen.getByRole("button", { name: "Ask workbench" }));
