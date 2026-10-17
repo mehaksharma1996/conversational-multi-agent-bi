@@ -24,3 +24,4 @@ docker/** text eol=lf
 sample_data/retail_operations.csv text eol=lf
 sample_data/retail_operations_ground_truth.json text eol=lf
 apps/web/public/demo/retail_operations.csv text eol=lf
+sample_data/subscription_churn.csv text eol=lf
