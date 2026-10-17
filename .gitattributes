@@ -25,3 +25,7 @@ sample_data/retail_operations.csv text eol=lf
 sample_data/retail_operations_ground_truth.json text eol=lf
 apps/web/public/demo/retail_operations.csv text eol=lf
 sample_data/subscription_churn.csv text eol=lf
+
+# Deterministic investigation evaluation assets must remain byte-identical.
+evals/investigation/v1/*.json text eol=lf
+evals/investigation/v1/*.sql text eol=lf
