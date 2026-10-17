@@ -6,7 +6,11 @@ How the multi-agent investigation fits beside the existing question graph. The d
 today: the contracts in `packages/investigation/` exist (INV-0). The question graph runs its SQL and
 document steps through `GuardedSQLService` (`src/orchestration/guarded_sql.py`) and
 `DocumentResearchService` (`src/orchestration/document_research.py`), which specialists will reuse
-(INV-1). Nothing else below runs yet.
+(INV-1). INV-3 (#136, stages S0 to S4) adds typed JSON-native state with validated single-writer
+updates (`packages/investigation/state.py`), the gateway refusal and authority vocabulary
+(`refusals.py`, `gateway.py`), and strict process-local checkpoints
+(`src/orchestration/investigation_checkpoint.py`). The gateway's executing operations (S5 to S7)
+are not built yet, and nothing below runs in a route or graph yet.
 
 These services are not access controls. The API authorizes the caller, enforces consent, and
 resolves the tenant's table and documents before building them. For investigations, the INV-3 tool
@@ -51,13 +55,42 @@ Approved plan → background job → EXECUTION SUBGRAPH — execution budget
 | State | Single writer | Update rule |
 |---|---|---|
 | Plan, admitted follow-ups, round counts | Supervisor | Only validated tasks are admitted |
-| Task status | Dispatcher | Moves forward only: pending → running → terminal |
-| Evidence | Specialists, via the gateway | Insert-only; IDs assigned by the server |
+| Task status | Dispatcher, applying gateway-issued updates | Moves forward only: pending → running → terminal |
+| Evidence | Dispatcher, applying gateway-issued records | Insert-only; IDs assigned by the gateway |
 | Hypotheses and verdicts | Business Investigation | Verdicts must cite existing evidence |
 | Critiques | Critic | Append-only |
-| Budget usage | Tool gateway (ledger) | Cumulative; never reset |
+| Budget usage | Dispatcher, applying gateway ledger snapshots | Cumulative; never reset |
 | Approvals | API resume path | Typed decisions only |
 | Report and terminal status | Composer and terminal nodes | Written once |
+
+The tool gateway is authoritative for task attempts, evidence IDs, and budget usage, and it never
+writes state itself. It returns typed updates, and the dispatcher node applies them. Every update is
+validated inside the writing node (`owned_update`) before LangGraph's reducers see it, because a
+reducer that rejects an update leaves it stored as a pending write and makes the thread unreadable.
+The same check enforces status: tasks start or retry, evidence is created, and budget is spent only
+while the investigation is `running`. After a terminal status only bookkeeping is accepted (closing
+tasks, recording refusals, settling reservations made while running, and the terminal record).
+
+**Budget settlement comes from the gateway's ledger.** State records only how many reservations
+are outstanding, not their amounts, so on its own it cannot check that a settlement charges no more
+than it releases. The dispatcher's node is therefore bound to the gateway's `BudgetLedger` when the
+graph is built (`guarded_node(..., ledger=)`). Outside `running`, a change to budget usage needs that
+binding and must equal the ledger's snapshot exactly. After a terminal status the ledger must also
+be closed, so it cannot authorize another reservation. When a ledger is bound, its snapshot is
+required in every status. Binding the right ledger to the right investigation is trusted wiring:
+state cannot tell two ledgers apart, and `restore_state` checks only shape and monotonicity. While
+`running`, an unbound dispatcher can still write budget usage, so S5 must bind the gateway's ledger.
+The settlement itself (closing and settling the ledger at a terminal status) is S5's job.
+
+**Writers run one at a time.** Each update is validated against the state before its step, and
+reducers see one channel at a time. Two writers in the same LangGraph step would each pass alone,
+and their combination (for example `completed` plus a new task start) would never be checked:
+restore cannot tell it apart from legitimate closing bookkeeping. `guarded_node` therefore also
+writes `step_writer`, a channel with no reducer. LangGraph refuses two writes to it in one step
+(`InvalidUpdateError`), and the thread then fails closed (`checkpoint_unreadable`). This rules out
+parallel guarded writers, including parallel specialists, until a later design adds cross-channel
+validation. It does not make one step's writes atomic across channels. A node added without
+`guarded_node` is outside every one of these checks, so graph wiring must guard every node.
 
 ## Lifecycle
 
