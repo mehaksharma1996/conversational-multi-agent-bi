@@ -464,3 +464,357 @@ route, approve, execute, commit, push, open a PR, or modify GitHub as part of S0
       blockers documented.
 - [x] No Supervisor/runtime implementation, route, API, UI, evaluation, baseline, or production
       provider change made.
+
+## S2 architecture and contract review: bounded planning gateway
+
+Review date: 2026-10-18. This section refines the S0 design after S1 established
+`PlanningContext`, `PlanningDraft`, `PlanningValidationResult`, and `InvestigationProposal`. It is
+architecture only: no gateway, adapter, prompt renderer, state, test, provider, or graph code is
+implemented by this review.
+
+### S2 baseline and reviewed evidence
+
+- The clean worktree is `work/agent-worktrees/137-inv4-supervisor-planner` on
+  `feat/iteration2-inv4-supervisor-planner` at
+  `9c152e4ef73926768f260a5ba16cb888de898f31`, tracking the same remote commit.
+- Issue #137 remains open with no closing PR. It requires at most 2 model calls, 12,000 input
+  tokens, 2,000 output tokens, 30 seconds, and zero tools; the model sees schema information and
+  document titles, not rows or passages.
+- ADR 0024 and its INV-3 amendment, the investigation architecture, `BudgetLedger`,
+  `PLANNING_LIMITS`, `ProviderEnvelope`, `InvestigationAuthority`, `BoundedModelAdapter`, provider
+  call metering, cost estimation, S1 planning contracts, and the INV-3 gateway/budget/metering tests
+  were reviewed. The test-only `ExactAdapter` demonstrates the existing single-attempt count/cap/
+  identity contract, but has no deadline guarantee and is not a production adapter.
+- S1 did not change `InvestigationPlan`, `validate_plan`, `plan_digest`, proposer permissions,
+  execution authority, the question graph, evaluations, or baselines. In particular, a Supervisor
+  still cannot propose `hypothesis_test` tasks.
+
+### S2 conclusions and conflicts with the earlier sketch
+
+The following refinements are required. They are called out rather than silently changing INV-3
+or the S1 contracts.
+
+1. **Reserve before counting.** S0 D5 said to reserve the exact counted input. The existing secure
+   model wrapper meters `count_input_tokens` because an adapter that violates its declaration could
+   contact a provider while counting. Planning must therefore reserve the full per-attempt
+   partition before calling the counter, then settle the actual complete report. A quiet counter
+   failure proves no invocation and permits release; provider activity or a meter fault does not.
+2. **Do not replay the previous candidate.** S0 D6 allowed the prior candidate in a delimited repair
+   section. S2 recommends discarding raw provider output after strict parsing and validation. The
+   repair prompt receives the original metadata plus fixed validation codes and syntactically valid
+   task IDs only. This is less helpful to the model but removes a second injection/content channel.
+3. **Add a public deadline checkpoint.** `BudgetLedger.authorize` samples elapsed monotonic time,
+   but settlement does not refresh it and the ledger exposes no remaining-time operation. S2 needs
+   an additive, lock-protected `remaining_wall_clock()` (name subject to implementation review)
+   that uses the ledger's existing clock, closes on a clock fault or exhaustion, and never reserves
+   work. Duplicating the ledger start time in the gateway would create two clocks of record.
+4. **Deadline admission is stronger than `BoundedModelAdapter`.** A local future/thread timeout can
+   stop waiting but cannot prove that a remote request stopped or stopped billing. Planning needs a
+   reviewed deadline-capable specialization. No current Gemini, Anthropic, Ollama, fallback, or
+   wrapper client qualifies.
+5. **ADR 0024 cancellation remains honest.** ADR 0024 says an ordinary in-flight operation may
+   finish and be discarded. S2 does not relabel that behavior as cancellation. A planning adapter
+   is eligible only if it can impose the remaining deadline on the provider request and can confirm
+   termination before returning a cancellation/deadline result. Otherwise production planning is
+   disabled with `metering_unbounded`.
+
+### Proposed modules and public interfaces
+
+| Proposed seam | Responsibility and visibility |
+|---|---|
+| `packages/investigation/gateway.py:PlanningAuthority` | Additive frozen authority containing `InvestigationScope`, `analysis:run`, `ConsentSnapshot`, required recipients, epoch, and one `ProviderEnvelope`. It has no plan approval, SQL approval, budget, price, prompt, or model-generated field. |
+| `packages/investigation/gateway.py:check_planning_authority` | Pure checks that reuse INV-3 capability, consent-recipient union, and live-authority semantics without weakening `check_authority`. It additionally binds `PlanningContext.scope` to the authority. |
+| `packages/investigation/budget.py:remaining_wall_clock` | Additive sampling operation on the existing planning ledger. It returns the remaining seconds or closes/raises using existing clock-fault and exhaustion semantics. |
+| `src/llm/bounded.py:DeadlineBoundedModelAdapter` | Specialization of `BoundedModelAdapter` for exactly one provider attempt, exact complete-request counting, enforced output cap, complete reporting, and provider-side deadline/termination behavior. |
+| `src/orchestration/investigation_planning.py:InvestigationPlanningGateway` | Trusted implementation owning authority, context, adapter, `BudgetLedger(PLANNING_LIMITS)`, clock, cancellation, prompt renderer, meter, private prior-call state, pricing profiles, and terminal close state. |
+| `src/orchestration/investigation_planning.py:PlannerGateway` | Narrow Supervisor-facing protocol: `initial()` and `repair(errors)`. It exposes no authority, scope mutation, ledger, adapter, prompt, raw response, provider envelope, resolver, SQL/RAG operation, or arbitrary tool method. |
+| `src/orchestration/investigation_planning.py:PlanningCallResult` | Frozen tagged result containing either a validated `PlanningDraft`, fixed `PlanningValidationError`s, or a content-free gateway code, plus the trusted `CostEstimate` and ledger `BudgetUsage`. Raw provider text and exceptions are absent. |
+| `src/orchestration/planning_prompt.py` | Pure deterministic renderer with no provider, file, database, retrieval, evaluation, authority, or budget import. It accepts only S1 `PlanningMetadata` and, for repair, fixed errors. |
+| `tests/investigation_planning_fakes.py` | Test-only scripted deadline adapter and fake clock/cancellation/authority ports. Production modules and images must not import or select it. |
+
+`InvestigationPlanningGateway` is deliberately separate from `InvestigationToolGateway`. The latter
+requires an approved-plan digest and `running` state and exposes execution operations. Reusing it
+before plan approval would either forge authority or weaken INV-3. The planning facade has no tool
+surface, and
+`PLANNING_LIMITS` independently fixes SQL, retrieval, task attempts, replan rounds, and critic
+rounds at zero.
+
+### Trusted construction and authority checks
+
+The API/intake adapter eventually constructs `PlanningAuthority` and `PlanningContext`; neither is
+accepted from a Supervisor or model. The gateway constructor rejects them unless their scopes are
+identical. The model projection remains exactly `context.model_metadata`; tenant, workspace,
+investigation, dataset, and collection identifiers stay server-side.
+
+Before each possible model call, the gateway checks in this order:
+
+1. the non-reentrant call lock, gateway state, and exact operation (`initial` then optional
+   `repair` only);
+2. cancellation and remaining planning time;
+3. context-to-authority scope equality and the `analysis:run` capability;
+4. consent for the union of trusted required recipients and the envelope recipient;
+5. the live authority epoch/status, last among authority checks;
+6. one-member provider-envelope and deadline-adapter admission;
+7. deterministic prompt rendering and the fixed stage partition;
+8. worst-case ledger reservation; and
+9. exact complete-request counting inside the reserved, metered invocation wrapper.
+
+A failure closes the gateway when it is an authority, cancellation, budget, deadline, concurrency,
+adapter, meter, or call-sequence violation. No later call is then possible. A syntactically or
+semantically invalid candidate is not an authority failure: it permits the one repair while the
+same gateway, authority, context, adapter, ledger, deadline, and cost profile remain bound.
+
+### Deadline-capable adapter contract
+
+The additive adapter should accept the gateway's **remaining monotonic duration**, not an
+independently interpreted wall-clock timestamp. Its reviewed implementation must:
+
+- send a provider/server-enforced request deadline no greater than that duration;
+- make exactly one provider request, with SDK and transport retries disabled;
+- enforce the supplied output-token cap;
+- observe cancellation during the call through an adapter-owned cancellable transport;
+- not return a timeout/cancelled outcome until provider termination is confirmed;
+- report complete token usage, provider/model identity, retry count zero, and a typed termination
+  disposition; and
+- make no background, telemetry, token-count, retry, or cleanup request outside the admitted
+  invocation.
+
+The exact method/result names are an implementation detail, but the result must distinguish
+`completed`, `provider_cancelled`, and `provider_deadline_enforced`. A local wait timeout or a sent
+cancel request without confirmation is neither of the latter two. Runtime checks can compare the
+elapsed clock, response identity, reports, cap, retries, fallbacks, and disposition. They cannot
+independently observe an unreported network request or prove provider billing stopped; those facts
+remain reviewed adapter-implementation guarantees.
+
+If cancellation or the deadline occurs during a call, the gateway immediately seals itself against
+subsequent calls. When the adapter returns:
+
+- complete in-bound reports are settled as reported;
+- incomplete or missing reports after invocation charge the full reservation;
+- reported overruns are charged as reported and mark the bound `exceeded`;
+- an unconfirmed termination is a metering violation, regardless of a local timeout; and
+- every response/candidate is discarded.
+
+If the 30-second deadline expires after the initial result but before repair authorization, the
+ledger closes as exhausted and repair is refused without rendering, counting, or invoking it.
+
+### Exact planning budget and call state machine
+
+`BudgetLedger(PLANNING_LIMITS)` remains the only resource ledger and is never reset. The fixed
+partitions are:
+
+| Stage | Calls reserved | Input reserved | Output reserved | Invocation |
+|---|---:|---:|---:|---|
+| Initial | 1 | 6,000 | 1,000 | exactly once |
+| Repair | 1 | 6,000 | 1,000 | at most once, only after invalid initial output |
+
+Each reservation covers the complete **stage** allowance, not the entire remaining 12k/2k global
+budget. This prevents the initial attempt from consuming the repair partition. Counting happens
+after reservation and before provider invocation. A non-integer or non-positive count is
+`metering_unbounded`; a valid count above 6,000 releases a quiet, unused reservation and closes the
+ledger as input-budget exhaustion. The adapter receives exactly `max_output_tokens=1000`.
+Settlement may charge less when exactly one complete report proves the lower usage. Unknown usage
+charges the partition, never zero.
+
+The state machine is monotonic and internal:
+
+```text
+new --initial reserved/invoked--> initial_in_flight
+  | success+valid -------------------------------> complete
+  | success+invalid -----------------------------> repair_available
+  | refusal/failure/cancel/deadline --------------> closed
+
+repair_available --repair reserved/invoked-------> repair_in_flight
+  | success+valid -------------------------------> complete
+  | success+invalid -----------------------------> plan_invalid
+  | refusal/failure/cancel/deadline --------------> closed
+```
+
+Only `repair_available` admits repair. A repeated initial, repair-before-invalid, second repair, or
+third call is a terminal sequence violation before reservation. Every terminal state closes the
+ledger (`completed` only after all reservations settle); outstanding work may still settle after a
+close, as INV-3 already requires.
+
+### Metering and provider admission
+
+Admission requires all of the following; one failure yields `metering_unbounded` before model
+invocation:
+
+- the client is the deadline-capable subtype, not merely `BoundedModelAdapter`;
+- the envelope contains exactly `adapter.bound` and no fallback member;
+- provider/model identity matches the bound exactly;
+- `max_attempts == 1`, `input_bounded is True`, and output cap is exactly 1,000;
+- the deadline guarantee and termination dispositions are implemented by the reviewed adapter;
+- the counter covers the complete provider request and performs no billable call; and
+- production dependency construction cannot import/select the scripted adapter.
+
+Reuse INV-3's provider meter and settlement rules. Exactly one usage report, one matching
+`served_by`, zero retries, zero fallbacks, a response with matching identity, no meter fault, and
+reported counts within the exact count/output cap are required for a verified settlement. A second
+report, hidden retry, fallback, wrong identity, provider activity outside the wrapper, incomplete
+success report, cap breach, or meter fault discards the candidate and closes the gateway. Runtime
+metering is defense in depth; it does not turn an unreviewed client into an eligible adapter.
+
+### Deterministic prompt and repair boundary
+
+The renderer uses a fixed versioned instruction and canonical JSON (`sort_keys=True`, compact
+separators, UTF-8) in a length-delimited data section. JSON quoting is structural, not a claim that
+the text is safe instruction content. The output schema and deterministic validation remain the
+security boundary.
+
+The initial model-visible material is limited to:
+
+- bounded question, schema field names/logical types/descriptions, and document display titles;
+- the fixed role/task vocabulary, explicitly excluding Supervisor-authored `hypothesis_test`;
+- the frozen `InvestigationPlan`/`PlanningDraft` output shape; and
+- fixed planning instructions and schema version.
+
+It excludes rows, values, aggregates, passages, document bodies/paths, SQL/results, secrets,
+authority/consent, scope/resource identifiers, budgets, provider configuration, prices, raw
+messages, logs, evaluator code, oracle data, and reference SQL.
+
+For repair, the renderer repeats the same trusted metadata and adds only the ordered, de-duplicated
+fixed validation codes and pattern-validated task IDs. Raw parser/Pydantic/provider exceptions and
+the previous provider output are discarded and never re-rendered. Repair output passes the same
+strict S1 parsing and `validate_plan(..., limits=EXECUTION_LIMITS)` boundary. The model cannot set
+limits, scope, authority, approval requirements, cost, call state, or execution permission.
+
+The gateway accepts a response only through a strict JSON-object decoder: no Markdown-fence or
+substring extraction, trailing text, duplicate object keys, non-finite constants, or non-object
+root. It then calls the existing `validate_planning_draft`; it never duplicates plan validation or
+returns the raw response through the facade.
+
+### Cost-estimation integration
+
+A trusted configuration adapter supplies a versioned tuple of `ProviderCostProfile` values. For S2
+the tuple must correspond exactly to the admitted provider/model; there is no fallback. Profiles
+are not accepted from the model, authority, prompt, or observed billing. The gateway calls
+`estimate_cost(PLANNING_LIMITS, profiles, price_table_version=...)` locally before generation; this
+uses no provider and consumes no model budget.
+
+- no admitted adapter/profile: `unavailable(no_eligible_provider)`;
+- missing input or output price: `unavailable(pricing_unknown)`;
+- known prices but any missing cap/input/retry enforcement: `indicative` with existing limitations;
+- `enforced_upper_bound` only when every eligible path has known prices and all existing
+  enforcement flags are true.
+
+Deadline enforcement does not create a new cost classification by itself. Conversely, a trusted
+price does not make an unbounded adapter admissible. The estimate is computed from the fixed total
+planning limits, not observed usage, and remains labelled `kind="estimate"`.
+
+### Safe result and refusal taxonomy
+
+Reuse existing `RefusalCode`s where their meaning is exact:
+
+| Condition | Code/result | Ledger close | External status |
+|---|---|---|---|
+| malformed facade request | `invalid_request` | no, if no security ambiguity | caller error |
+| scope/capability/consent/live authority failure | existing matching refusal | `policy_refused` | `failed` |
+| cancellation | `cancelled` | `cancelled` | `cancelled` |
+| time/token/call exhaustion | `budget_exhausted` | `exhausted` | `budget_exhausted` |
+| adapter/deadline guarantee absent | `metering_unbounded` | `policy_refused` | `failed` |
+| report/identity/retry/fallback/deadline violation | `metering_violation` | `reservation_exceeded` or `policy_refused` after settlement | `failed` |
+| gateway already terminal | `gateway_closed` | unchanged | unchanged terminal status |
+| typed candidate invalid | `PlanningValidationError` tuple | remains open only for first candidate | repair eligible |
+| repaired candidate invalid | `plan_invalid` result | `completed` after settlements | `plan_invalid` |
+| provider exception after invocation | additive `provider_failure` result | conservative settlement then `policy_refused` | `failed` |
+| illegal initial/repair sequence | additive `planning_sequence_violation` | `policy_refused` | `failed` |
+
+The two additive names belong to a planning-result vocabulary, not the execution-tool refusal enum,
+unless implementation review demonstrates a safe shared meaning. Messages, prompts, candidates,
+provider errors, schema descriptions, and titles never appear in result errors, state, telemetry,
+or audit. No S2 telemetry/audit field is required; any later addition must use the existing
+allowlist and content-free values.
+
+### Adversarial S2 test matrix
+
+`Call?` means whether a provider invocation may occur. Every case also asserts zero SQL, retrieval,
+native-tool, file, or resolver activity.
+
+| Case | Expected result/refusal | Ledger behavior | Call? |
+|---|---|---|---:|
+| Valid initial draft | validated draft | one verified settlement; close completed | 1 |
+| Invalid initial, valid repair | validated repaired draft | two cumulative settlements; close completed | 2 |
+| Invalid initial and repair | `plan_invalid` | two settlements; close completed | 2 |
+| Repeated initial, repair first, second repair, or third call | `planning_sequence_violation` | close policy-refused; no new reservation | 0 additional |
+| Initial/repair rendered input over 6,000 | `budget_exhausted` | release if counter quiet; close exhausted | 0 |
+| Cumulative input/output would exceed 12,000/2,000 | `budget_exhausted` | ledger closes exhausted before invocation | 0 additional |
+| Deadline already expired | `budget_exhausted` | closes exhausted | 0 |
+| Deadline expires after initial/before repair | `budget_exhausted` | first settled; close before repair | 1 |
+| Deadline during call, provider confirms enforcement | budget exhausted; candidate discarded | settle complete report or full partition if incomplete; close | 1 |
+| Local timeout/cancel sent without stop confirmation | `metering_violation` | full/greater reported charge; close | 1 |
+| Cancellation before call | `cancelled` | close; no reservation | 0 |
+| Cancellation during call with confirmed provider stop | `cancelled` | conservative settlement; close; discard late data | 1 |
+| Late response after gateway sealed | ignored/`gateway_closed` | no second settlement or call | 1 total |
+| Hidden retry, second report, or fallback | `metering_violation` | charge reported/full; close, overrun marked if applicable | 1+ observed |
+| Incomplete/missing usage after invocation | provider failure or metering violation | full partition, unverified; close | 1 |
+| Forged/excessive usage | `metering_violation` | malformed charges full; overrun charges reported and marks exceeded | 1 |
+| Wrong provider/model in bound, report, or response | `metering_unbounded` pre-call or `metering_violation` post-call | none pre-call; conservative settlement post-call | 0 or 1 |
+| Counter raises quietly | `metering_unbounded` | release reservation, then close | 0 |
+| Counter returns non-integer or non-positive value | `metering_unbounded` | release if meter quiet, then close | 0 |
+| Counter reports/provider activity | `metering_violation` | full/greater charge; close | observed violation |
+| Meter fault | `metering_violation` | full partition, unverified; close | 0 or 1 |
+| Ordinary production client or plain bounded adapter | `metering_unbounded` | no reservation | 0 |
+| Provider exception | `provider_failure` | full partition unless provably not invoked; close | 0 or 1 |
+| Injection in question/title/description | normal validation only | unaffected accounting; rendered as data | as normal |
+| Row/passage/secret/oracle/provider message in metadata | S1 schema rejection | no reservation | 0 |
+| SQL/RAG/native-tool request | no facade method / `invalid_request` | no reservation; tool counters stay zero | 0 |
+| Forged authority/approval/scope/budget in candidate | `planning_draft_invalid` | first may permit repair; second `plan_invalid` | at most 2 |
+| Missing pricing profile | valid `unavailable` estimate | no model charge for estimation | as normal |
+| Unknown price | `unavailable(pricing_unknown)` | no model charge for estimation | as normal |
+| Unenforced cost prerequisite | `indicative` with exact existing limitation | no model charge for estimation | as normal |
+| Fully priced/enforced profile | `enforced_upper_bound` | amount uses fixed limits/highest eligible price | as normal |
+
+Tests use a fake monotonic clock and a scripted deadline adapter; they never sleep or access a
+network. Structural tests ensure production modules cannot import the fake, execution gateway,
+guarded SQL/RAG services, files, evaluation packages, or dynamic/private access. Regression gates
+retain all S1, INV-0/INV-3, question-orchestrator, evaluation-baseline, and package-boundary tests.
+
+### Proposed small S2 implementation stages and gates
+
+1. **S2a — Pure authority/deadline contracts.** Add `PlanningAuthority`, its pure checker, the
+   deadline-adapter abstract contract, planning result codes, and the ledger remaining-time seam.
+   Gate: contract tests for strict fields, scope/capability/consent/live checks, monotonic faults,
+   and proof that existing execution authority behavior is byte-for-byte unchanged.
+2. **S2b — Renderer and cost inputs.** Add the pure canonical renderer and trusted pricing-profile
+   binding. Gate: golden prompt-shape tests, canary exclusion/injection tests, deterministic output,
+   and the existing cost-classification matrix using `PLANNING_LIMITS`.
+3. **S2c — Single-call admission and settlement.** Add the gateway shell, fixed initial partition,
+   adapter admission, meter, conservative settlement, cancellation/deadline handling, and safe
+   typed result. Gate: no repair yet; every pre/post-invocation failure in the matrix passes.
+4. **S2d — One repair and terminal state machine.** Add only the second fixed partition and
+   code/task-ID repair prompt; discard the prior raw output. Gate: valid-first, invalid-then-valid,
+   invalid-twice, every illegal sequence, cumulative budget, and between-call deadline tests.
+5. **S2e — Boundary and regression review.** Add production-exclusion/import tests and run focused
+   suites followed by `python -m scripts.check_all`. Gate: production remains fail-closed, no
+   provider client is added, and evaluations/baselines/legacy workflows remain unchanged.
+
+S3 Supervisor work and S4 proposal-graph/checkpoint wiring remain separately authorized future
+stages. Nothing in S2 may register a graph, approve a plan, execute a task, or expose a route.
+
+### Unsupported-provider behavior and remaining approvals
+
+Production construction must return a typed unavailable/refused planning result before prompt
+rendering or metadata disclosure when no deadline-capable adapter is configured. It must not fall
+back to Gemini, Anthropic, Ollama, `FallbackLLMClient`, a wrapper, or a plain
+`BoundedModelAdapter`. The scripted adapter is test-only and cannot be selected by configuration.
+
+The following decisions require approval before implementation:
+
+1. Approve full 6k/1k stage reservation before counting, replacing S0's exact-input reservation
+   sequence while retaining exact settlement.
+2. Approve excluding the previous raw candidate from repair, replacing S0's delimited replay.
+3. Approve the additive `BudgetLedger` remaining-time/checkpoint method rather than a duplicate
+   gateway clock.
+4. Approve the precise provider-termination evidence required by the deadline adapter. Until a
+   real implementation is reviewed, only the scripted test adapter qualifies.
+5. Identify the trusted owner and version format for provider pricing profiles. Without it, cost is
+   `unavailable`; no price is hard-coded or inferred.
+6. Confirm that planning-specific provider/sequence failures remain a separate content-free result
+   vocabulary until S3/S4 lifecycle mapping is designed, instead of expanding INV-3's execution
+   refusal enum prematurely.
+
+No conflict requires weakening ADR 0024, INV-3 authorization, S1 validation, cost honesty, or the
+Supervisor prohibition on `hypothesis_test`. The only architectural tension is ADR 0024's honest
+statement that ordinary in-flight calls may finish: S2 resolves it by admitting no planning adapter
+unless provider-side deadline/termination behavior is a reviewed guarantee.

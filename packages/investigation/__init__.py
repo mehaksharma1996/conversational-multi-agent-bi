@@ -14,6 +14,7 @@ from packages.investigation.budget import (
     CostEstimate,
     InvalidChargeError,
     ProviderCostProfile,
+    ProviderPricingTable,
     Reservation,
     estimate_cost,
 )
@@ -115,6 +116,7 @@ __all__ = [
     "PlanningValidationError",
     "PlanningValidationResult",
     "ProviderCostProfile",
+    "ProviderPricingTable",
     "RefusalCode",
     "RefusalSeverity",
     "Reservation",

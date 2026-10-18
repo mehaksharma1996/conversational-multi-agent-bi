@@ -38,7 +38,7 @@ from itertools import count
 from threading import Lock
 from typing import Annotated, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, Strict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, Strict, StringConstraints, model_validator
 
 Clock = Callable[[], float]
 
@@ -286,6 +286,21 @@ class BudgetLedger:
             self._outstanding[reservation.id] = reservation
             return reservation
 
+    def remaining_wall_clock(self) -> float:
+        """Return the remaining monotonic allowance, or fail closed.
+
+        This is the ledger's only public deadline checkpoint. It samples the same clock and start
+        time used by :meth:`authorize`, holds the ledger lock while doing so, and never reserves or
+        resets work. A closed ledger is not a source of a reusable deadline.
+        """
+        with self._lock:
+            if self._closed is not None:
+                raise BudgetClosedError(self._closed)
+            remaining = self._limits.wall_clock_seconds - self._elapsed()
+            if remaining <= 0:
+                self._exhaust(BudgetResource.WALL_CLOCK)
+            return remaining
+
     def settle(
         self,
         reservation: Reservation,
@@ -470,6 +485,46 @@ class ProviderCostProfile(BaseModel):
     output_cap_enforced: Flag = False
     input_bounded_before_call: Flag = False
     retries_metered: Flag = False
+
+
+PriceTableVersion = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$"),
+]
+MAX_PRICING_PROFILES = 8
+
+
+class ProviderPricingTable(BaseModel):
+    """Trusted, versioned pricing input; never accepted from model or agent output.
+
+    The contract carries no default prices. Configuration must identify every eligible
+    provider/model explicitly, and duplicate identities are rejected so lookup cannot depend on
+    ordering. Trust comes from the configuration adapter that constructs this value, not from
+    schema validation alone.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: PriceTableVersion
+    profiles: tuple[ProviderCostProfile, ...] = Field(min_length=1, max_length=MAX_PRICING_PROFILES)
+
+    @model_validator(mode="after")
+    def _unique_provider_models(self) -> ProviderPricingTable:
+        identities = [(profile.provider, profile.model) for profile in self.profiles]
+        if len(identities) != len(set(identities)):
+            raise ValueError("provider/model pricing identities must be unique")
+        return self
+
+    def profile_for(self, *, provider: str, model: str) -> ProviderCostProfile | None:
+        """Return an exact identity match; provider or model aliases are never inferred."""
+        return next(
+            (
+                profile
+                for profile in self.profiles
+                if profile.provider == provider and profile.model == model
+            ),
+            None,
+        )
 
 
 class CostEstimate(BaseModel):
