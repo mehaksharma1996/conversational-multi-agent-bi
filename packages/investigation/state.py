@@ -16,8 +16,8 @@ The LangGraph investigation subgraph keeps this state in its checkpoints. Three 
    returns the update as proposed (a JSON copy); the reducers repeat the per-channel rules as
    defense in depth and store each value in its canonical form (``model_dump(mode="json")``).
    Status-dependent rules need the prior state, so only ``owned_update`` enforces them.
-   Budget usage written outside ``running`` must equal the snapshot of the trusted gateway's
-   ledger, bound when the graph is built (``ledger=``); see ``_settlement_violation``.
+   Every change to budget usage must equal the snapshot of the trusted gateway's ledger, bound
+   when the graph is built (``ledger=``); see ``_settlement_violation``.
 3. **Revalidated on restore.** ``restore_state`` rebuilds a typed, immutable view from raw
    checkpoint values and checks every invariant again. Nothing restored is trusted until it passes.
 
@@ -518,6 +518,9 @@ _MONOTONIC_USAGE = (
     "critic_rounds",
     "elapsed_seconds",
     "unmetered_model_calls",
+    "verified_model_settlements",
+    "exceeded_reservations",
+    "released_reservations",
 )
 
 
@@ -813,9 +816,9 @@ def _settlement_violation(
     check on its own that a settlement charges no more than the reservations it releases. The
     ledger can: it settles only reservations it issued, exactly as issued. So:
 
-    - a ledger bound with ``ledger=`` must be the exact ``BudgetLedger`` type, and any change to
-      budget usage must equal its current snapshot, in every status;
-    - outside ``running``, a change to budget usage needs a bound ledger (S5 binds the gateway's);
+    - any change to budget usage, in every status, needs a bound ledger: the exact
+      ``BudgetLedger`` type, whose current snapshot the new usage must equal (the dispatcher can
+      never write consumption the ledger did not record);
     - after a terminal status the ledger must also be closed, so it can authorize nothing more.
 
     Binding the right ledger to the right investigation is trusted graph wiring, like the writer
@@ -832,9 +835,7 @@ def _settlement_violation(
     )
     if view.budget_usage == prior:
         return None
-    if ledger is None:
-        return None if view.status is InvestigationStatus.RUNNING else "settlement_unverified"
-    if type(ledger) is not BudgetLedger or view.budget_usage != ledger.usage():
+    if ledger is None or type(ledger) is not BudgetLedger or view.budget_usage != ledger.usage():
         return "settlement_unverified"
     if view.status in TERMINAL_STATUSES and view.budget_usage.closed_reason is None:
         return "ledger_open"

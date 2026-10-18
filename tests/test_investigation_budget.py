@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -23,6 +24,7 @@ from packages.investigation import (
     ProviderCostProfile,
     estimate_cost,
 )
+from packages.investigation.budget import ReservationExceededError
 
 
 class FakeClock:
@@ -164,14 +166,94 @@ def test_missing_usage_is_charged_at_the_full_reservation(
     assert ledger.closed_reason is None
 
 
-def test_reported_usage_above_the_reservation_is_charged_and_can_exhaust() -> None:
+def test_reported_usage_above_the_reservation_is_charged_closes_and_raises() -> None:
     ledger, _ = _ledger(EXECUTION_LIMITS.model_copy(update={"output_tokens": 600}))
-    ledger.settle(ledger.authorize(CALL), input_tokens=10, output_tokens=900)
+    with pytest.raises(ReservationExceededError):
+        ledger.settle(ledger.authorize(CALL), input_tokens=10, output_tokens=900)
     usage = ledger.usage()
-    assert usage.output_tokens == 900
+    assert usage.output_tokens == 900  # charged as reported, never the smaller reservation
+    assert usage.input_tokens == 10
     assert usage.exhausted_resource is BudgetResource.OUTPUT_TOKENS
+    assert usage.closed_reason == "reservation_exceeded"
+    assert (usage.exceeded_reservations, usage.reservation_bound) == (1, "exceeded")
     with pytest.raises(BudgetClosedError):
         ledger.authorize(BudgetRequest(retrievals=1))
+
+
+def test_an_overrun_within_the_limits_is_still_never_successful_accounting() -> None:
+    ledger, _ = _ledger()  # 25,000 output tokens allowed: 900 is far inside the limit
+    with pytest.raises(ReservationExceededError):
+        ledger.settle(ledger.authorize(CALL), input_tokens=1_001, output_tokens=40)
+    usage = ledger.usage()
+    assert (usage.input_tokens, usage.output_tokens) == (1_001, 40)
+    assert usage.exhausted_resource is None and usage.closed_reason == "reservation_exceeded"
+    assert usage.reservation_bound == "exceeded"
+
+
+def test_unknown_usage_is_charged_the_reservation_or_more_and_is_unverified() -> None:
+    ledger, _ = _ledger()
+    usage = ledger.settle(
+        ledger.authorize(CALL), input_tokens=300, output_tokens=40, usage_complete=False
+    )
+    assert (usage.model_calls, usage.input_tokens, usage.output_tokens) == (1, 1_000, 500)
+    assert (usage.unmetered_model_calls, usage.reservation_bound) == (1, "unverified")
+    with pytest.raises(ReservationExceededError):  # partial reports above it still count in full
+        ledger.settle(
+            ledger.authorize(CALL), input_tokens=1_500, model_calls=2, usage_complete=False
+        )
+    usage = ledger.usage()
+    assert (usage.model_calls, usage.input_tokens, usage.output_tokens) == (3, 2_500, 1_000)
+    assert usage.reservation_bound == "exceeded"
+
+
+def test_complete_usage_within_the_reservation_holds_the_bound() -> None:
+    ledger, _ = _ledger()
+    assert ledger.usage().reservation_bound == "none"  # no evidence yet, so nothing is claimed
+    usage = ledger.settle(ledger.authorize(CALL), input_tokens=1_000, output_tokens=500)
+    assert usage.verified_model_settlements == 1
+    assert usage.reservation_bound == "held" and ledger.closed_reason is None
+
+
+def test_only_complete_in_reservation_model_settlements_are_verified() -> None:
+    ledger, _ = _ledger()
+    ledger.settle(ledger.authorize(BudgetRequest(retrievals=1)))  # not a model call
+    ledger.settle(ledger.authorize(CALL), input_tokens=10, output_tokens=None)  # unknown output
+    with pytest.raises(ReservationExceededError):
+        ledger.settle(ledger.authorize(CALL), input_tokens=1_001, output_tokens=1)
+    usage = ledger.usage()
+    assert usage.verified_model_settlements == 0
+    assert usage.reservation_bound == "exceeded"
+
+
+def test_release_returns_an_unused_reservation_without_charging_it() -> None:
+    ledger, _ = _ledger(EXECUTION_LIMITS.model_copy(update={"model_calls": 1}))
+    reservation = ledger.authorize(CALL)
+    usage = ledger.release(reservation)
+    assert (usage.model_calls, usage.input_tokens, usage.output_tokens) == (0, 0, 0)
+    assert (usage.released_reservations, usage.outstanding_reservations) == (1, 0)
+    assert usage.reservation_bound == "none"  # a release is not evidence of a bound
+    ledger.settle(ledger.authorize(CALL), input_tokens=1, output_tokens=1)  # the budget came back
+
+
+def test_release_accepts_only_an_issued_unsettled_reservation_and_works_after_close() -> None:
+    ledger, _ = _ledger()
+    reservation = ledger.authorize(CALL)
+    with pytest.raises(InvalidChargeError):
+        ledger.release(dataclasses.replace(reservation, request=BudgetRequest(retrievals=1)))
+    ledger.close("cancelled")
+    ledger.release(reservation)  # in-flight work that never started may still be returned
+    with pytest.raises(InvalidChargeError):
+        ledger.release(reservation)
+    with pytest.raises(InvalidChargeError):
+        ledger.settle(reservation)
+
+
+@pytest.mark.parametrize("usage_complete", [None, 1, "yes"])
+def test_a_non_boolean_completeness_flag_is_malformed(usage_complete: Any) -> None:
+    ledger, _ = _ledger()
+    with pytest.raises(InvalidChargeError):
+        ledger.settle(ledger.authorize(CALL), usage_complete=usage_complete)
+    assert ledger.closed_reason == "invalid_settlement"
 
 
 def test_in_flight_work_still_settles_after_cancellation() -> None:

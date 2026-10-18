@@ -80,16 +80,28 @@ def _approved_run_steps() -> list[Step]:
     ]
 
 
-def _graph(steps: list[Step], *, guard: bool = True) -> tuple[Any, Any]:
+def _graph(
+    steps: list[Step], *, guard: bool = True, ledger: BudgetLedger | None = None
+) -> tuple[Any, Any]:
+    """Chain ``steps``; dispatcher nodes are bound to ``ledger`` when one is given."""
     graph = StateGraph(InvestigationState)
     previous = START
     for name, owner, step in steps:
-        graph.add_node(name, guarded_node(owner, step) if guard else step)
+        bound = ledger if owner == "dispatcher" else None
+        graph.add_node(name, guarded_node(owner, step, ledger=bound) if guard else step)
         graph.add_edge(previous, name)
         previous = name
     graph.add_edge(previous, END)
     saver = new_investigation_saver()
     return graph.compile(checkpointer=saver), saver
+
+
+def _usage_step() -> tuple[Step, BudgetLedger]:
+    """A dispatcher step recording one reservation, and the ledger it must be bound to."""
+    ledger = BudgetLedger(EXECUTION_LIMITS, clock=lambda: 0.0)
+    ledger.authorize(BudgetRequest(sql_executions=1))
+    usage = ledger.usage().model_dump(mode="json")
+    return ("usage", "dispatcher", lambda s: {"budget_usage": usage}), ledger
 
 
 def _config(thread: str = "tenant_a:ws_1:inv_1") -> dict[str, Any]:
@@ -191,11 +203,8 @@ def test_json_constructor_payloads_never_call_code(lc: int, fields: dict[str, An
 
 @pytest.mark.parametrize("path", [*_TRUSTED_STATE_CLASSES, [*__name__.split("."), "record_call"]])
 def test_a_json_constructor_checkpoint_fails_closed_on_load(path: list[str]) -> None:
-    steps = [
-        *_approved_run_steps(),
-        ("usage", "dispatcher", lambda s: {"budget_usage": {"model_calls": 1}}),
-    ]
-    app, saver = _graph(steps)
+    usage, ledger = _usage_step()
+    app, saver = _graph([*_approved_run_steps(), usage], ledger=ledger)
     app.invoke({}, _config())
     for lc in (1, 2):
         saver.blobs[_latest_blob_key(saver, "budget_usage")] = _json_constructor(
@@ -341,9 +350,10 @@ def test_state_round_trips_through_the_checkpointer_as_json_without_pickle() -> 
 )
 def test_tampered_checkpoints_fail_closed_on_load(channel: str, blob: tuple[str, bytes]) -> None:
     steps = _approved_run_steps()
+    usage, ledger = _usage_step()
     if channel == "budget_usage":
-        steps.append(("usage", "dispatcher", lambda s: {"budget_usage": {"model_calls": 1}}))
-    app, saver = _graph(steps)
+        steps.append(usage)
+    app, saver = _graph(steps, ledger=ledger)
     app.invoke({}, _config())
     saver.blobs[_latest_blob_key(saver, channel)] = blob
     CALLED.clear()

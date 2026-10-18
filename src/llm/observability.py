@@ -119,6 +119,12 @@ class ProviderCallMeter(Protocol):
     def record_fallbacks(self, count: int) -> None: ...
 
 
+class ServedByMeter(ProviderCallMeter, Protocol):
+    """A meter that also wants the provider and model that really answered each call."""
+
+    def record_served_by(self, provider: str, model: str) -> None: ...
+
+
 class MeterHealth:
     """Whether every provider report inside one metered block reached its meter.
 
@@ -194,6 +200,10 @@ def report_usage(
 
 def report_served_by(provider: str, model: str) -> None:
     """Called by a provider client on success so telemetry names the model that really answered."""
+    metered = _METER.get()
+    if metered is not None and callable(getattr(metered[0], "record_served_by", None)):
+        served = (str(provider), str(model))
+        _notify_meter(lambda meter: meter.record_served_by(*served))  # type: ignore[attr-defined]
     slot = _SLOT.get()
     if slot is not None:
         slot.served_provider = provider

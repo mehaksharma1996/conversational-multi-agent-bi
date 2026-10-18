@@ -6,9 +6,12 @@ Planning and execution each get their own ``BudgetLedger`` with their own limits
   any request that would take committed usage (consumed plus outstanding reservations) past a limit;
 - records actual usage when the work settles, counting every attempt, so retries and follow-up
   rounds accumulate and nothing is ever reset;
-- charges the full reservation when a model call reports no token usage (worst case, never zero);
+- charges the full reservation when a model call reports no token usage (worst case, never zero),
+  and counts that settlement as unverified;
 - charges the provider calls actually metered when a reservation covers several (fallbacks and
-  retries), never more than were reserved;
+  retries);
+- treats reported usage above the reservation as a broken guarantee, never as successful
+  accounting: it is charged as reported, counted, closes the ledger, and raises;
 - measures elapsed time with a monotonic clock, and treats a clock that goes backwards, returns a
   non-number, or raises as a fault;
 - settles only reservations it issued, exactly as issued;
@@ -66,7 +69,12 @@ CloseReason = Literal[
     "completed",
     # A security, authority, or scope refusal by the investigation tool gateway (#136).
     "policy_refused",
+    # Reported usage exceeded what a reservation authorized.
+    "reservation_exceeded",
 ]
+
+# What the model-call settlements so far show about the reservations (see ``BudgetUsage``).
+ReservationBound = Literal["none", "held", "unverified", "exceeded"]
 
 
 class BudgetLimits(BaseModel):
@@ -130,6 +138,13 @@ class InvalidChargeError(BudgetError, ValueError):
     """A malformed request or settlement. Raised before anything is reserved or after closing."""
 
 
+class ReservationExceededError(BudgetError):
+    """Reported usage exceeded the reservation. Raised after charging it; the ledger is closed."""
+
+    def __init__(self) -> None:
+        super().__init__("Reported usage exceeded the reservation.")
+
+
 @dataclass(frozen=True)
 class BudgetRequest:
     """The most one unit of work may consume. A model call must reserve both token directions."""
@@ -168,7 +183,26 @@ class Reservation:
 
 
 class BudgetUsage(BaseModel):
-    """Content-free snapshot of consumed budget; safe for state, telemetry, and reports."""
+    """Content-free snapshot of charged budget; safe for state, telemetry, and reports.
+
+    The counts are what the ledger *charged*. A charge is never below any usage a provider
+    reported, but it is not the same thing. Each model-call settlement is one of:
+
+    - verified (``verified_model_settlements``): complete usage was reported, within the
+      reservation, and charged as reported;
+    - unknown (``unmetered_model_calls``): charged at the full reservation, or more if more was
+      reported; an upper bound only if the provider really enforced the reserved caps;
+    - exceeded (``exceeded_reservations``): reported usage passed the reservation and was charged
+      as reported.
+
+    ``released_reservations`` counts reservations returned unused because the work was proven not
+    to have started; they charge nothing and are not evidence of anything.
+
+    ``reservation_bound`` summarises these: ``exceeded`` if any overrun, else ``unverified`` if any
+    usage was unknown, else ``held`` if at least one settlement was verified, else ``none``. The
+    ledger takes the settling caller's word for completeness (``usage_complete``); deciding that is
+    the caller's job (for investigations, the tool gateway's).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -182,9 +216,21 @@ class BudgetUsage(BaseModel):
     critic_rounds: Count = 0
     elapsed_seconds: Seconds = 0.0
     unmetered_model_calls: Count = 0
+    verified_model_settlements: Count = 0
+    exceeded_reservations: Count = 0
+    released_reservations: Count = 0
     outstanding_reservations: Count = 0
     closed_reason: CloseReason | None = None
     exhausted_resource: BudgetResource | None = None
+
+    @property
+    def reservation_bound(self) -> ReservationBound:
+        """``held`` only when verified settlements exist and nothing was unknown or exceeded."""
+        if self.exceeded_reservations:
+            return "exceeded"
+        if self.unmetered_model_calls:
+            return "unverified"
+        return "held" if self.verified_model_settlements else "none"
 
 
 _COUNTED = tuple(item.value for item in BudgetResource if item is not BudgetResource.WALL_CLOCK)
@@ -204,6 +250,9 @@ class BudgetLedger:
         self._reserved = dict.fromkeys(_COUNTED, 0)
         self._outstanding: dict[int, Reservation] = {}
         self._unmetered = 0
+        self._exceeded = 0
+        self._verified = 0
+        self._released = 0
         self._closed: CloseReason | None = None
         self._exhausted: BudgetResource | None = None
         self._started = self._read_clock()
@@ -244,62 +293,102 @@ class BudgetLedger:
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         model_calls: int | None = None,
+        usage_complete: bool = True,
     ) -> BudgetUsage:
         """Record what the reserved work consumed. Allowed after closing, so in-flight work counts.
 
-        Token counts apply only to model calls. A missing count is charged at its full reservation.
-        A count above the reservation is charged as reported and closes the ledger if it passes a
-        limit. A malformed settlement charges the full reservation, closes the ledger, and raises.
+        Token counts apply only to model calls. ``model_calls`` is the number of provider calls
+        actually metered for a reservation that may cover several (fallbacks and retries of one
+        logical call); omitted, every reserved call is charged.
 
-        ``model_calls`` is the number of provider calls actually metered for a reservation that may
-        cover several (fallbacks and retries of one logical call). It must lie between 1 and the
-        reserved call count: a reservation is the most the work may do, so a higher count is
-        malformed. Omitted, every reserved call is charged.
+        Usage is *unknown* when a token count is missing or the caller says the reports may be
+        incomplete (``usage_complete=False``, for example after a meter fault). Unknown usage is
+        charged at the full reservation, raised to any larger count that was reported, and counted
+        in ``unmetered_model_calls``: the charge is then an upper bound only if the provider really
+        enforces the reserved caps.
+
+        A reported count above the reservation means the work exceeded what was authorized. It is
+        charged as reported (never less), counted in ``exceeded_reservations``, closes the ledger
+        with ``reservation_exceeded``, and raises ``ReservationExceededError``, so no caller can
+        mistake it for successful accounting. A malformed settlement charges the full reservation,
+        closes the ledger, and raises ``InvalidChargeError``.
         """
         with self._lock:
-            issued = (
-                self._outstanding.get(reservation.id)
-                if isinstance(reservation, Reservation) and reservation.ledger_id == self._id
-                else None
-            )
-            # Settle what was issued, never what the caller passes back: an altered copy with a
-            # smaller request would otherwise release reserved budget it never accounted for.
-            if issued is None or issued != reservation:
-                raise InvalidChargeError("Unknown, altered, or already settled reservation.")
-            del self._outstanding[issued.id]
-            request = issued.request
-            for name in _COUNTED:
-                self._reserved[name] -= getattr(request, name)
-
+            request = self._take(reservation).request
             charge = {name: getattr(request, name) for name in _COUNTED}
-            reported = {"input_tokens": input_tokens, "output_tokens": output_tokens}
-            malformed = any(
-                value is not None and (type(value) is not int or value < 0)
-                for value in reported.values()
-            ) or (not request.model_calls and any(v is not None for v in reported.values()))
-            malformed = malformed or (
-                model_calls is not None
-                and (type(model_calls) is not int or not 1 <= model_calls <= request.model_calls)
+            reported = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "model_calls": model_calls,
+            }
+            malformed = (
+                type(usage_complete) is not bool
+                or any(
+                    value is not None and (type(value) is not int or value < 0)
+                    for value in reported.values()
+                )
+                or (not request.model_calls and any(v is not None for v in reported.values()))
+                or model_calls == 0
             )
+            exceeded = False
+            known = False
             if not malformed and request.model_calls:
-                if input_tokens is None or output_tokens is None:
+                known = usage_complete is True and None not in (input_tokens, output_tokens)
+                if not known:
                     self._unmetered += 1
                 for name, value in reported.items():
-                    if value is not None:
+                    reserved = getattr(request, name)
+                    if value is not None and value > reserved:
+                        exceeded = True
+                    if value is not None and usage_complete is True:
                         charge[name] = value
-                if model_calls is not None:
-                    charge["model_calls"] = model_calls
+                    else:  # unknown: the reservation, or more if more was reported
+                        charge[name] = max(reserved, value or 0)
             for name, value in charge.items():
                 self._consumed[name] += value
 
             if malformed:
                 self._close("invalid_settlement")
                 raise InvalidChargeError("Malformed usage; the full reservation was charged.")
+            if exceeded:
+                self._exceeded += 1
+                self._close("reservation_exceeded")
+            elif known:
+                self._verified += 1
             for name in _COUNTED:
                 if self._consumed[name] > getattr(self._limits, name):
                     self._exhausted = self._exhausted or BudgetResource(name)
                     self._close("exhausted")
+            if exceeded:
+                raise ReservationExceededError()
             return self._snapshot()
+
+    def release(self, reservation: Reservation) -> BudgetUsage:
+        """Return a reservation unused, charging nothing. Allowed after closing.
+
+        Only for work the caller has *proven* never started; when that is uncertain, ``settle``
+        without counts instead. A missing usage report is not such proof. Released reservations
+        are counted but are not evidence of a bound.
+        """
+        with self._lock:
+            self._take(reservation)
+            self._released += 1
+            return self._snapshot()
+
+    def _take(self, reservation: Reservation) -> Reservation:
+        issued = (
+            self._outstanding.get(reservation.id)
+            if isinstance(reservation, Reservation) and reservation.ledger_id == self._id
+            else None
+        )
+        # Settle what was issued, never what the caller passes back: an altered copy with a
+        # smaller request would otherwise release reserved budget it never accounted for.
+        if issued is None or issued != reservation:
+            raise InvalidChargeError("Unknown, altered, or already settled reservation.")
+        del self._outstanding[issued.id]
+        for name in _COUNTED:
+            self._reserved[name] -= getattr(issued.request, name)
+        return issued
 
     def close(self, reason: CloseReason) -> None:
         """Refuse all further authorization. Closing is permanent; settling is still allowed."""
@@ -317,6 +406,9 @@ class BudgetLedger:
             **self._consumed,
             elapsed_seconds=self._last_reading - self._started,
             unmetered_model_calls=self._unmetered,
+            verified_model_settlements=self._verified,
+            exceeded_reservations=self._exceeded,
+            released_reservations=self._released,
             outstanding_reservations=len(self._outstanding),
             closed_reason=self._closed,
             exhausted_resource=self._exhausted,

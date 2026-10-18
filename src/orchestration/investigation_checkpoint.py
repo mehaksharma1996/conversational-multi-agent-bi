@@ -20,8 +20,8 @@ pickle or class revival. This module keeps them that way:
   Every guarded write also writes the reducer-less ``step_writer`` channel, so two guarded writers
   in one step make LangGraph refuse the step (``InvalidUpdateError``) and the thread unreadable:
   writers run one at a time, because each is validated only against the state before its step.
-  The dispatcher's node may be bound to the trusted gateway's ``BudgetLedger``; budget usage
-  written outside ``running`` must then equal that ledger's snapshot (and needs one bound).
+  The dispatcher's node is bound to the trusted gateway's ``BudgetLedger``; every change to
+  budget usage must equal that ledger's snapshot, and is refused without one.
 - ``load_investigation_state`` first checks the graph's checkpointer is a strict investigation
   saver (``is_strict_investigation_saver``), then reads the thread back and fully revalidates it.
   A permissive or unknown saver, a thread that cannot be read, a thread whose last step failed, or

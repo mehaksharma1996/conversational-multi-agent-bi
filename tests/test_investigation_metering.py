@@ -14,13 +14,14 @@ from packages.investigation import (
     BudgetRequest,
     InvalidChargeError,
 )
-from packages.investigation.budget import CloseReason
+from packages.investigation.budget import CloseReason, ReservationExceededError
 from packages.investigation.refusals import LEDGER_CLOSE_REASON, RefusalCode
 from src.llm.base import LLMGenerationError, LLMResponse
 from src.llm.fallback import FallbackLLMClient
 from src.llm.observability import (
     meter_provider_calls,
     report_fallbacks,
+    report_served_by,
     report_usage,
     tap_usage,
 )
@@ -83,8 +84,18 @@ def test_unknown_usage_is_still_charged_in_full_when_calls_are_counted() -> None
     assert usage.unmetered_model_calls == 1
 
 
-@pytest.mark.parametrize("model_calls", [0, -1, 4, True, 1.0, "2"])
-def test_a_call_count_outside_the_reservation_is_malformed_and_closes(model_calls: Any) -> None:
+def test_more_metered_calls_than_reserved_are_charged_as_metered_and_close() -> None:
+    ledger = _ledger()
+    with pytest.raises(ReservationExceededError):
+        ledger.settle(ledger.authorize(_worst_case()), model_calls=4)
+    usage = ledger.usage()
+    assert (usage.model_calls, usage.input_tokens, usage.output_tokens) == (4, 3_000, 1_500)
+    assert usage.closed_reason == "reservation_exceeded"
+    assert usage.reservation_bound == "exceeded"
+
+
+@pytest.mark.parametrize("model_calls", [0, -1, True, 1.0, "2"])
+def test_a_malformed_call_count_is_malformed_and_closes(model_calls: Any) -> None:
     ledger = _ledger()
     with pytest.raises(InvalidChargeError):
         ledger.settle(ledger.authorize(_worst_case()), model_calls=model_calls)
@@ -149,6 +160,25 @@ def test_meters_nest_and_restore() -> None:
         report_usage(prompt_tokens=2, output_tokens=2)
     assert inner.usage == [(1, 1, 0)]
     assert outer.usage == [(2, 2, 0)]
+
+
+def test_a_meter_that_asks_for_it_learns_who_served_each_call() -> None:
+    class ServedMeter(RecordingMeter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.served: list[tuple[str, str]] = []
+
+        def record_served_by(self, provider: str, model: str) -> None:
+            self.served.append((provider, model))
+
+    served, plain = ServedMeter(), RecordingMeter()
+    with meter_provider_calls(served):
+        report_served_by("gemini", "gemini-2.5-pro")
+    with meter_provider_calls(plain) as health:
+        report_served_by("gemini", "gemini-2.5-pro")  # a meter without the hook is unaffected
+    report_served_by("ollama", "llama3")  # outside any meter: ignored
+    assert served.served == [("gemini", "gemini-2.5-pro")]
+    assert health.faulted is False
 
 
 def test_negative_or_absurd_reports_reach_the_meter_sanitised() -> None:

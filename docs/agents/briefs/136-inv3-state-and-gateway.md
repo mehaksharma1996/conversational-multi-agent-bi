@@ -160,7 +160,8 @@ Status rules (`owned_update` only, because they compare against the prior state)
   `MeterHealth` yielded by `meter_provider_calls` is marked `faulted` and the exception is dropped.
   **S5 obligation:** when the meter faulted, the metered block raised, or a member failed without
   reporting, settle the reservation without counts (the full reservation), never the partial
-  counts and never zero.
+  counts and never zero. (S5 H2/H3: settled with `usage_complete=False`, which charges the larger of
+  the reservation and the reported totals; a meter fault is also `metering_violation`.)
 - **F6** this brief and the module docstrings now match ownership, reducer canonicalization,
   Command handling, and the authorization-check order.
 - **F7** `load_investigation_state` refuses (`checkpointer_not_strict`) unless the graph's
@@ -196,7 +197,8 @@ The existing question graph, its checkpoint saver, the API, and approvals keep t
       unavailable live check, and an expired or mismatched approval. Agent-supplied state is never
       an input to the authority decision.
 - [ ] `ProviderEnvelope` refuses unbounded members and reserves the worst case across all members
-      and attempts. `settle(model_calls=)` rejects 0, booleans, and values above the reservation.
+      and attempts. `settle(model_calls=)` rejects 0 and booleans; a value above the reservation (S5 H3) is charged as
+      metered, closes the ledger (`reservation_exceeded`), and raises `ReservationExceededError`.
 - [ ] The meter changes nothing when it is not installed (existing observability tests unchanged).
 - [ ] `test_orchestrator_characterization.py`, `test_langgraph_orchestrator.py`, and
       `test_guarded_services.py` pass unmodified, and `python -m scripts.check_all` passes.

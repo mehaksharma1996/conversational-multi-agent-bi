@@ -349,17 +349,9 @@ def test_refusal_decisions_must_carry_the_matching_severity_and_category() -> No
 
 
 def test_budget_usage_never_decreases_and_close_reason_is_final() -> None:
-    state = apply_update(
-        running_state(),
-        "dispatcher",
-        {
-            "budget_usage": {
-                "model_calls": 3,
-                "outstanding_reservations": 1,
-                "closed_reason": "exhausted",
-            }
-        },
-    )
+    usage = {"model_calls": 3, "outstanding_reservations": 1, "closed_reason": "exhausted"}
+    state = {**running_state(), "budget_usage": usage}  # as restored from a checkpoint
+    restore_state(state)
     _rejected("budget_regression", "dispatcher", state, {"budget_usage": {"model_calls": 2}})
     _rejected(
         "budget_regression",
@@ -367,8 +359,17 @@ def test_budget_usage_never_decreases_and_close_reason_is_final() -> None:
         state,
         {"budget_usage": {"model_calls": 3, "closed_reason": "completed"}},
     )
+    # Monotonic, but nothing authoritative vouches for it: only a bound ledger's snapshot is.
     drained = {"model_calls": 3, "outstanding_reservations": 0, "closed_reason": "exhausted"}
-    assert owned_update("dispatcher", state, {"budget_usage": drained})
+    _rejected("settlement_unverified", "dispatcher", state, {"budget_usage": drained})
+
+
+def test_a_recorded_reservation_overrun_can_never_be_erased() -> None:
+    usage = {"model_calls": 2, "exceeded_reservations": 1, "closed_reason": "reservation_exceeded"}
+    state = {**running_state(), "budget_usage": usage}
+    assert restore_state(state).budget_usage.reservation_bound == "exceeded"  # type: ignore[union-attr]
+    erased = {**usage, "exceeded_reservations": 0}
+    _rejected("budget_regression", "dispatcher", state, {"budget_usage": erased})
 
 
 # --- execution only while running; bookkeeping only after a terminal status ---------------------
@@ -480,9 +481,7 @@ def test_terminal_investigations_refuse_calls_that_ran(status: str) -> None:
 
 @_TERMINAL
 def test_terminal_investigations_refuse_new_budget_spending(status: str) -> None:
-    state = apply_update(
-        running_state(), "dispatcher", {"budget_usage": {"model_calls": 1, "input_tokens": 10}}
-    )
+    state = {**running_state(), "budget_usage": {"model_calls": 1, "input_tokens": 10}}
     state = apply_update(state, "lifecycle", {"status": status})
     for usage in (
         {"model_calls": 2, "input_tokens": 10},  # spending with nothing in flight
@@ -655,6 +654,11 @@ def test_a_bound_ledger_vouches_for_running_budget_writes_too() -> None:
     assert caught.value.code == "settlement_unverified"
     genuine = {"budget_usage": _usage(ledger)}
     assert owned_update("dispatcher", running_state(), genuine, ledger=ledger)
+
+
+def test_running_budget_writes_also_need_the_gateway_ledger() -> None:
+    usage = {"model_calls": 1, "input_tokens": 10, "outstanding_reservations": 1}
+    _rejected("settlement_unverified", "dispatcher", running_state(), {"budget_usage": usage})
 
 
 def test_the_step_writer_channel_is_reserved_and_validated_on_restore() -> None:

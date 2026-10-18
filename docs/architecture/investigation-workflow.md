@@ -9,8 +9,9 @@ document steps through `GuardedSQLService` (`src/orchestration/guarded_sql.py`) 
 (INV-1). INV-3 (#136, stages S0 to S4) adds typed JSON-native state with validated single-writer
 updates (`packages/investigation/state.py`), the gateway refusal and authority vocabulary
 (`refusals.py`, `gateway.py`), and strict process-local checkpoints
-(`src/orchestration/investigation_checkpoint.py`). The gateway's executing operations (S5 to S7)
-are not built yet, and nothing below runs in a route or graph yet.
+(`src/orchestration/investigation_checkpoint.py`). S5 adds the tool gateway's guarded attempts and
+document research (`src/orchestration/tool_gateway.py`). SQL handles (S6) and bypass enforcement
+(S7) are not built yet, and nothing below runs in a route or graph yet.
 
 These services are not access controls. The API authorizes the caller, enforces consent, and
 resolves the tenant's table and documents before building them. For investigations, the INV-3 tool
@@ -74,13 +75,11 @@ tasks, recording refusals, settling reservations made while running, and the ter
 **Budget settlement comes from the gateway's ledger.** State records only how many reservations
 are outstanding, not their amounts, so on its own it cannot check that a settlement charges no more
 than it releases. The dispatcher's node is therefore bound to the gateway's `BudgetLedger` when the
-graph is built (`guarded_node(..., ledger=)`). Outside `running`, a change to budget usage needs that
-binding and must equal the ledger's snapshot exactly. After a terminal status the ledger must also
-be closed, so it cannot authorize another reservation. When a ledger is bound, its snapshot is
-required in every status. Binding the right ledger to the right investigation is trusted wiring:
-state cannot tell two ledgers apart, and `restore_state` checks only shape and monotonicity. While
-`running`, an unbound dispatcher can still write budget usage, so S5 must bind the gateway's ledger.
-The settlement itself (closing and settling the ledger at a terminal status) is S5's job.
+graph is built (`guarded_node(..., ledger=gateway.ledger)`). In every status, a change to budget
+usage needs that binding and must equal the ledger's snapshot exactly, so the dispatcher can never
+record consumption the ledger did not. After a terminal status the ledger must also be closed, so it
+cannot authorize another reservation. Binding the right ledger to the right investigation is trusted
+wiring: state cannot tell two ledgers apart, and `restore_state` checks only shape and monotonicity.
 
 **Writers run one at a time.** Each update is validated against the state before its step, and
 reducers see one channel at a time. Two writers in the same LangGraph step would each pass alone,
@@ -139,3 +138,115 @@ The package imports no LangGraph, `src`, `apps`, or web framework
 | UI Stage 6b/6c | #155, #156 |
 | Security | #157 |
 | Deployment | #159 |
+
+## Tool gateway execution (INV-3 S5)
+
+`InvestigationToolGateway` (`src/orchestration/tool_gateway.py`) serves one sequential
+investigation. Specialists send it typed, frozen requests: `BeginAttempt(task_id, role)` and
+`ResearchDocuments(task_id, role, attempt)`. Requests carry no query, prompt, or resource name; the
+query and passage limit come from the admitted plan task, and the document collection comes from
+the trusted resolver for the authority's scope.
+
+Every call runs one pre-flight and stops at the first failure with a code-only refusal. The order is:
+
+1. Request type.
+2. Restored state, which must be the state this gateway last issued updates for.
+3. The gateway is open.
+4. The investigation is not cancelled.
+5. Scope, approval, and `running` binding.
+6. The task is admitted and at the right step, the role is the assigned executor, the tool fits the
+   task, and the attempt token is the one issued.
+7. The provider envelope is bounded, and the model client is an admitted `BoundedModelAdapter`
+   whose declared bound is the envelope's only member (`metering_unbounded` otherwise).
+8. Capability, consent, approval expiry, then the live re-check.
+9. Tenant resolution.
+10. A worst-case ledger reservation for the retrieval and the whole provider envelope.
+
+Model calls go through an admitted client that allows one call per reservation. Before anything is
+sent, it asks the adapter for the exact input-token count of the complete request (system text,
+template, and prompt) and refuses a count above the input cap, or one that is not an integer. It
+sends the envelope's output cap with the request and meters the provider's reports, including who
+served the call.
+
+The retrieval and the model call have separate reservations, and both are settled in every outcome
+after the service wrappers are sealed. A charge is never below what was reported.
+
+**Proving that no call happened.** Each wrapper has an invocation marker. The marker is set
+immediately before the wrapped service is entered, and only the wrapper can reach the service for
+that reservation. The meter is installed from the input count onward. The gateway therefore treats
+the model as *provably not invoked* only when all three hold: the marker is unset, the meter saw no
+report of any kind (usage, fallback, or served-by), and the meter did not fault. A missing usage
+report alone never counts as proof.
+
+| Outcome | Model reservation | `reservation_bound` effect |
+|---|---|---|
+| No relevant passage; retrieval failed or was cancelled before the model; prompt refused before the call (count over the cap, not an integer, or the counter raised) | Released: no model calls or tokens charged | None (`released_reservations` + 1) |
+| Budget refused the model reservation | Never issued; the retrieval reservation is released too | None |
+| Invoked, one complete report within the contract and the reservation | Charged as reported | `held` (`verified_model_settlements` + 1) |
+| Invoked, provider raised with no report | Full reservation | `unverified` (`unmetered_model_calls` + 1) |
+| Uncertain: provider activity without an invocation, or a meter fault | Reservation or reported totals, whichever is larger; `metering_violation` | `unverified` |
+| Contract breach: a second call, a retry, a fallback, another provider or model, more input than counted, more output than the cap, or a success without complete usage | Same as uncertain; `metering_violation` | `unverified`, or `exceeded` if reports pass the reservation |
+
+A `metering_violation` discards the evidence, closes the gateway and its ledger, and sends the
+investigation to `failed`. `BudgetLedger.settle` never treats usage above a reservation as successful
+accounting. It charges the reported amount, records `exceeded_reservations`, closes with
+`reservation_exceeded`, and raises `ReservationExceededError`.
+
+The retrieval reservation is charged once the retriever has been entered, and released if it never
+was.
+
+### Bound terminology
+
+These terms are kept apart, and each claims only what its evidence supports:
+
+| Term | Meaning | Evidence |
+|---|---|---|
+| **Declared limits** | What the adapter (`BoundedModelAdapter.bound`) and the authority's `ProviderEnvelope` say: one attempt, an output cap, bounded input, a fixed provider and model. | A code-level claim, plus the check that the envelope equals the adapter's declaration. Admission proves only that the two agree. |
+| **Enforcement at the request boundary** | What the gateway itself does before and during the call: refuses a prompt whose exact count passes the cap; sends the cap with the request; allows one `generate_once` per reservation; seals the wrapper afterwards; refuses an answer from another model. | Gateway code. Whether the *provider* honours the cap, and whether the adapter's count is exact, cannot be seen before the call. They are checked only against the reports afterwards. |
+| **Complete observed usage within reservation** (`held`) | At least one model settlement had a complete report, inside the contract and the reservation, and no settlement was unknown or exceeded. | Provider reports, checked by the gateway and charged as reported. |
+| **Unknown usage** (`unverified`) | A settlement where an invocation happened, or may have happened, but usage is not completely known. | Charged at the reservation or more. This is an upper bound only if the provider really enforced the declared caps. |
+| **Confirmed reservation overrun** (`exceeded`) | Reported usage passed what the reservation authorized. | Provider reports, charged as reported. Final: the count can never decrease in state. |
+| **No evidence** (`none`) | No model settlement yet. Released reservations do not count. | None. Nothing is claimed. |
+
+`held` is never assigned because an adapter was admitted, or because a call was released.
+`CostEstimate.bound == "enforced_upper_bound"` is a separate, earlier estimate about provider
+profiles. It is not evidence about any settlement.
+
+**Current production providers remain unsupported for model-executing investigation tools.** No
+production client is a `BoundedModelAdapter`, so document research and any other model-executing
+investigation tool is refused with `metering_unbounded` before any resource is resolved or budget
+reserved.
+
+### Supported model clients
+
+The gateway runs model calls only for a `BoundedModelAdapter` (`src/llm/bounded.py`). No production
+client is one, so every model-executing investigation path is disabled today and refused with
+`metering_unbounded` before any resolution or reservation. The question workflows keep their
+current clients unchanged.
+
+| Client | Why it is refused |
+|---|---|
+| `GeminiClient` | Purpose-tier model routing; internal retries (`max_retries=2`); no output cap unless configured; a system instruction outside the prompt; no local tokenizer for an exact pre-call count. |
+| `AnthropicClient` | Purpose-tier routing; internal retries; a system instruction outside the prompt; no pre-call count. |
+| `OllamaClient` | Purpose-tier routing; internal retries; no output cap is sent; the server's model template wraps the prompt with text the client cannot see. |
+| `FallbackLLMClient` | Any member may serve the call. |
+| `ObservedLLMClient` and other wrappers | A wrapper is not the adapter, even around one. |
+
+UTF-8 byte length is not used as a token bound. The provider adds system and template tokens that
+the prompt's bytes do not contain. A normalising tokenizer can also produce more tokens than bytes:
+under NFKC, the 3-byte U+FDFA becomes 18 characters (33 bytes).
+
+An overlapping or re-entrant call is `concurrent_call`. It closes the gateway, and the in-flight
+call also ends refused. Investigation-severity refusals close the gateway and its ledger and name the
+lifecycle target. Results carry JSON updates for the ledger-bound dispatcher: decisions, task
+records, evidence metadata (collection, source number, page, chunk index, score, citation counts,
+and evidence statuses), and the ledger snapshot. Passages, filenames, prompts, model output, and
+provider error messages stay out of results and state. The research payload stays in process
+(`evidence_payload`) until INV-5.
+
+Limitations: an adapter's exact count, single attempt, and provider-enforced cap are a reviewed,
+code-level claim that subclassing `BoundedModelAdapter` makes. The gateway verifies identity
+against the envelope before the call and every report after it. It cannot see a provider request
+that is never reported, and it cannot recover money already spent when a breach is detected; it
+can only charge the reported amount, mark the bound `exceeded`, and stop. Fallback chains and
+multi-attempt envelopes are not supported for investigations.
