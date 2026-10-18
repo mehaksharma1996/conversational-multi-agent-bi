@@ -111,6 +111,12 @@ approval. Plan approval expires after 24 hours, or when the workspace expires if
   monotonic clock; and `estimate_cost`, which returns a `CostEstimate` labelled
   `enforced_upper_bound`, `indicative`, or `unavailable`.
 - `lifecycle.py`: statuses, legal transitions, and the approval deadline.
+- `planning.py` (INV-4 S1): a trusted, scope-bound planning context exposes only the question,
+  schema names/types/descriptions, and document display titles to a future planning adapter. Schema
+  descriptions, titles, and the question remain bounded untrusted data, never instructions or
+  authority. Its strict draft validator reuses `validate_plan`; its proposal wrapper preserves the
+  embedded plan and digest, keeps missing-information text informational, and distinguishes plan
+  approval from SQL approval deferred to statement preparation.
 
 The package imports no LangGraph, `src`, `apps`, or web framework
 (`tests/test_package_boundaries.py`).
