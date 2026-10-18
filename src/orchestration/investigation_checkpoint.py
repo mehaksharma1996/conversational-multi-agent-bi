@@ -22,18 +22,26 @@ pickle or class revival. This module keeps them that way:
   writers run one at a time, because each is validated only against the state before its step.
   The dispatcher's node is bound to the trusted gateway's ``BudgetLedger``; every change to
   budget usage must equal that ledger's snapshot, and is refused without one.
-- ``load_investigation_state`` first checks the graph's checkpointer is a strict investigation
-  saver (``is_strict_investigation_saver``), then reads the thread back and fully revalidates it.
-  A permissive or unknown saver, a thread that cannot be read, a thread whose last step failed, or
-  values that fail validation raise ``StateInvalid``; the investigation must then fail and never
-  resume.
+- ``guarded_node`` records every node it builds (owner and bound ledger) in a private registry.
+  ``require_guarded_graph`` refuses a compiled graph with any node the registry does not know, so a
+  raw function, a lambda, or a function carrying a copied marker cannot be registered as an
+  investigation node. With ``ledger=``, every budget writer must also be bound to that ledger.
+  ``investigation_graph.InvestigationGraphBuilder`` is the registration interface that applies all
+  of this by construction (S7).
+- ``load_investigation_state`` first checks that the graph is guarded and that its checkpointer is
+  a strict investigation saver (``is_strict_investigation_saver``). Only then does it read the
+  thread back and fully revalidate it. An unguarded graph, a permissive or unknown saver, a thread
+  that cannot be read, a thread whose last step failed, or values that fail validation raise
+  ``StateInvalid``; the investigation must then fail and never resume.
 
 Checkpoints are process-local by design (ADR 0024 §9). Durable, encrypted checkpoints are #149.
 """
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -53,6 +61,17 @@ from packages.investigation.state import (
 )
 
 NodeStep = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+
+
+@dataclass(frozen=True)
+class _Registration:
+    owner: Writer
+    ledger: BudgetLedger | None
+
+
+# Every node ``guarded_node`` built, keyed by the node function itself. Weak, so graphs can be
+# collected; private, so only this module adds to it.
+_GUARDED: weakref.WeakKeyDictionary[Callable[..., Any], _Registration] = weakref.WeakKeyDictionary()
 
 
 def build_investigation_serializer() -> JsonPlusSerializer:
@@ -124,14 +143,39 @@ def guarded_node(
         except Exception:
             raise InvestigationNodeError("node_failed") from None
 
+    _GUARDED[node] = _Registration(owner=owner, ledger=ledger)
     return node
 
 
-def load_investigation_state(graph: Any, config: Mapping[str, Any]) -> InvestigationStateView:
-    """Check the saver is strict, read a thread's latest checkpoint, and revalidate it.
+def require_guarded_graph(graph: Any, *, ledger: BudgetLedger | None = None) -> None:
+    """Refuse a compiled investigation graph unless every node was built by ``guarded_node``.
 
-    Raises ``StateInvalid`` otherwise. The saver check runs before anything is deserialized.
+    With ``ledger``, every budget writer must be bound to exactly that ledger, so the dispatcher
+    can record only the trusted gateway's own usage. Raises ``StateInvalid("graph_not_guarded")``.
+    Anything that cannot be inspected (an unknown graph type, a library change) counts as unguarded.
     """
+    try:
+        specs = dict(graph.builder.nodes)
+        functions = [getattr(spec.runnable, "func", None) for spec in specs.values()]
+    except Exception:
+        raise StateInvalid("graph_not_guarded") from None
+    if not functions:
+        raise StateInvalid("graph_not_guarded")
+    for function in functions:
+        registration = _GUARDED.get(function) if callable(function) else None
+        if registration is None:
+            raise StateInvalid("graph_not_guarded")
+        if ledger is not None and registration.owner == CHANNEL_OWNERS["budget_usage"]:
+            if registration.ledger is not ledger:
+                raise StateInvalid("graph_not_guarded")
+
+
+def load_investigation_state(graph: Any, config: Mapping[str, Any]) -> InvestigationStateView:
+    """Check the graph is guarded and its saver strict; then read and revalidate the thread.
+
+    Raises ``StateInvalid`` otherwise. Both checks run before anything is deserialized.
+    """
+    require_guarded_graph(graph)
     if not is_strict_investigation_saver(getattr(graph, "checkpointer", None)):
         raise StateInvalid("checkpointer_not_strict")
     try:

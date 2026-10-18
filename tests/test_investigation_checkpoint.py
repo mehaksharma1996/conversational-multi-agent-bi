@@ -401,7 +401,8 @@ def test_an_unguarded_reducer_rejection_poisons_the_thread_and_load_fails_closed
         app.invoke({}, _config())
     with pytest.raises(StateInvalid) as caught:
         load_investigation_state(app, _config())
-    assert caught.value.code == "checkpoint_unreadable"
+    # S7: an unguarded graph is refused before its (poisoned) thread is even read.
+    assert caught.value.code == "graph_not_guarded"
 
 
 @pytest.mark.parametrize(

@@ -645,6 +645,10 @@ class InvestigationToolGateway:
         """The process-local result behind gateway-issued evidence; never checkpointed."""
         return self._payloads.get(evidence_id)
 
+    def specialist_port(self) -> SpecialistGateway:
+        """The only object a specialist may hold: the tool operations, and nothing else."""
+        return SpecialistGateway(self)
+
     # --- operations -----------------------------------------------------------------------------
 
     def begin_attempt(self, state: Mapping[str, Any], request: object) -> GatewayResult:
@@ -1462,6 +1466,45 @@ class InvestigationToolGateway:
         if type(value) is not str or len(value) != 32 or value.strip("0123456789abcdef"):
             raise RuntimeError("the gateway id source must return 32 lowercase hex characters")
         return value
+
+
+class SpecialistGateway:
+    """A specialist's view of the gateway: the five tool operations, and no other access.
+
+    It exposes no ledger, payload, handle store, authority, or close state, and it cannot be
+    modified. Python cannot hide the wrapped gateway from code that reaches for private names;
+    ``tests/test_investigation_boundaries.py`` forbids that in specialist modules
+    (``src/investigation/``), which also may not import the gateway class itself.
+    """
+
+    __slots__ = ("__gateway",)
+    __gateway: InvestigationToolGateway
+
+    def __init__(self, gateway: InvestigationToolGateway) -> None:
+        if type(gateway) is not InvestigationToolGateway:
+            raise TypeError("A specialist port wraps a trusted InvestigationToolGateway.")
+        object.__setattr__(self, "_SpecialistGateway__gateway", gateway)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("A specialist port cannot be modified.")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("A specialist port cannot be modified.")
+
+    def begin_attempt(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        return self.__gateway.begin_attempt(state, request)
+
+    def research_documents(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        return self.__gateway.research_documents(state, request)
+
+    def prepare_sql(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        return self.__gateway.prepare_sql(state, request)
+
+    def execute_sql(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        return self.__gateway.execute_sql(state, request)
+
+    def prepare_correction(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        return self.__gateway.prepare_correction(state, request)
 
 
 def _bare(code: RefusalCode) -> GatewayResult:

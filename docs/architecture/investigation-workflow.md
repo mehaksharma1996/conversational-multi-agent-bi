@@ -357,3 +357,33 @@ model call, and a handle bound to an approval requirement never executes.
 SQL text, result rows, row values, and database error text never enter state, decisions, or
 results. Decisions carry fixed codes and categories only. Fingerprints are keyed and per-gateway:
 they identify SQL within one investigation run, and are not comparable across restarts.
+
+## Bypass enforcement (INV-3 S7)
+
+The gateway is mandatory at three integration boundaries, and each is enforced at runtime, not by
+convention:
+
+- **Tool access.** A specialist holds a `SpecialistGateway` (`InvestigationToolGateway.specialist_port()`).
+  It has the five tool operations, no ledger, payloads, handle store, or authority, and it cannot
+  be modified. Requests are strict, typed, and frozen, and forbid unknown fields. Even a request
+  built without validation (`model_construct`) cannot inject SQL, a query, a role, or a counter: the
+  gateway uses only the admitted plan and its own records, and refuses request subclasses.
+- **Graph registration.** `InvestigationGraphBuilder(gateway)` (`src/orchestration/investigation_graph.py`)
+  is the only way to build an investigation graph:
+  - `add_step(name, owner, step)` registers a `guarded_node`, and binds a dispatcher to the
+    gateway's own ledger;
+  - there is no raw `add_node`;
+  - `compile()` uses a fresh strict saver and calls `require_guarded_graph`.
+
+  `guarded_node` records the nodes it builds in a private registry. A raw function, a lambda, or a
+  function with copied attributes is refused (`graph_not_guarded`), as is a dispatcher bound to
+  another ledger. `load_investigation_state` repeats the check before reading a thread.
+- **Specialist modules.** INV-4 and INV-5 modules go in `src/investigation/`.
+  `tests/test_investigation_boundaries.py` allows them only the contracts, the typed requests, the
+  port, and the builder. It forbids services, executors, retrievers, model clients, storage,
+  `BudgetLedger`, authority types, LangGraph, evaluation code, private attributes, and dynamic
+  access, and it tests the checker on synthetic violations. Only `investigation_graph.py` may
+  construct `StateGraph(InvestigationState)`.
+
+Actual Supervisor, specialist, and dispatcher wiring is deferred to INV-4 and INV-5, which must use
+these interfaces. Behavioural attacks on each boundary are in `tests/test_investigation_bypass.py`.

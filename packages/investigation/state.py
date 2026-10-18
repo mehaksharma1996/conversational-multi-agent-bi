@@ -123,6 +123,7 @@ StateErrorCode = Literal[
     "checkpoint_unreadable",
     "checkpointer_not_strict",
     "step_failed",
+    "graph_not_guarded",
 ]
 
 
