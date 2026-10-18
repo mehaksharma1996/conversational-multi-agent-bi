@@ -46,6 +46,7 @@ from src.llm.observability import (
 )
 from src.llm.providers import AnthropicClient, ModelTiers, OllamaClient
 from src.orchestration import tool_gateway
+from src.orchestration.document_research import DocumentResearchOutcome
 from src.orchestration.tool_gateway import (
     AttemptToken,
     BeginAttempt,
@@ -370,7 +371,8 @@ def test_admitted_document_research_records_gateway_issued_evidence_with_safe_pr
     assert usage.reservation_bound == "held"  # backed by one complete, in-reservation report
 
     payload = h.gateway.evidence_payload(result.evidence_id)  # process-local, never checkpointed
-    assert payload is not None and payload.sources[0].filename == FILENAME
+    assert isinstance(payload, DocumentResearchOutcome)
+    assert payload.sources[0].filename == FILENAME
 
 
 def test_a_hypothesis_document_check_researches_its_own_admitted_query() -> None:

@@ -250,3 +250,110 @@ against the envelope before the call and every report after it. It cannot see a 
 that is never reported, and it cannot recover money already spent when a breach is detected; it
 can only charge the reported amount, mark the bound `exceeded`, and stop. Fallback chains and
 multi-attempt envelopes are not supported for investigations.
+
+## SQL handles (INV-3 S6)
+
+The gateway alone prepares and executes investigation SQL, in three operations. Each takes a task
+ID and role, plus a gateway-issued token; none takes SQL, a question, a resource, a correction
+counter, or an error text (`extra="forbid"`, strict).
+
+- `PrepareSQL(task_id, role, attempt)` uses the attempt token once. The question comes from the
+  admitted task: a `sql_analysis` objective and fields, or the method and fields of a
+  non-document `hypothesis_test`. Any other task kind is `tool_not_permitted`. The gateway then
+  runs the S5 pre-flight and model path:
+  1. it refuses `sql_approval_required` if the authority needs approval;
+  2. it admits the bounded adapter (`metering_unbounded` otherwise) and re-checks live authority;
+  3. it resolves the tenant's table through the trusted `TableResolver`;
+  4. it reserves the worst case of one logical call, and makes one bounded call through
+     `GuardedSQLService.generate`, settled exactly as for document research;
+  5. it applies the read-only guard (`GuardedSQLService.validate`) and policy-to-SQL verification.
+
+  Only then does it issue an `SQLHandle(task_id, handle_id)`. The SQL stays in process.
+- `ExecuteSQL(task_id, role, handle)` uses the handle up on its first presentation, whatever
+  happens next.
+- `PrepareCorrection(task_id, role)` uses the task's one correction on the last failed execution
+  the gateway itself recorded, and issues a new handle.
+
+A handle is bound to the tenant, workspace and investigation (the scope), the plan digest, the
+authority epoch, the task, the attempt, the role, the resolved table (path, name, columns,
+encryption), an HMAC-SHA256 fingerprint of the validated SQL under a per-gateway key, the policy
+status, and the approval requirement. It expires after `SQL_HANDLE_TTL` (10 minutes), and never
+later than the plan approval deadline.
+
+Before the executor runs, `execute_sql` checks, in order:
+
+| Check | Refusal |
+|---|---|
+| Handle unknown, altered, issued by another gateway, presented for another task, or presented by another role | `handle_unknown` |
+| Handle already presented | `handle_replayed` |
+| Handle revoked (task refused or gateway closed) | `handle_stale` |
+| Task no longer running, or on another attempt | `handle_stale` |
+| Handle expired; scope, plan digest, or epoch changed | `handle_stale` |
+| Approval required | `sql_approval_required` |
+| Live authority, then the tenant's table re-resolved | as in S5 |
+| Table identity changed | `handle_stale` |
+| Read-only guard re-applied; fingerprint and policy status recomputed | `handle_stale` |
+| One SQL execution reserved | `budget_exhausted` |
+
+The executor is the trusted `execute_sql`, with its table and column allowlist and its row and time
+limits, behind a counting wrapper. An execution that never entered the executor is released;
+one that did is charged. Cancellation or a concurrent call during execution charges it and keeps
+no evidence.
+
+Outcomes:
+
+- **Success**: `query` evidence with `QueryProvenance` (dataset, fingerprint, row and column
+  counts, corrections used, policy status, elapsed milliseconds). The rows and SQL stay in
+  `evidence_payload`.
+- **Guard or timeout refusal by the executor**: the task fails (`unsafe_query` or `timeout`) and is
+  never offered a correction.
+- **Database error with the correction unused**: the task stays `running`, and the gateway keeps
+  the bounded error text for the correction prompt only.
+- **Database error after the correction**: the task fails (`sql_generation`), or stays `running`
+  when a further attempt is allowed.
+
+The correction count belongs to the task, not the attempt. A second correction is
+`correction_limit`, and the task ends `refused`. A correction with no recorded failure is
+`attempt_mismatch`. A new attempt cannot begin while a handle is open, and it discards an unused
+correction.
+
+**Exactly one statement.** The question graph's `extract_sql` keeps the first statement and skips
+any text before the first `SELECT` or `WITH`. Neither is safe for investigations, where a
+`SELECT …; DELETE …` answer would run as its first half. The gateway therefore never validates
+`extract_sql`'s candidate. `sole_statement` takes the model's whole answer and works as follows:
+
+- it uses the single Markdown SQL fence if there is one, and refuses two or more fences;
+- it splits statements with `sqlparse`, so a semicolon inside a string, comment, or quoted
+  identifier never splits;
+- it ignores empty, comment-only, and terminator-only statements, and refuses any other count than
+  exactly one executable statement;
+- it strips comments and applies the shared read-only guard to that statement as written.
+
+A write with a sub-select, or prose before the SQL, is therefore refused rather than reinterpreted.
+The same rule runs again on the stored SQL before execution, and the correction path issues its
+handle through the same code. `extract_sql` and the question graph are unchanged.
+
+**Unknown double-quoted identifiers.** SQLite treats a double-quoted name that matches no column as
+a string literal: `SELECT "secret" FROM t` returns the constant `'secret'` for every row, and
+`AVG("churn")` returns `0.0`, instead of failing. Before the executor runs, the gateway compiles the
+query (`EXPLAIN`, never executed) against an empty in-memory copy of the table's schema, built from
+`StoredTable` metadata, with that fallback turned off (`SQLITE_DBCONFIG_DQS_DML`):
+
+- SQLite's own name resolution, including aliases and CTE names, reports `no such column`;
+- the failure is an ordinary database error, so the task's one correction can fix it;
+- the execution is released, because the executor was never entered;
+- it needs no data and no key, so it covers encrypted tables too; `sqlcipher3` cannot turn the
+  fallback off on the real connection;
+- the shared executor and the question graph keep SQLite's default behaviour.
+
+Policy: with no trusted `PolicyCriteriaSource` criteria, SQL may run only for a task that cites no
+evidence (`not_applicable`). A task that cites evidence without trusted criteria cannot run SQL:
+the task fails with `policy_refused`, because INV-5 has not yet provided document-derived
+criteria. With criteria, only `structurally_verified` SQL gets a handle.
+
+Approval: no INV-10 approval binding exists yet, so any SQL that needs approval is refused before a
+model call, and a handle bound to an approval requirement never executes.
+
+SQL text, result rows, row values, and database error text never enter state, decisions, or
+results. Decisions carry fixed codes and categories only. Fingerprints are keyed and per-gateway:
+they identify SQL within one investigation run, and are not comparable across restarts.
