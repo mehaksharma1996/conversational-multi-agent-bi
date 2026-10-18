@@ -92,6 +92,91 @@ The approved architecture (October 13, 2026) is a required Iteration 2 deliverab
 - Investigations cost several times more than a simple answer. Claims about quality relative to
   the bounded workflow wait for the live comparison (#147).
 
+## Amendment 1: state, gateway, and bypass enforcement (INV-3, #136, 2026-10-17)
+
+INV-3 makes decisions 5, 7, 9, and 13 concrete and records the limits of what is enforced today.
+Details, tests, and refusal codes are in `docs/architecture/investigation-workflow.md`.
+
+1. **Strict checkpoints (refines decision 9).** "JSON-only" means a JSON-native value domain under a
+   strict serializer, not JSON bytes on disk; LangGraph stores msgpack.
+   - Investigation threads use their own `InMemorySaver`, whose `JsonPlusSerializer` has no pickle
+     fallback and no msgpack allowlist, so a checkpoint cannot revive or call arbitrary classes.
+   - Restored state is revalidated in full (`restore_state`) before anything trusts it.
+   - A reducer that raises poisons a thread, so updates are validated inside the node
+     (`owned_update`), and reducers are defence in depth only.
+   - Node exceptions become code-only errors, because LangGraph stores `repr(exc)`.
+   - An unreadable, poisoned, failed, or unguarded thread fails closed and never resumes.
+2. **Trusted authority and consent.** Authority comes only from a trusted adapter
+   (`InvestigationAuthority`: scope, capability, consent, plan approval, epoch, provider envelope).
+   It is never read from state or agent output; state is only compared with it. Consent is checked
+   against the union of the adapter's required recipients and every provider-envelope recipient,
+   so an envelope always binds consent. The live re-check runs last, and when it is unavailable the
+   operation is refused.
+3. **Mandatory gateway execution (decision 5).**
+   - Every SQL, document-research, and model call in an investigation runs inside
+     `InvestigationToolGateway`. A request carries only a task ID, a role, and a gateway-issued
+     token, and is strictly typed with unknown fields forbidden. Queries, SQL, and limits come from
+     the admitted plan task; resources come from trusted resolvers.
+   - Specialists hold a `SpecialistGateway`: the five tool operations, without the ledger,
+     payloads, or internals.
+   - Investigation graphs are built only through `InvestigationGraphBuilder`. It registers only
+     `guarded_node` steps, binds the dispatcher to the gateway's ledger, and compiles with the strict
+     saver. `require_guarded_graph` refuses any unregistered node, at compile time and again before
+     a thread is loaded.
+   - Specialist modules live in `src/investigation/`. A structural test limits their imports and
+     names to the typed requests, the port, the builder, and the contracts; it also forbids private
+     attributes and dynamic access.
+   - Legacy question-graph modules are unchanged and are not scanned.
+4. **Provider envelope (refines decisions 7 and 11).** A model call is admitted only when its client
+   is a `BoundedModelAdapter` whose declared bound is the envelope's only member: one attempt, an
+   enforced output cap, an exact pre-call input count, and a fixed provider and model. UTF-8 byte
+   counts are not used as a token bound. No production client qualifies: Gemini, Anthropic, Ollama,
+   fallback chains, and wrappers are refused with `metering_unbounded`. Model-executing
+   investigation tools are therefore disabled until a real adapter is reviewed.
+5. **Reservation settlement (refines decision 7).**
+   - Work is reserved at its worst case before it starts.
+   - A reservation whose service provably never ran is released, charging nothing. Proof is an
+     invocation marker set before the service is entered, plus a quiet, unfaulted meter; a missing
+     report alone is not proof.
+   - Unknown usage after an invocation is charged at the full reservation and marked `unverified`.
+   - Reported usage above a reservation is charged as reported (never less), recorded as
+     `exceeded`, closes the ledger, and fails the investigation (`metering_violation`).
+   - `reservation_bound` is `held` only after complete, in-reservation reports, never because an
+     adapter was admitted.
+6. **Sequential writers (decision 8).** Each channel has one owner. Every guarded write also writes
+   a reducer-less channel, so LangGraph refuses a step in which two guarded writers run. A
+   concurrent gateway call is investigation-terminal (`concurrent_call`). Parallel dispatch (#150)
+   needs its own design.
+7. **SQL handles and approval (decision 10).** SQL is prepared and executed in two gateway
+   operations.
+   - A handle is single-use and expires after 10 minutes, never past the plan approval.
+   - It is bound to the scope, plan digest, epoch, task, attempt, role, resolved table, a keyed SQL
+     fingerprint, the policy status, and the approval requirement.
+   - Exactly one parser-split statement is accepted. Unresolved double-quoted identifiers are
+     rejected by a schema-only compile.
+   - The gateway counts the one correction a task may use.
+   - Until INV-10 provides a statement-level approval binding, any SQL that requires approval is
+     refused before a model call, and a handle bound to an approval requirement never executes.
+8. **Evaluator-only data.** Investigation runtime modules import no evaluation, test, or script
+   code and name no oracle. No gateway request carries a path or resource name. Specialists cannot
+   open files.
+
+**Known limitations and deferred milestones.**
+- Python cannot hide private attributes, so the specialist rules are structural (AST) on top of the
+  runtime facade, builder, and graph check.
+- An adapter's exact count, single attempt, and provider-enforced cap are a reviewed code claim;
+  the gateway verifies every report afterwards but cannot see an unreported request.
+- SQL fingerprints are keyed per gateway and not comparable across restarts.
+- Not yet built:
+  - the Supervisor (INV-4);
+  - the specialists, dispatcher, graph wiring, evidence payload exposure, and document-derived
+    policy criteria (INV-5);
+  - SQL approval binding (INV-10);
+  - routing behind the feature flag (#142);
+  - durable checkpoints (#149);
+  - parallel dispatch (#150);
+  - a real-provider adapter.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

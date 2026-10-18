@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any
+from typing import Any, Protocol
 
 LLM_PURPOSES: frozenset[str] = frozenset(
     {"route", "sql_generation", "sql_correction", "rag_answer", "criteria_extraction"}
@@ -109,6 +109,71 @@ def tap_usage(tap: UsageTap) -> Iterator[None]:
         _USAGE_TAP.reset(token)
 
 
+class ProviderCallMeter(Protocol):
+    """Receives every provider report made inside :func:`meter_provider_calls`, sanitised."""
+
+    def record_usage(
+        self, prompt_tokens: int | None, output_tokens: int | None, retries: int
+    ) -> None: ...
+
+    def record_fallbacks(self, count: int) -> None: ...
+
+
+class ServedByMeter(ProviderCallMeter, Protocol):
+    """A meter that also wants the provider and model that really answered each call."""
+
+    def record_served_by(self, provider: str, model: str) -> None: ...
+
+
+class MeterHealth:
+    """Whether every provider report inside one metered block reached its meter.
+
+    ``faulted`` becomes ``True`` (and stays so) when the meter raises. The exception itself is
+    dropped, never stored or logged, because it may carry content.
+    """
+
+    def __init__(self) -> None:
+        self.faulted = False
+
+
+_METER: ContextVar[tuple[ProviderCallMeter, MeterHealth] | None] = ContextVar(
+    "llm_provider_call_meter", default=None
+)
+
+
+@contextmanager
+def meter_provider_calls(meter: ProviderCallMeter) -> Iterator[MeterHealth]:
+    """Count the provider calls made in the block, including retries and fallbacks.
+
+    The investigation tool gateway (#136) installs a meter around one logical model call, so it can
+    settle a worst-case budget reservation against what the providers actually reported. A provider
+    that fails reports nothing, so the meter alone never proves a call was cheap.
+
+    A meter that raises never breaks the provider call, the fallback chain, or ordinary reporting;
+    the yielded ``MeterHealth`` is marked ``faulted`` instead. The meter's counts are then
+    incomplete, so the caller (the S5 gateway) must treat usage as unknown and settle the full
+    reservation (``settle()`` without counts), never the partial counts and never zero. The same
+    applies when the block raises. Without a meter, reporting behaves exactly as before.
+    """
+    health = MeterHealth()
+    token = _METER.set((meter, health))
+    try:
+        yield health
+    finally:
+        _METER.reset(token)
+
+
+def _notify_meter(record: Callable[[ProviderCallMeter], None]) -> None:
+    metered = _METER.get()
+    if metered is None:
+        return
+    meter, health = metered
+    try:
+        record(meter)
+    except Exception:
+        health.faulted = True
+
+
 def report_usage(
     *,
     prompt_tokens: int | None = None,
@@ -116,6 +181,12 @@ def report_usage(
     retries: int = 0,
 ) -> None:
     """Called by a provider client while a call is in flight; a no-op when nothing observes it."""
+    # The meter goes first, so a failing tap cannot hide a provider report from it.
+    _notify_meter(
+        lambda meter: meter.record_usage(
+            _count(prompt_tokens), _count(output_tokens), _count(retries) or 0
+        )
+    )
     tap = _USAGE_TAP.get()
     if tap is not None:
         tap(_count(prompt_tokens), _count(output_tokens))
@@ -129,6 +200,10 @@ def report_usage(
 
 def report_served_by(provider: str, model: str) -> None:
     """Called by a provider client on success so telemetry names the model that really answered."""
+    metered = _METER.get()
+    if metered is not None and callable(getattr(metered[0], "record_served_by", None)):
+        served = (str(provider), str(model))
+        _notify_meter(lambda meter: meter.record_served_by(*served))  # type: ignore[attr-defined]
     slot = _SLOT.get()
     if slot is not None:
         slot.served_provider = provider
@@ -137,6 +212,7 @@ def report_served_by(provider: str, model: str) -> None:
 
 def report_fallbacks(count: int) -> None:
     """Called by the fallback chain with how many providers failed before the one that answered."""
+    _notify_meter(lambda meter: meter.record_fallbacks(_count(count) or 0))
     slot = _SLOT.get()
     if slot is not None:
         slot.fallbacks = max(0, int(count))
