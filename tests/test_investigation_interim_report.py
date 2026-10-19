@@ -275,7 +275,7 @@ def test_compose_is_not_implemented_in_s1() -> None:
 # --- S1 leaves checkpointed state unchanged ------------------------------------------------------
 
 
-def test_the_checkpoint_schema_is_unchanged() -> None:
+def test_the_checkpoint_schema_changes_only_by_the_skip_task_literal() -> None:
     assert state.STATE_VERSION == 1
     assert set(state.REDUCERS) == {
         "state_version",
@@ -298,7 +298,8 @@ def test_the_checkpoint_schema_is_unchanged() -> None:
         "prepare_correction",
         "research_documents",
         "finish_attempt",
-    }  # ``skip_task`` is added with the gateway operation in S2, not before
+        "skip_task",  # INV-5 S2: added with the gateway operation, the only state vocabulary change
+    }
     assert set(typing.get_args(state.EvidenceRecord.model_fields["kind"].annotation)) == {
         "query",
         "document",
