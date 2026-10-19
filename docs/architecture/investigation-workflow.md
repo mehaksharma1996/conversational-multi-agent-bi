@@ -225,16 +225,23 @@ production client is a `BoundedModelAdapter`, so document research and any other
 investigation tool is refused with `metering_unbounded` before any resource is resolved or budget
 reserved.
 
-**Planning (INV-4 S2c).** `InvestigationPlanningGateway`
-(`src/orchestration/investigation_planning.py`) makes at most one initial planning call. It checks
-cancellation, the ledger's remaining time, and `check_planning_authority`, then admits only a
+**Planning (INV-4 S2c/S2d).** `InvestigationPlanningGateway`
+(`src/orchestration/investigation_planning.py`) makes one initial planning call and, only after an
+invalid initial candidate, at most one repair. Before each call it checks cancellation, the
+ledger's remaining time, and `check_planning_authority`, then admits only a
 `DeadlineBoundedModelAdapter` whose single envelope member `ReviewedPlanningEvidence.covering`
-matches exactly (`admit_planning_adapter`). It reserves the full 6,000/1,000 initial stage on one
-`BudgetLedger(PLANNING_LIMITS)` before exact counting, and calls once with the ledger's remaining
-original deadline. Settlement follows the tool gateway's conservative rules, and additionally
-requires the reported input to equal the exact count. No production client or reviewed evidence
-exists, so production planning is refused with `metering_unbounded` before the prompt is rendered.
-The one repair attempt is S2d.
+matches exactly (`admit_planning_adapter`). Each call reserves its full 6,000/1,000 stage on the
+same `BudgetLedger(PLANNING_LIMITS)` before exact counting, and runs with what remains of the
+original 30-second deadline. The repair must use exactly the trusted inputs the initial call was
+bound to, and `render_repair_prompt` over the same metadata (equal `metadata_digest`) and the
+initial attempt's fixed validation codes and task IDs; the raw initial candidate is never kept.
+Settlement follows the tool gateway's conservative rules, and additionally requires the reported
+input to equal the exact count. Two invalid candidates end in `plan_invalid`; every refusal and
+every illegal sequence (`planning_sequence_violation`) is terminal, so no third call is possible.
+No production client or reviewed evidence exists, so production planning is refused with
+`metering_unbounded` before the prompt is rendered.
+A count above a stage's 6,000-token input partition closes the ledger `exhausted` without naming
+`exhausted_resource`, because no tokens were charged; adding a ledger seam for it is an S2e item.
 
 ### Supported model clients
 

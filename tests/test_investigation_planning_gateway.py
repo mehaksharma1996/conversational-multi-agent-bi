@@ -243,13 +243,13 @@ def test_a_success_closes_the_gateway_to_any_further_call() -> None:
     assert h.model_calls == 1
 
 
-def test_the_supervisor_port_exposes_one_operation_and_no_tool_surface() -> None:
+def test_the_supervisor_port_exposes_two_operations_and_no_tool_surface() -> None:
     h = _harness()
     port: PlannerGateway = h.gateway
     public = {name for name in dir(InvestigationPlanningGateway) if not name.startswith("_")}
-    assert public == {"initial", "closed", "usage"}
-    assert callable(port.initial)
-    for forbidden in ("repair", "execute_sql", "prepare_sql", "research_documents", "ledger"):
+    assert public == {"initial", "repair", "closed", "usage"}
+    assert callable(port.initial) and callable(port.repair)
+    for forbidden in ("execute_sql", "prepare_sql", "research_documents", "ledger"):
         assert not hasattr(h.gateway, forbidden)
 
 

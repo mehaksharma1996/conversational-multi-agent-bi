@@ -186,10 +186,12 @@ class ScriptedDeadlineAdapter(DeadlineBoundedModelAdapter):
     ``count`` is returned by the counter (or raised when it is an exception); ``count_reports``
     makes the counter report provider usage. The default call reports exactly the counted input,
     ``output_tokens`` output, and ``served_by`` the bound identity, then completes with ``text``.
-    ``script`` replaces the default call entirely.
+    ``answers`` gives one text per call in order (falling back to ``text``). ``script`` replaces
+    the default call entirely.
     """
 
     text: str = field(default_factory=valid_response_text)
+    answers: list[str] = field(default_factory=list)
     count: object = 1_234
     output_tokens: int = 321
     declared: ProviderAttemptBound = BOUND
@@ -227,7 +229,8 @@ class ScriptedDeadlineAdapter(DeadlineBoundedModelAdapter):
             return self.script(self, call)
         report_usage(prompt_tokens=cast(int, self.count), output_tokens=self.output_tokens)
         report_served_by(self.provider, self.model)
-        return completed(self, self.text)
+        index = len(self.calls) - 1
+        return completed(self, self.answers[index] if index < len(self.answers) else self.text)
 
 
 def completed(adapter: ScriptedDeadlineAdapter, text: str) -> DeadlineModelResult:

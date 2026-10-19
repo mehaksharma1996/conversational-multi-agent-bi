@@ -1,16 +1,23 @@
-"""The bounded initial planning gateway (ADR 0024, INV-4 S2c).
+"""The bounded planning gateway: one initial call and at most one repair (ADR 0024, INV-4).
 
-One ``InvestigationPlanningGateway`` makes at most one initial Supervisor planning call for one
-trusted ``PlanningContext``. It is separate from ``InvestigationToolGateway``: it needs no approved
-plan or ``running`` state, has no tool, SQL, retrieval, or resolver surface, and returns only a
-non-executable ``InvestigationProposal`` or fixed, content-free codes. The one repair attempt
-(S2d) is not implemented here.
+One ``InvestigationPlanningGateway`` makes at most two Supervisor planning calls for one trusted
+``PlanningContext``: ``initial()`` and, only after an invalid initial candidate, one ``repair()``.
+It is separate from ``InvestigationToolGateway``: it needs no approved plan or ``running`` state,
+has no tool, SQL, retrieval, or resolver surface, and returns only a non-executable
+``InvestigationProposal`` or fixed, content-free codes.
 
-``initial()`` runs this pre-flight, stopping at the first failure before any model invocation:
+The state machine is monotonic: ``new`` -> ``initial()`` -> ``complete`` (valid) or
+``repair_available`` (invalid); ``repair_available`` -> ``repair()`` -> ``complete`` (valid) or
+``plan_invalid`` (invalid again). Any refusal closes the gateway. Every other call is a terminal
+``planning_sequence_violation`` (or ``gateway_closed`` once closed) before any reservation, so no
+call can create a third planning allowance.
 
-1. the call lock and one-shot sequence (``concurrent_call``, ``gateway_closed``,
+Both stages run the same pre-flight, stopping at the first failure before any model invocation:
+
+1. the call lock and the stage's sequence (``concurrent_call``, ``gateway_closed``,
    ``planning_sequence_violation``);
-2. trusted inputs re-validate, so a ``model_construct`` bypass fails closed;
+2. trusted inputs re-validate, so a ``model_construct`` bypass fails closed; for the repair they
+   must also equal exactly what the initial call was bound to (``authority_unavailable``);
 3. cancellation, then the remaining time on the ledger's original deadline;
 4. ``check_planning_authority``: scope, ``analysis:run``, consent for every provider recipient, and
    the live re-check last;
@@ -20,10 +27,13 @@ non-executable ``InvestigationProposal`` or fixed, content-free codes. The one r
    production client is a ``DeadlineBoundedModelAdapter``, so with Gemini, Anthropic, Ollama,
    fallback, or wrapped clients every call is ``metering_unbounded`` before rendering;
 6. the trusted cost estimate (``estimate_planning_cost``), computed locally;
-7. the deterministic ``render_initial_prompt`` of ``context.model_metadata`` only;
-8. the full initial stage (1 call, 6,000 input, 1,000 output) reserved on the one
+7. the deterministic prompt of ``context.model_metadata`` only: ``render_initial_prompt``, or for
+   the repair ``render_repair_prompt`` with the initial attempt's fixed validation codes and
+   task IDs, whose ``metadata_digest`` must equal the initial one (``state_invalid``). The raw
+   initial candidate is never kept, so it cannot reach the repair prompt;
+8. the stage's full allowance (1 call, 6,000 input, 1,000 output) reserved on the one
    ``BudgetLedger(PLANNING_LIMITS)``, which is never reset and whose 30-second deadline is never
-   extended.
+   extended; the two stages together cannot exceed 2 calls, 12,000 input, and 2,000 output.
 
 Then, with a provider-call meter installed, the adapter counts the complete request exactly
 (a non-integer or non-positive count, or a counter that raises, is ``metering_unbounded``; a count
@@ -44,8 +54,16 @@ unrequested cancellation) is ``metering_violation`` and the candidate is discard
 A completed in-contract answer is parsed by a strict JSON-object decoder (no fences, substrings,
 trailing text, duplicate keys, or non-finite constants) and validated by the existing
 ``validate_planning_draft``. A valid draft becomes an ``InvestigationProposal`` and the ledger
-closes ``completed``. An invalid one returns fixed ``PlanningValidationError``s and leaves the
-ledger open for the S2d repair. Every refusal closes the gateway and the ledger.
+closes ``completed``. An invalid initial candidate returns fixed ``PlanningValidationError``s and
+leaves the ledger open for the repair; an invalid repaired candidate is the terminal
+``plan_invalid`` (ledger ``completed``). Every refusal closes the gateway and the ledger. The close
+reason ``completed`` means the accounting is complete, not that planning succeeded; the outcome is
+the result's status and code.
+
+A count above 6,000 closes the ledger ``exhausted`` through ``BudgetLedger.close``, after releasing
+the unused reservation. ``BudgetUsage.exhausted_resource`` stays unset: the ledger names a resource
+only when an authorization or a settlement exceeds a limit, and naming ``input_tokens`` here would
+mean charging tokens that were never sent. Whether to add a ledger seam for this is left to S2e.
 
 The gateway logs nothing, writes no state or checkpoint, and emits no telemetry. Prompts, provider
 text, candidates, exception messages, and metadata never appear in a result.
@@ -108,14 +126,20 @@ from src.llm.bounded import (
     admit_planning_adapter,
 )
 from src.llm.observability import MeterHealth, meter_provider_calls
-from src.orchestration.planning_prompt import PlanningPromptError, render_initial_prompt
+from src.orchestration.planning_prompt import (
+    PlanningPromptError,
+    RenderedPlanningPrompt,
+    render_initial_prompt,
+    render_repair_prompt,
+)
 
 type PlanningCode = RefusalCode | PlanningOutcomeCode
 
 
 class PlanningCallStatus(StrEnum):
     PROPOSED = "proposed"  # a validated, non-executable proposal
-    INVALID = "invalid"  # fixed validation codes; the S2d repair may follow
+    INVALID = "invalid"  # fixed validation codes; the one repair may follow
+    PLAN_INVALID = "plan_invalid"  # the repaired candidate is invalid too; terminal
     REFUSED = "refused"  # a fixed code; the gateway and its ledger are closed
 
 
@@ -136,22 +160,30 @@ class PlanningCallResult:
         expected = {
             PlanningCallStatus.PROPOSED: (True, False, False),
             PlanningCallStatus.INVALID: (False, True, False),
+            PlanningCallStatus.PLAN_INVALID: (False, True, True),
             PlanningCallStatus.REFUSED: (False, False, True),
         }
         if expected.get(self.status) != shape:
             raise ValueError("inconsistent planning result")
+        if (self.status is PlanningCallStatus.PLAN_INVALID) != (
+            self.code is PlanningOutcomeCode.PLAN_INVALID
+        ):
+            raise ValueError("plan_invalid is exactly the terminal invalid result")
 
 
 class PlannerGateway(Protocol):
-    """The Supervisor-facing planning port: in S2c, one initial attempt and nothing else."""
+    """The Supervisor-facing planning port: one initial attempt and at most one repair."""
 
     def initial(self) -> PlanningCallResult: ...
+
+    def repair(self) -> PlanningCallResult: ...
 
 
 class _Phase(StrEnum):
     NEW = "new"
     INITIAL_IN_FLIGHT = "initial_in_flight"
-    REPAIR_AVAILABLE = "repair_available"  # S2d adds the only transition out of this phase
+    REPAIR_AVAILABLE = "repair_available"
+    REPAIR_IN_FLIGHT = "repair_in_flight"
     COMPLETE = "complete"
     CLOSED = "closed"
 
@@ -248,7 +280,13 @@ class InvestigationPlanningGateway:
         self._ledger = BudgetLedger(PLANNING_LIMITS, clock=clock)
         self._lock = Lock()
         self._phase = _Phase.NEW
+        self._stage = PlanningStage.INITIAL
         self._closed: PlanningCode | None = None
+        # Bound by the initial call, for the repair only: the re-validated trusted inputs, the
+        # metadata digest, and the fixed validation feedback. No candidate text is ever kept.
+        self._bound: _TrustedInputs | None = None
+        self._metadata_digest: str | None = None
+        self._feedback: tuple[PlanningValidationError, ...] = ()
 
     @property
     def closed(self) -> PlanningCode | None:
@@ -260,24 +298,41 @@ class InvestigationPlanningGateway:
 
     def initial(self) -> PlanningCallResult:
         """Make the one initial planning attempt, or refuse with a fixed code."""
+        return self._enter(PlanningStage.INITIAL)
+
+    def repair(self) -> PlanningCallResult:
+        """Make the one repair attempt after an invalid initial candidate, or refuse."""
+        return self._enter(PlanningStage.REPAIR)
+
+    def _enter(self, stage: PlanningStage) -> PlanningCallResult:
         if not self._lock.acquire(blocking=False):
             return self._refuse(RefusalCode.CONCURRENT_CALL)
         try:
-            if self._phase is not _Phase.NEW:
+            ready = _Phase.NEW if stage is PlanningStage.INITIAL else _Phase.REPAIR_AVAILABLE
+            if self._phase is not ready:
                 if self._closed is not None:
                     return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=None)
+                self._stage = stage
                 return self._refuse(PlanningOutcomeCode.SEQUENCE_VIOLATION)
-            self._phase = _Phase.INITIAL_IN_FLIGHT
-            return self._initial()
+            self._stage = stage
+            self._phase = (
+                _Phase.INITIAL_IN_FLIGHT
+                if stage is PlanningStage.INITIAL
+                else _Phase.REPAIR_IN_FLIGHT
+            )
+            return self._attempt(stage)
         finally:
             self._lock.release()
 
     # --- pre-flight -------------------------------------------------------------------------
 
-    def _initial(self) -> PlanningCallResult:
+    def _attempt(self, stage: PlanningStage) -> PlanningCallResult:
         cost: CostEstimate | None = None
         try:
-            authority, context, evidence, pricing = self._trusted_inputs()
+            inputs = self._trusted_inputs()
+            if stage is PlanningStage.REPAIR and inputs != self._bound:
+                raise _Refused(RefusalCode.AUTHORITY_UNAVAILABLE)  # changed between calls
+            authority, context, evidence, pricing = inputs
             self._check_cancelled()
             self._check_time()
             code = check_planning_authority(authority, context.scope, live=self._live)
@@ -289,11 +344,9 @@ class InvestigationPlanningGateway:
             except CostInputInvalid:
                 raise _Refused(RefusalCode.AUTHORITY_UNAVAILABLE) from None
             cost = estimate
-            try:
-                prompt = render_initial_prompt(context.model_metadata).text
-            except PlanningPromptError:
-                raise _Refused(RefusalCode.INVALID_REQUEST) from None
-            reservation = self._reserve()
+            rendered = self._render(stage, context)
+            prompt = rendered.text
+            reservation = self._reserve(stage)
         except _Refused as refused:
             return self._refuse(refused.code, cost=cost)
         invocation = _Invocation((adapter.bound.provider, adapter.bound.model))
@@ -306,16 +359,28 @@ class InvestigationPlanningGateway:
             return self._refuse(final or RefusalCode.METERING_VIOLATION, cost=estimate)
         if self._closed is not None:  # sealed by a concurrent violation while in flight
             return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=estimate)
-        return self._validated(invocation.response.text, context, estimate)
+        if stage is PlanningStage.INITIAL:
+            self._bound = inputs
+            self._metadata_digest = rendered.metadata_digest
+        return self._validated(stage, invocation.response.text, context, estimate)
 
-    def _trusted_inputs(
-        self,
-    ) -> tuple[
-        PlanningAuthority,
-        PlanningContext,
-        ReviewedPlanningEvidence | None,
-        ProviderPricingTable | None,
-    ]:
+    def _render(self, stage: PlanningStage, context: PlanningContext) -> RenderedPlanningPrompt:
+        """The stage's deterministic prompt; the repair is bound to the initial metadata digest."""
+        try:
+            if stage is PlanningStage.INITIAL:
+                return render_initial_prompt(context.model_metadata)
+            rendered = render_repair_prompt(context.model_metadata, self._feedback)
+        except PlanningPromptError:
+            raise _Refused(
+                RefusalCode.INVALID_REQUEST
+                if stage is PlanningStage.INITIAL
+                else RefusalCode.STATE_INVALID
+            ) from None
+        if self._metadata_digest is None or rendered.metadata_digest != self._metadata_digest:
+            raise _Refused(RefusalCode.STATE_INVALID)
+        return rendered
+
+    def _trusted_inputs(self) -> _TrustedInputs:
         """Re-check every trusted value, so a bypassed or substituted object fails closed."""
         try:
             authority = _revalidated(self._authority, PlanningAuthority)
@@ -366,9 +431,9 @@ class InvestigationPlanningGateway:
         except MeteringUnbounded:
             raise _Refused(RefusalCode.METERING_UNBOUNDED) from None
 
-    def _reserve(self) -> Reservation:
+    def _reserve(self, stage: PlanningStage) -> Reservation:
         try:
-            return reserve_planning_stage(self._ledger, PlanningStage.INITIAL).reservation
+            return reserve_planning_stage(self._ledger, stage).reservation
         except BudgetExhaustedError:
             raise _Refused(RefusalCode.BUDGET_EXHAUSTED) from None
         except (BudgetClosedError, InvalidChargeError):
@@ -553,7 +618,7 @@ class InvestigationPlanningGateway:
     # --- validation and results -------------------------------------------------------------
 
     def _validated(
-        self, text: str, context: PlanningContext, cost: CostEstimate
+        self, stage: PlanningStage, text: str, context: PlanningContext, cost: CostEstimate
     ) -> PlanningCallResult:
         candidate = strict_json_object(text)
         result = (
@@ -561,13 +626,26 @@ class InvestigationPlanningGateway:
             if candidate is None
             else validate_planning_draft(candidate, context=context)
         )
-        if result.errors:
+        if result.errors and stage is PlanningStage.INITIAL:
+            self._feedback = result.errors  # fixed codes and syntactic task IDs only
             self._phase = _Phase.REPAIR_AVAILABLE
             return PlanningCallResult(
                 status=PlanningCallStatus.INVALID,
-                stage=PlanningStage.INITIAL,
+                stage=stage,
                 usage=self._ledger.usage(),
                 errors=result.errors,
+                cost_estimate=cost,
+            )
+        if result.errors:
+            self._closed = PlanningOutcomeCode.PLAN_INVALID
+            self._phase = _Phase.CLOSED
+            self._ledger.close("completed")
+            return PlanningCallResult(
+                status=PlanningCallStatus.PLAN_INVALID,
+                stage=stage,
+                usage=self._ledger.usage(),
+                errors=result.errors,
+                code=PlanningOutcomeCode.PLAN_INVALID,
                 cost_estimate=cost,
             )
         proposal = build_investigation_proposal(result, cost_estimate=cost)
@@ -575,7 +653,7 @@ class InvestigationPlanningGateway:
         self._ledger.close("completed")
         return PlanningCallResult(
             status=PlanningCallStatus.PROPOSED,
-            stage=PlanningStage.INITIAL,
+            stage=stage,
             usage=self._ledger.usage(),
             proposal=proposal,
             cost_estimate=cost,
@@ -593,7 +671,7 @@ class InvestigationPlanningGateway:
     ) -> PlanningCallResult:
         return PlanningCallResult(
             status=PlanningCallStatus.REFUSED,
-            stage=PlanningStage.INITIAL,
+            stage=self._stage,
             usage=self._ledger.usage(),
             code=code,
             cost_estimate=cost,
@@ -636,6 +714,12 @@ class _Untrusted(Exception):
     pass
 
 
+type _TrustedInputs = tuple[
+    PlanningAuthority,
+    PlanningContext,
+    ReviewedPlanningEvidence | None,
+    ProviderPricingTable | None,
+]
 type _Trusted = (
     PlanningAuthority | PlanningContext | ReviewedPlanningEvidence | ProviderPricingTable
 )
