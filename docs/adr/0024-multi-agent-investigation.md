@@ -278,6 +278,84 @@ adapters. It also refines decisions 4, 7, 9, and 11 for planning. It does not ch
   the investigation API and approval UI (later milestones under #131); durable checkpoints
   (#149); and any production cost guarantee without matching reviewed evidence.
 
+## Amendment 3: sequential execution (INV-5, #138, 2026-10-19)
+
+INV-5 makes decisions 2, 4, and 5 concrete for execution: an approved plan runs sequentially through
+the tool gateway under scripted bounded adapters, and production stays fail-closed
+(`metering_unbounded`) until a reviewed bounded adapter exists. Investigation routing stays off
+(#142). Details, codes, and tests are in `docs/architecture/investigation-workflow.md` and
+`docs/agents/briefs/138-inv5-dispatcher-specialists.md` (decisions R1 to R8).
+
+1. **Re-seeded execution thread (R1).** `InvestigationExecutionRun`
+   (`src/orchestration/investigation_execution.py`) is the only code that hands a proposal to
+   execution. It reads the proposal thread only through `load_investigation_state` and refuses
+   unless the proposal awaits approval with a `proposed` record and no approval in its state, the
+   authority's, the record's, and the plan's digests are equal, the scopes are equal, the approval
+   has not expired, and every task is a `sql_analysis` task for the SQL Analyst or a
+   `document_research` task for Document Research. Execution then runs on a new strict thread
+   (`…:execution`), seeded from that verified handoff; the builder and saver are unchanged.
+2. **INV-5 grants nothing.** The approval written to the execution thread is copied from the
+   trusted `InvestigationAuthority`. No INV-5 module constructs a `PlanApprovalRecord` or an
+   `InvestigationAuthority`, or sets `sql_approval_required` to false; a structural test enforces
+   this over `src/`, `packages/`, and `apps/`. SQL that needs approval ends its task
+   `refused/policy_refused`, and INV-5 never enters `awaiting_sql_approval` (INV-10, #143).
+3. **Replay limits.** A run is single-use, and a process-local registry keyed by scope, plan digest,
+   and approval time refuses a second execution of the same approval in the same process. Nothing
+   durable prevents re-execution in another process or after a restart, and the approval record
+   names no approver: durable idempotency, approver identity, and audit belong to #143/#144.
+4. **Placement (R7).** The pure dispatch policy is `packages/investigation/dispatch.py`. The
+   ledger-bound dispatcher node and the run owner are trusted and live in
+   `src/orchestration/investigation_execution.py`. The specialists (`sql_analyst.py`,
+   `document_researcher.py`) live in `src/investigation/`, hold only `SpecialistGateway`, and make
+   exactly one port call per step.
+5. **Owner-only gateway operations.** `resource_status`, `skip_task`, `finish_attempt`,
+   `close(completed | cancelled | shutdown)`, and `evidence_payloads` are on the trusted gateway
+   and absent from the specialist port. A skip re-verifies its reason (a dependency that ended
+   without succeeding, or an absent resource) and charges nothing (R5). `finish_attempt` uses the
+   gateway's own record of the attempt's last failure, which must agree with the last decision in
+   state. Closing is permanent and idempotent; the first closure wins. The only state vocabulary
+   change is the additive `GatewayTool` literal `skip_task`; `STATE_VERSION` stays 1.
+6. **Sequential dispatch.** One gateway operation per guarded step; at most one task `running`; a
+   task starts only when every dependency `succeeded`, in plan order, so a failure never satisfies
+   a dependency. Cancellation is checked before every action, and the step bound is an explicit
+   LangGraph recursion limit derived from the plan; reaching it is a defect.
+7. **Retries (R6, refined).** The dispatcher, never a specialist, decides a retry. A second attempt
+   needs `max_attempts == 2`, a last failure in `sql_generation` or `retrieval_or_grounding`, an
+   open ledger, and a shared task attempt left under the limits. Timeouts, security and policy
+   refusals, provider configuration, and the unknown outcomes `provider_failure` and `internal`
+   are never retried. The execution gateway enforces the same category set
+   (`retry_categories`), so even a misbehaving caller cannot retry an unknown outcome. The SQL
+   correction is not a retry: it is the gateway-counted single correction of a task.
+8. **Final status.** The first match wins: a defect (node error, bare gateway refusal, step bound)
+   is `failed`; then the first investigation-severity refusal decides (`cancelled`,
+   `budget_exhausted`, or `failed`, including `approval_expired`, because `running → expired` is
+   illegal); then owner-observed cancellation is `cancelled`; then all tasks succeeded is
+   `completed`, some is `completed_partial`, and none is `failed` (R2). Cancellation, budget
+   exhaustion, and security refusals therefore always override the normal rules.
+9. **Evidence payloads (R3, refined).** Typed, frozen, process-local payloads
+   (`packages/investigation/evidence.py`) are built by the gateway with each evidence record and
+   verified against it before the evidence is issued: query rows of JSON scalars (at most 500,
+   with an explicit `truncated` flag) and no SQL; document sources with their complete location
+   (number, page, chunk, and score must equal the record's provenance), citations, statuses, and
+   the answer typed as untrusted model output. Derived evidence is a contract only.
+10. **Interim report.** `compose_interim_report` is pure and deterministic and makes no model call.
+    Every report is labelled "interim, unverified, association only". It shows verified query cells
+    (at most 50 rows per table) and the locations of verified citations only, never answer prose,
+    and states limitations as fixed codes with reviewed wording. A `failed` report carries codes
+    only (R8). It lives in process; persistence belongs to #144.
+11. **Document-derived policy criteria (R4).** Decision 5's document-derived SQL criteria move from
+    INV-5 to the first milestone in which tasks cite evidence (INV-6 or INV-7). INV-5 plans cite no
+    evidence, so their SQL runs as `not_applicable`; a task that cites evidence without trusted
+    criteria still fails `policy_refused`.
+
+**Known limitations and deferred work.** A reviewed real-provider bounded adapter; routing (#142);
+approvals, approver identity, durable idempotency, audit, and SQL approval waves (#143); the API,
+jobs, and report storage (#144); Business Investigation, hypothesis tests, and derived evidence
+(#139); the Critic, replanning, evidence-citing follow-ups, and document-derived policy criteria
+(#140); the verified report (#141); observability (#146); evaluation (#145, #147, #148); durable
+checkpoints (#149); parallel dispatch (#150); UI (#155, #156); security review (#157); and
+deployment (#159).
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

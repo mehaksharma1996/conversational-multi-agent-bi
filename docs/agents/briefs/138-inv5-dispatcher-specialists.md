@@ -472,3 +472,38 @@ placement) and updates the workflow document.
       cancellation, evidence validation, status precedence, ownership, acceptance matrix, and
       deferrals documented.
 - [x] No contract, gateway, specialist, graph, test, evaluation, ADR, or GitHub change made in S0.
+
+## Readiness (S6, 2026-10-19)
+
+Delivered locally on `feat/iteration2-inv5-dispatcher-specialists`, one commit per stage:
+
+| Stage | Delivered |
+|---|---|
+| S1 | `evidence.py`, `dispatch.py`, `interim_report.py` contracts and pure policy |
+| S2 | Owner-only gateway operations, typed payload issuance, the `skip_task` literal |
+| S3 | `SQLAnalyst` and `DocumentResearcher` |
+| S4 | `InvestigationExecutionRun`: handoff, seeding, dispatch, cancellation, defects, step bound |
+| S5 | `compose_interim_report` and the scripted churn acceptance matrix |
+| S6 | ADR 0024 Amendment 3, the workflow document, this section |
+
+Approved changes to the decisions above (2026-10-19), carried through every stage and documented
+in Amendment 3:
+
+1. Retry eligibility is limited to `sql_generation` and `retrieval_or_grounding`; `provider_failure`
+   and `internal` are unknown outcomes and are never retried (refines R6). The execution gateway
+   enforces the same set (`retry_categories`).
+2. A retry also needs an open ledger and a shared task attempt left; otherwise the task is finished.
+3. The `skip_task` literal was added in S2 with its gateway operation, not in S1.
+4. Payload verification compares the complete source location (number, page, chunk, and score).
+
+Resolved design questions: `finish_attempt` uses the gateway's failure record and refuses unless the
+last state decision agrees (`state_invalid`); the step bound is `8 + 1 + Σ(max_attempts × 5 + 1) +
+4`, pinned by a test; limitation wording is fixed in `LIMITATION_TEMPLATES`.
+
+Acceptance: A1, A2, A3, A4, A5, A9, A11, and determinism in
+`tests/test_investigation_churn_execution.py` on the real churn CSV and four-PDF index; A6, A7, A8,
+and A10 in `tests/test_investigation_execution_lifecycle.py`.
+
+Known limits: process-local replay protection only; no approver identity; checkpoints are
+process-local and become `interrupted` on restart; production stays fail-closed until a reviewed
+bounded adapter exists; the deferred dependencies above are unchanged.
