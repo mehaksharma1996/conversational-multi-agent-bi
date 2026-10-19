@@ -1,7 +1,9 @@
 """Investigation specialists, Supervisor, and dispatcher modules (ADR 0024; INV-4 and INV-5).
 
-Empty until INV-4 and INV-5. Every module added here is untrusted with respect to execution and is
-checked structurally by ``tests/test_investigation_boundaries.py``:
+``supervisor`` (INV-4 S3) plans only through a ``PlannerPort``
+(``InvestigationPlanningGateway.planner_port()``): one initial call and at most one repair. Every
+module added here is untrusted with respect to execution and is checked structurally by
+``tests/test_investigation_boundaries.py``:
 
 - it may reach SQL, document research, and models only through a ``SpecialistGateway``
   (``InvestigationToolGateway.specialist_port()``), with the typed requests from

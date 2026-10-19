@@ -856,8 +856,12 @@ the S2e changes. S2 delivers the bounded planning gateway; it is not yet the Sup
 
 ### Remaining for S3/S4 and production
 
-- **S3:** `src/investigation/supervisor.py` driving `PlannerPort` (initial, then at most one repair)
-  under the specialist boundary; the brief's S3 test list.
+- **S3 (delivered):** `src/investigation/supervisor.py` drives
+  `PlannerPort` (initial, then at most one repair) under the specialist boundary;
+  `tests/test_investigation_supervisor.py`. Because a `PlanningCallResult` carries trusted ledger
+  usage the Supervisor never sees, a Supervisor-detected failure is a separate fixed
+  `SupervisorFailureCode` in `SupervisorOutcome`, not a fabricated result. S4 must pass
+  `planner_port()`, never the gateway, to `plan_investigation`.
 - **S4:** proposal mode in `InvestigationGraphBuilder`; a planning node that constructs the gateway
   from trusted authority/context, owns `close(...)`, applies `planning_lifecycle_target` through the
   existing guarded transitions, writes the proposal record and planning `BudgetUsage` with strict

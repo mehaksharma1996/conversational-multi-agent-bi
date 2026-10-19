@@ -255,6 +255,14 @@ Once a proposal is published the gateway is terminal: later calls and closes ret
 `gateway_closed` (no new status) and cannot cancel or fail it. Withdrawing a proposal that awaits
 approval belongs to the investigation lifecycle owner, not to the planning gateway.
 
+**Supervisor (INV-4 S3).** `src/investigation/supervisor.py:plan_investigation(port)` calls
+`initial()` once and, only after an `invalid` initial result, `repair()` once, returning the
+gateway's result unchanged. It checks every result's type, shape, and stage-legal status before it
+can cause another call; a malformed result or a raising port ends with a fixed
+`SupervisorFailureCode` (`supervisor_result_invalid`, `supervisor_port_error`) and no further call,
+which the S4 lifecycle owner records as `failed` after closing the gateway. It imports only the
+port, the result types, and the pure planning enums.
+
 ### Supported model clients
 
 The gateway runs model calls only for a `BoundedModelAdapter` (`src/llm/bounded.py`). No production

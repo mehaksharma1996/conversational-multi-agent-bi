@@ -70,6 +70,9 @@ SPECIALIST_IMPORTS: dict[str, frozenset[str] | None] = {
     "src.orchestration.investigation_planning": frozenset(
         {"PlannerPort", "PlannerGateway", "PlanningCallResult", "PlanningCallStatus"}
     ),
+    # INV-4 S3: the two pure planning enums only; authority, admission, and stage reservation in
+    # the same module stay banned (``BANNED_NAMES`` and this allowlist).
+    "packages.investigation.gateway": frozenset({"PlanningStage", "PlanningOutcomeCode"}),
 }
 # Names a specialist module may never import or reference, from any module or attribute.
 BANNED_NAMES = frozenset(
@@ -320,6 +323,13 @@ def test_investigation_runtime_cannot_reach_evaluator_only_data(path: Path) -> N
         "gateway.planner_port()",
         "port._PlannerPort__gateway.close('abandoned')",
         "port._PlannerPort__gateway._ledger",
+        # INV-4 S3: only the two pure enums may come from the planning contracts module
+        "import packages.investigation.gateway",
+        "from packages.investigation.gateway import PlanningAuthority",
+        "from packages.investigation.gateway import reserve_planning_stage",
+        "from packages.investigation.gateway import ProviderEnvelope",
+        "from packages.investigation.gateway import PLANNING_STAGE_INPUT_TOKENS",
+        "from packages.investigation.gateway import check_planning_authority",
     ],
 )
 def test_the_checker_detects_each_violation(source: str) -> None:
