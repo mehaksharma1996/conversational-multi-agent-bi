@@ -11,9 +11,10 @@ a provider object:
 - ``DocumentEvidencePayload``: source locations, citations, evidence statuses, and the answer text
   wrapped as ``UntrustedModelText``. The answer is model output: it is data to show, never an
   instruction, a task, or a finding on its own.
-- ``DerivedEvidencePayload``: **contract only** (INV-5 decision R3). It fixes the shape INV-6 will
-  validate; nothing computes, emits, or stores it, ``EvidenceRecord`` has no ``derived`` kind, and
-  ``verify_payload`` refuses it.
+- ``DerivedEvidencePayload`` (INV-6 decision D4): one fixed operation, the difference of two exact
+  ratios (``rate_difference`` or ``mean_difference``), over the counts of one query evidence of the
+  same task. Only the gateway's owner-only ``derive_evidence`` produces it, after recomputing it
+  from the payload it holds; no model-written number can become one.
 
 The gateway issues payloads alongside their records (INV-5 S2). ``verify_payload`` checks a payload
 against its record before anything uses it; a mismatch excludes the payload. Errors and mismatch
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import json
 import math
+from fractions import Fraction
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -37,10 +39,13 @@ from pydantic import (
     model_validator,
 )
 
-from packages.investigation.contracts import MAX_EVIDENCE_REFS, TaskId
+from packages.investigation.contracts import TaskId
 from packages.investigation.state import (
+    MAX_DERIVED_SOURCES,
     MAX_EVIDENCE_STATUSES,
     MAX_SOURCES,
+    DerivedOperationName,
+    DerivedProvenance,
     DocumentProvenance,
     EvidenceRecord,
     EvidenceStatusName,
@@ -211,14 +216,27 @@ class DocumentEvidencePayload(_Payload):
         return self
 
 
-DerivedOperation = Literal["difference", "ratio", "share", "rate_difference"]
+DerivedOperation = DerivedOperationName
+Finite = Annotated[float, Strict(), Field(allow_inf_nan=False)]
+
+
+class DerivedRatio(_Payload):
+    """One exact ratio: an event count (or value sum) over a population (or row) count."""
+
+    numerator: Finite
+    denominator: Annotated[int, Strict(), Field(ge=1)]
+
+    @property
+    def exact(self) -> Fraction:
+        return Fraction(self.numerator) / self.denominator
 
 
 class DerivedEvidencePayload(_Payload):
-    """**Contract only (R3).** The shape INV-6 will validate for numbers derived from evidence.
+    """``measure - reference`` for one approved test, recomputed by the gateway (D4).
 
-    A closed operation over cited source evidence, with its finite result. INV-5 defines no
-    producer, no state record kind, and no computation; ``verify_payload`` refuses it.
+    ``value`` must equal the exact difference of the two ratios; ``verify_payload`` also requires
+    the record's operation and sources. The counts come from the source query payload, which the
+    gateway checks before issuing; nothing here is taken from a model or the plan.
     """
 
     schema_version: Literal[1] = PAYLOAD_SCHEMA_VERSION
@@ -228,9 +246,11 @@ class DerivedEvidencePayload(_Payload):
     attempt: Attempt
     operation: DerivedOperation
     source_evidence_ids: tuple[GatewayEvidenceId, ...] = Field(
-        min_length=1, max_length=MAX_EVIDENCE_REFS
+        min_length=1, max_length=MAX_DERIVED_SOURCES
     )
-    value: Annotated[float, Strict(), Field(allow_inf_nan=False)]
+    measure: DerivedRatio
+    reference: DerivedRatio
+    value: Finite
 
     @model_validator(mode="after")
     def _sources(self) -> DerivedEvidencePayload:
@@ -238,6 +258,13 @@ class DerivedEvidencePayload(_Payload):
             raise ValueError("source evidence must be unique")
         if self.evidence_id in self.source_evidence_ids:
             raise ValueError("derived evidence cannot cite itself")
+        if self.operation == "rate_difference" and any(
+            ratio.numerator != int(ratio.numerator) or ratio.numerator > ratio.denominator
+            for ratio in (self.measure, self.reference)
+        ):
+            raise ValueError("a rate is a whole event count within its population")
+        if self.value != float(self.measure.exact - self.reference.exact):
+            raise ValueError("the value is the exact difference of the two ratios")
         return self
 
 
@@ -274,8 +301,9 @@ def verify_payload(record: EvidenceRecord, payload: object) -> PayloadMismatch |
 
     Identity (ID, task, attempt, kind) must be equal. Query rows and columns must match the
     recorded counts. Document sources must match the recorded locations exactly, and citation
-    counts and evidence statuses must be equal. Types are exact: subclasses are refused, and a
-    derived payload is always refused because state has no derived record (R3).
+    counts and evidence statuses must be equal. A derived payload must name the record's operation
+    and sources exactly (its value is checked by its own contract). Types are exact: subclasses are
+    refused.
     """
     if type(record) is not EvidenceRecord or not isinstance(payload, _PAYLOAD_TYPES):
         return "kind_mismatch"
@@ -307,6 +335,13 @@ def verify_payload(record: EvidenceRecord, payload: object) -> PayloadMismatch |
             return "citation_mismatch"
         if payload.evidence_statuses != provenance.evidence_statuses:
             return "status_mismatch"
+        return None
+    if type(payload) is DerivedEvidencePayload and type(provenance) is DerivedProvenance:
+        if (
+            payload.operation != provenance.operation
+            or payload.source_evidence_ids != provenance.source_evidence_ids
+        ):
+            return "source_mismatch"
         return None
     return "kind_mismatch"
 

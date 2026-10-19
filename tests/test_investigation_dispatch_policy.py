@@ -568,7 +568,7 @@ def test_s1_policy_modules_import_only_pure_contracts(name: str) -> None:
             modules.add(node.module)
         elif isinstance(node, ast.Name):
             assert node.id not in {"eval", "exec", "open", "__import__", "compile"}
-    allowed = _ALLOWED_IMPORTS | {"json", "math"}
+    allowed = _ALLOWED_IMPORTS | {"json", "math", "fractions"}
     foreign = {
         module
         for module in modules

@@ -123,7 +123,9 @@ def derived_payload(**changes: Any) -> DerivedEvidencePayload:
         "attempt": 1,
         "operation": "rate_difference",
         "source_evidence_ids": [EV],
-        "value": 0.031,
+        "measure": {"numerator": 70.0, "denominator": 500},
+        "reference": {"numerator": 30.0, "denominator": 500},
+        "value": 0.08,
     }
     raw.update(changes)
     return DerivedEvidencePayload.model_validate(raw)
@@ -311,6 +313,12 @@ def test_citations_are_valid_only_when_every_citation_resolves() -> None:
         {"value": float("inf")},
         {"value": "0.1"},
         {"formula": "a - b"},
+        {"value": 0.081},  # not the exact difference
+        {"operation": "ratio"},
+        {"measure": {"numerator": 70.5, "denominator": 500}},  # a rate counts whole events
+        {"measure": {"numerator": 600.0, "denominator": 500}},  # more events than population
+        {"reference": {"numerator": 1.0, "denominator": 0}},
+        {"source_evidence_ids": [EV, EV2, "ev_" + "d" * 32]},  # at most two sources
     ],
 )
 def test_derived_payload_is_a_closed_contract(changes: dict[str, Any]) -> None:
