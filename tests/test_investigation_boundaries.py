@@ -25,6 +25,9 @@ RUNTIME_MODULES = (
     ROOT / "src" / "orchestration" / "tool_gateway.py",
     ROOT / "src" / "orchestration" / "investigation_checkpoint.py",
     ROOT / "src" / "orchestration" / "investigation_graph.py",
+    ROOT / "src" / "orchestration" / "planning_prompt.py",
+    ROOT / "src" / "orchestration" / "investigation_planning.py",
+    ROOT / "src" / "orchestration" / "investigation_proposal.py",
     ROOT / "src" / "llm" / "bounded.py",
 )
 
@@ -64,6 +67,13 @@ SPECIALIST_IMPORTS: dict[str, frozenset[str] | None] = {
     "packages.investigation.budget": frozenset({"BudgetUsage", "BudgetLimits"}),
     "src.orchestration.tool_gateway": _TOOL_REQUESTS,
     "src.orchestration.investigation_graph": frozenset({"InvestigationGraphBuilder"}),
+    # INV-4 S2e: the Supervisor plans only through the two-operation port.
+    "src.orchestration.investigation_planning": frozenset(
+        {"PlannerPort", "PlannerGateway", "PlanningCallResult", "PlanningCallStatus"}
+    ),
+    # INV-4 S3: the two pure planning enums only; authority, admission, and stage reservation in
+    # the same module stay banned (``BANNED_NAMES`` and this allowlist).
+    "packages.investigation.gateway": frozenset({"PlanningStage", "PlanningOutcomeCode"}),
 }
 # Names a specialist module may never import or reference, from any module or attribute.
 BANNED_NAMES = frozenset(
@@ -92,6 +102,23 @@ BANNED_NAMES = frozenset(
         "ProviderAttemptBound",
         "check_authority",
         "authorize_state",
+        # planning authority, admission, pricing, and the planning gateway itself (INV-4 S2e):
+        # a specialist holds ``PlannerPort`` at most, never the gateway, its ledger, or its inputs
+        "InvestigationPlanningGateway",
+        "PlanningAuthority",
+        "PlanningContext",
+        "PlanningCloseReason",
+        "check_planning_authority",
+        "reserve_planning_stage",
+        "admit_planning_adapter",
+        "DeadlineBoundedModelAdapter",
+        "ReviewedPlanningCapability",
+        "ReviewedPlanningEvidence",
+        "ProviderPricingTable",
+        "ProviderCostProfile",
+        "planner_port",
+        # the proposal graph's trusted lifecycle owner (INV-4 S4)
+        "InvestigationProposalRun",
         # state is written through guarded graph steps only
         "StateGraph",
         "InMemorySaver",
@@ -286,6 +313,29 @@ def test_investigation_runtime_cannot_reach_evaluator_only_data(path: Path) -> N
         "__import__('sqlite3')",
         "open('evals/investigation/v1/oracle.json')",
         "from packages.investigation import *",
+        # INV-4 S2e: planning authority, admission, ledger, and gateway stay trusted
+        "from src.orchestration.investigation_planning import InvestigationPlanningGateway",
+        "from src.orchestration.investigation_planning import PlanningCloseReason",
+        "from src.orchestration.investigation_planning import strict_json_object",
+        "import src.orchestration.investigation_planning",
+        "from packages.investigation import PlanningAuthority",
+        "from packages.investigation import ProviderPricingTable",
+        "from packages.investigation.gateway import ReviewedPlanningEvidence",
+        "from src.llm.bounded import DeadlineBoundedModelAdapter",
+        "from tests.investigation_planning_fakes import ScriptedDeadlineAdapter",
+        "gateway.planner_port()",
+        "port._PlannerPort__gateway.close('abandoned')",
+        "port._PlannerPort__gateway._ledger",
+        # INV-4 S3: only the two pure enums may come from the planning contracts module
+        "import packages.investigation.gateway",
+        "from packages.investigation.gateway import PlanningAuthority",
+        "from packages.investigation.gateway import reserve_planning_stage",
+        "from packages.investigation.gateway import ProviderEnvelope",
+        "from packages.investigation.gateway import PLANNING_STAGE_INPUT_TOKENS",
+        "from packages.investigation.gateway import check_planning_authority",
+        # INV-4 S4: the proposal graph owner stays trusted
+        "from src.orchestration.investigation_proposal import InvestigationProposalRun",
+        "import src.orchestration.investigation_proposal",
     ],
 )
 def test_the_checker_detects_each_violation(source: str) -> None:
@@ -330,3 +380,208 @@ def run(port: SpecialistGateway, state: dict, task_id: str) -> RefusalCode | Non
     return helpers.summarise(view)
 """
     assert specialist_violations(source) == []
+
+
+def test_a_legitimate_supervisor_passes_the_checker() -> None:
+    source = """
+from __future__ import annotations
+
+from src.orchestration.investigation_planning import (
+    PlannerPort,
+    PlanningCallResult,
+    PlanningCallStatus,
+)
+
+
+def plan(port: PlannerPort) -> PlanningCallResult:
+    result = port.initial()
+    if result.status is PlanningCallStatus.INVALID:
+        result = port.repair()
+    return result
+"""
+    assert specialist_violations(source) == []
+
+
+# --- INV-4 S2e: production exclusion for planning -------------------------------------------------
+
+PRODUCTION_ROOTS = ("src", "apps", "packages", "config")
+# Trusted planning runtime: it may reach the prompt renderer, the cost binding, the contracts, the
+# bounded-adapter contract, and the meter, and nothing that runs SQL, retrieval, or a real model.
+PLANNING_MODULES = (
+    ROOT / "packages" / "investigation" / "planning.py",
+    ROOT / "packages" / "investigation" / "planning_cost.py",
+    ROOT / "src" / "orchestration" / "planning_prompt.py",
+    ROOT / "src" / "orchestration" / "investigation_planning.py",
+)
+PLANNING_FORBIDDEN_MODULES = (
+    "src.orchestration.guarded_sql",
+    "src.orchestration.document_research",
+    "src.orchestration.policy_grounding",
+    "src.orchestration.tool_gateway",
+    "src.orchestration.langgraph_orchestrator",
+    "src.orchestration.investigation_graph",
+    "src.orchestration.investigation_checkpoint",
+    "src.documents",
+    "src.storage",
+    "src.agents",
+    "src.investigation",
+    "src.llm.gemini_client",
+    "src.llm.providers",
+    "src.llm.fallback",
+    "src.llm.factory",
+    "sqlite3",
+    "socket",
+    "langgraph",
+    "logging",
+    "importlib",
+    "tests",
+    "evals",
+    "scripts",
+    "packages.evaluation",
+)
+# Reviewed evidence and pricing come from a trusted configuration owner that does not exist yet;
+# production code must not fabricate them. ``planning_cost`` derives effective profiles only.
+TRUSTED_RECORDS = frozenset(
+    {"ReviewedPlanningCapability", "ReviewedPlanningEvidence", "ProviderPricingTable"}
+)
+DERIVED_PROFILE_MODULES = frozenset({"packages/investigation/planning_cost.py"})
+
+
+def _is_forbidden(module: str, forbidden: tuple[str, ...]) -> bool:
+    return any(module == name or module.startswith(name + ".") for name in forbidden)
+
+
+def planning_runtime_violations(source: str, filename: str = "<planning>") -> list[str]:
+    """Forbidden imports and dynamic access in a trusted planning module."""
+    tree = ast.parse(source, filename=filename)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [
+                f"import {alias.name}"
+                for alias in node.names
+                if _is_forbidden(alias.name, PLANNING_FORBIDDEN_MODULES)
+            ]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            if _is_forbidden(node.module, PLANNING_FORBIDDEN_MODULES):
+                found.append(f"from {node.module} import ...")
+        elif isinstance(node, ast.Name) and node.id in {
+            "eval",
+            "exec",
+            "__import__",
+            "open",
+            "getattr",
+            "setattr",
+        }:
+            found.append(f"name {node.id}")
+    return found
+
+
+def production_planning_violations(source: str, relative: str = "<production>") -> list[str]:
+    """Test fakes, unreviewed deadline adapters, or fabricated reviewed records in production."""
+    tree = ast.parse(source, filename=relative)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            modules = (
+                [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+            )
+            found += [f"imports {m}" for m in modules if m == "tests" or m.startswith("tests.")]
+        elif isinstance(node, ast.ClassDef):
+            bases = {
+                getattr(base, "id", None) or getattr(base, "attr", None) for base in node.bases
+            }
+            if "DeadlineBoundedModelAdapter" in bases:
+                found.append(f"deadline adapter {node.name}")  # needs reviewed evidence first
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = getattr(func, "id", None) or getattr(func, "attr", None)
+            owner = getattr(getattr(func, "value", None), "id", None)
+            built = name if name in TRUSTED_RECORDS else None
+            if owner in TRUSTED_RECORDS and name in {"model_validate", "model_construct"}:
+                built = owner
+            if name == "ProviderCostProfile" and relative not in DERIVED_PROFILE_MODULES:
+                built = name
+            if built is not None:
+                found.append(f"constructs {built}")
+    return found
+
+
+def _production_modules() -> list[Path]:
+    return sorted(
+        path for top in PRODUCTION_ROOTS for path in (ROOT / top).rglob("*.py") if path.is_file()
+    )
+
+
+@pytest.mark.parametrize(
+    "path", PLANNING_MODULES, ids=lambda p: str(p.relative_to(ROOT)).replace("\\", "/")
+)
+def test_planning_runtime_cannot_reach_sql_retrieval_models_or_test_code(path: Path) -> None:
+    violations = planning_runtime_violations(path.read_text(encoding="utf-8"), str(path))
+    assert not violations, f"{path.relative_to(ROOT)}: " + ", ".join(violations)
+
+
+def test_production_code_has_no_test_fakes_deadline_adapters_or_fabricated_records() -> None:
+    offenders: list[str] = []
+    for path in _production_modules():
+        relative = str(path.relative_to(ROOT)).replace("\\", "/")
+        found = production_planning_violations(path.read_text(encoding="utf-8"), relative)
+        offenders += [f"{relative}: {item}" for item in found]
+    assert offenders == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from src.orchestration.guarded_sql import GuardedSQLService",
+        "from src.orchestration.document_research import DocumentResearchService",
+        "from src.orchestration.tool_gateway import InvestigationToolGateway",
+        "from src.documents.retriever import Retriever",
+        "from src.storage.query_executor import execute_read_query",
+        "from src.agents.sql_agent import answer_with_sql",
+        "from src.llm.gemini_client import GeminiClient",
+        "from src.llm.providers import AnthropicClient",
+        "from src.llm.fallback import FallbackLLMClient",
+        "from src.llm.factory import build_llm_client",
+        "from src.investigation import supervisor",
+        "from langgraph.graph import StateGraph",
+        "import sqlite3",
+        "import logging",
+        "import importlib",
+        "from tests.investigation_planning_fakes import ScriptedDeadlineAdapter",
+        "from evals import oracle",
+        "from packages.evaluation.live_demo import run",
+        "open('evals/investigation/v1/oracle.json')",
+        "getattr(module, 'GuardedSQLService')",
+    ],
+)
+def test_the_planning_checker_detects_each_violation(source: str) -> None:
+    assert planning_runtime_violations(source), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from tests.investigation_planning_fakes import ScriptedDeadlineAdapter",
+        "import tests.investigation_fixtures",
+        "class Gemini(DeadlineBoundedModelAdapter):\n    pass",
+        "class Gemini(bounded.DeadlineBoundedModelAdapter):\n    pass",
+        "EVIDENCE = ReviewedPlanningEvidence(evidence_version='v1', capabilities=())",
+        "CAPABILITY = ReviewedPlanningCapability(bound=b, evidence_version='v1')",
+        "PRICES = ProviderPricingTable(version='v1', currency='USD', profiles=())",
+        "PRICES = ProviderPricingTable.model_validate({})",
+        "EVIDENCE = ReviewedPlanningEvidence.model_construct()",
+        "PROFILE = ProviderCostProfile(provider='gemini', model='m')",
+        "PROFILE = budget.ProviderCostProfile(provider='gemini', model='m')",
+    ],
+)
+def test_the_production_checker_detects_each_violation(source: str) -> None:
+    assert production_planning_violations(source, "src/llm/new_client.py"), source
+
+
+def test_the_production_checker_allows_only_derived_profiles_in_planning_cost() -> None:
+    source = "PROFILE = ProviderCostProfile(provider=member.provider, model=member.model)"
+    assert production_planning_violations(source, "packages/investigation/planning_cost.py") == []
+    assert production_planning_violations(source, "packages/investigation/budget.py")

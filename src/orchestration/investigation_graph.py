@@ -13,6 +13,16 @@ directly. The builder applies the INV-3 boundary by construction:
 
 Edges and conditional edges route between registered steps; they never write state.
 
+Two modes, chosen by the exact trusted gateway type (ADR 0024 D7):
+
+- **execution** (``InvestigationToolGateway``): unchanged; the dispatcher is bound to the
+  execution ledger;
+- **proposal** (``InvestigationPlanningGateway``, INV-4 S4): only ``intake``, ``supervisor``, and
+  ``lifecycle`` steps may be registered, so a proposal graph has no dispatcher, approval,
+  terminal, specialist, or execution-tool writer and no execution ledger. The Supervisor writer is
+  bound to the planning ledger, which its ``proposal_record`` must match, and
+  ``require_guarded_graph`` checks that binding when the graph compiles.
+
 No investigation graph is wired into a route, the API, or the question graph yet. INV-4 (the
 Supervisor) and INV-5 (the specialists and dispatcher) must build theirs here.
 """
@@ -32,16 +42,27 @@ from src.orchestration.investigation_checkpoint import (
     new_investigation_saver,
     require_guarded_graph,
 )
+from src.orchestration.investigation_planning import InvestigationPlanningGateway
 from src.orchestration.tool_gateway import InvestigationToolGateway
+
+# The only writers a proposal graph may register (ADR 0024 D7).
+PROPOSAL_WRITERS: frozenset[Writer] = frozenset({"intake", "supervisor", "lifecycle"})
 
 
 class InvestigationGraphBuilder:
     """Build an investigation graph whose every node is guarded and ledger-bound."""
 
-    def __init__(self, gateway: InvestigationToolGateway) -> None:
-        if type(gateway) is not InvestigationToolGateway:
+    def __init__(self, gateway: InvestigationToolGateway | InvestigationPlanningGateway) -> None:
+        if type(gateway) is InvestigationToolGateway:
+            self.__proposal = False
+            self.__bound_owner: Writer = CHANNEL_OWNERS["budget_usage"]
+        elif type(gateway) is InvestigationPlanningGateway:
+            self.__proposal = True
+            self.__bound_owner = CHANNEL_OWNERS["proposal_record"]
+        else:
             raise TypeError(
-                "An investigation graph is bound to a trusted InvestigationToolGateway."
+                "An investigation graph is bound to a trusted InvestigationToolGateway "
+                "or InvestigationPlanningGateway."
             )
         self.__ledger = gateway.ledger
         self.__graph: StateGraph[Any] = StateGraph(InvestigationState)
@@ -55,7 +76,9 @@ class InvestigationGraphBuilder:
             raise ValueError("Each step needs a new, non-empty name.")
         if not callable(step):
             raise TypeError("A step must be callable.")
-        ledger = self.__ledger if owner == CHANNEL_OWNERS["budget_usage"] else None
+        if self.__proposal and owner not in PROPOSAL_WRITERS:
+            raise ValueError("A proposal graph registers only intake, supervisor, and lifecycle.")
+        ledger = self.__ledger if owner == self.__bound_owner else None
         self.__graph.add_node(name, guarded_node(owner, step, ledger=ledger))
         self.__names.add(name)
 
@@ -78,7 +101,10 @@ class InvestigationGraphBuilder:
         self._require_open()
         self.__compiled = True
         graph = self.__graph.compile(checkpointer=new_investigation_saver())
-        require_guarded_graph(graph, ledger=self.__ledger)
+        if self.__proposal:
+            require_guarded_graph(graph, planning_ledger=self.__ledger)
+        else:
+            require_guarded_graph(graph, ledger=self.__ledger)
         return graph
 
     def _require_open(self) -> None:

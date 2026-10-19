@@ -167,8 +167,7 @@ Details, tests, and refusal codes are in `docs/architecture/investigation-workfl
 - An adapter's exact count, single attempt, and provider-enforced cap are a reviewed code claim;
   the gateway verifies every report afterwards but cannot see an unreported request.
 - SQL fingerprints are keyed per gateway and not comparable across restarts.
-- Not yet built:
-  - the Supervisor (INV-4);
+- Not yet built (the Supervisor and proposal phase were delivered by INV-4; see Amendment 2):
   - the specialists, dispatcher, graph wiring, evidence payload exposure, and document-derived
     policy criteria (INV-5);
   - SQL approval binding (INV-10);
@@ -176,6 +175,108 @@ Details, tests, and refusal codes are in `docs/architecture/investigation-workfl
   - durable checkpoints (#149);
   - parallel dispatch (#150);
   - a real-provider adapter.
+
+## Amendment 2: the proposal phase (INV-4, #137, 2026-10-19)
+
+INV-4 makes decision 3 concrete: a callable, tested, proposal-only subgraph under reviewed scripted
+adapters. It also refines decisions 4, 7, 9, and 11 for planning. It does not change execution
+(Amendment 1), and investigation routing stays off (#142). Details, codes, and tests are in
+`docs/architecture/investigation-workflow.md` and
+`docs/agents/briefs/137-inv4-supervisor-planner.md`.
+
+1. **Proposal-only graph mode (decision 2).** `InvestigationGraphBuilder` takes the exact
+   `InvestigationPlanningGateway` for proposal mode. That mode registers only guarded `intake`,
+   `supervisor`, and `lifecycle` steps, binds the Supervisor writer to the planning gateway's own
+   ledger, compiles with the strict saver, and is checked by
+   `require_guarded_graph(planning_ledger=...)`. It has no dispatcher, approval, or terminal writer,
+   no execution ledger, and no tool gateway. Conversely, an execution graph refuses any
+   ledger-bound Supervisor writer, so it never writes a planning record.
+2. **Trusted lifecycle ownership.** `InvestigationProposalRun` constructs the planning gateway from
+   server-side authority, context, adapter, reviewed evidence, pricing, live check, cancellation,
+   and clock; owns its closure; and runs the graph once. The Supervisor
+   (`src/investigation/supervisor.py`) receives only `PlannerPort` (`initial()` and `repair()`) and
+   never the gateway, ledger, authority, adapter, prompts, or model client. For planning,
+   specialist modules may import only the port, the result types, and two pure planning enums.
+3. **Planning budget (decisions 3 and 7).** One `BudgetLedger(PLANNING_LIMITS)` per session: at most
+   2 model calls, 12,000 input and 2,000 output tokens, 30 seconds, and zero SQL, retrieval, or
+   tool calls. Each stage reserves its full 6,000/1,000 partition before the provider-backed exact
+   count; the ledger and its original deadline are never reset or extended. The sequence is one
+   initial call and, only after a deterministically invalid candidate, at most one repair; every
+   other call is a terminal `planning_sequence_violation`.
+4. **Planning authority and provider admission.** `PlanningAuthority` carries scope, capability,
+   consent, recipients, epoch, and one provider envelope, and has no approval, budget, or price.
+   Before each call the gateway re-validates its trusted inputs, checks cancellation and time, then
+   scope, `analysis:run`, consent for every recipient, and the live authority last. A model is
+   called only through a `DeadlineBoundedModelAdapter` whose single envelope member is covered,
+   exactly, by version-matched `ReviewedPlanningEvidence` (`admit_planning_adapter`). No production
+   client qualifies, so production planning fails closed with `metering_unbounded`.
+5. **Deadline and cancellation (refines decision 4 for planning).** A planning adapter receives the
+   ledger's remaining original deadline and must confirm provider-side termination for
+   cancellation and deadline outcomes; a local stop without confirmation is `metering_violation`.
+   A completed answer after the deadline, a late answer to a cancelled call, or an answer that
+   arrives after the gateway was sealed is discarded. Decision 4's "finishes and is discarded"
+   remains the rule for execution.
+6. **Settlement and metering (Amendment 1, item 5).** The same conservative rules apply, with one
+   addition: the reported input must equal the exact pre-call count. Hidden retries, fallbacks,
+   another identity, incomplete or excessive reports, meter faults, and provider exceptions are
+   charged conservatively and end planning.
+7. **Safe results.** `PlanningCallResult` carries only a status (`proposed`, `invalid`,
+   `plan_invalid`, `refused`), a fixed code, fixed validation codes with syntactic task IDs, ledger
+   usage, and the cost estimate. Planning-only codes are `plan_invalid`, `provider_failure`,
+   `planning_sequence_violation`, `planning_abandoned`, and `planning_interrupted`; Supervisor-side
+   failures are `supervisor_port_error` and `supervisor_result_invalid`. Raw candidates, prompts,
+   provider messages, and exception text never leave the gateway. The repair prompt contains only
+   the original metadata (equal `metadata_digest`) and the fixed codes and task IDs.
+8. **Model context.** Prompts are rendered deterministically from `PlanningMetadata` only: the
+   question, schema field names, logical types, and descriptions, and document display titles. No
+   rows, values, passages, SQL, scope identifiers, authority, budgets, prices, or evaluator data.
+9. **Proposal record and approval (decisions 3 and 10).** A write-once, Supervisor-owned
+   `proposal_record` holds the outcome, a fixed code, the lifecycle target, the plan digest for a
+   proposal, the closed planning ledger's `BudgetUsage`, and the `CostEstimate`. It is written with
+   the plan in one guarded update, only while `planning`, and must equal the bound planning ledger.
+   State invariants tie a proposed record to the stored plan's digest and keep a failed planning
+   step at its own target. A proposal reaches only `awaiting_plan_approval` and keeps the
+   `plan: required` approval requirement; `queued` and `running` still require a plan approval,
+   which the proposal graph cannot write. Withdrawal of a waiting proposal is a later lifecycle
+   transition, not a planning operation.
+10. **Ledger separation.** The planning ledger is never the execution ledger: a budget write bound
+    to a planning ledger is refused, and the planning ledger's identity is fixed when the graph
+    compiles. State alone cannot tell two equivalent closed ledgers apart (as in Amendment 1).
+11. **Checkpoints (decision 9).** The strict saver and full revalidation are unchanged. The record
+    is optional, so `STATE_VERSION` stays 1: pre-INV-4 threads restore unchanged, and an older
+    reader refuses a proposal state (`unknown_channel`) rather than misreading it. Checkpoints stay
+    process-local; durable checkpoints and their migration rules are reassessed in #149.
+12. **Cost classification (decision 11).** `estimate_planning_cost` gives `enforced_upper_bound`
+    only when every envelope member has trusted pricing and is covered exactly by reviewed
+    evidence; pricing flags and envelope declarations alone give at most `indicative`, and unknown
+    pricing is `unavailable`. The figure is the fixed planning limits at the highest eligible
+    price, and it never enters the plan or its digest.
+13. **Cleanup and terminal outcomes.** Every terminal transition goes through one seal: a refusal,
+    `plan_invalid`, or a published proposal is never rewritten, and every later call or close is
+    `gateway_closed` (no lifecycle transition). The owner closes the gateway when planning cannot
+    continue: `abandoned` for a Supervisor failure or an abandoned repair, `shutdown` on an
+    exception, and cancellation, revocation, deadline expiry, or shutdown on request. Closure makes
+    no model call and never resets the ledger; a call in flight is sealed and settles its own
+    reservation. There is no background worker.
+14. **No execution of unapproved plans.** Nothing in INV-4 approves, queues, schedules, or executes
+    a plan, constructs an `InvestigationToolGateway`, or reaches SQL, retrieval, or document
+    research. Structural tests enforce this for the planning modules, the Supervisor, and
+    production code.
+
+**Known limitations and deferred work.**
+- A deadline adapter's exact count, single attempt, cap, and provider-side termination remain a
+  reviewed code claim; runtime checks verify every report but cannot see an unreported request.
+- `PlannerPort`, like `SpecialistGateway`, cannot hide private names from Python; the boundary
+  tests enforce that structurally.
+- An over-input count closes the ledger `exhausted` without naming `exhausted_resource`, because
+  the 6,000-token limit is a stage partition, not a ledger limit; the code carries the cause.
+- Missing-information text is in-process only and untrusted; its persistence and display belong to
+  the API milestone.
+- Not delivered by INV-4: a production deadline adapter and production-owned evidence and pricing
+  (a separately reviewed adapter milestone); routing from the question graph (#142); specialist
+  execution, dispatcher, and terminal records (INV-5, #138); SQL approval binding (INV-10, #143);
+  the investigation API and approval UI (later milestones under #131); durable checkpoints
+  (#149); and any production cost guarantee without matching reviewed evidence.
 
 ## Alternatives rejected
 

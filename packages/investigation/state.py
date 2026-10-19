@@ -54,7 +54,12 @@ from pydantic import (
     model_validator,
 )
 
-from packages.investigation.budget import BudgetLedger, BudgetUsage
+from packages.investigation.budget import (
+    PLANNING_LIMITS,
+    BudgetLedger,
+    BudgetUsage,
+    CostEstimate,
+)
 from packages.investigation.contracts import (
     OUTCOME_CATEGORIES,
     AgentRole,
@@ -119,6 +124,8 @@ StateErrorCode = Literal[
     "reserved_channel",
     "settlement_unverified",
     "ledger_open",
+    # INV-4 S4: the proposal record disagrees with the plan or the lifecycle status.
+    "proposal_mismatch",
     # Raised when reading a checkpoint (``src/orchestration/investigation_checkpoint.py``).
     "checkpoint_unreadable",
     "checkpointer_not_strict",
@@ -337,6 +344,72 @@ class TerminalRecord(_State):
         return self
 
 
+ProposalOutcome = Literal["proposed", "plan_invalid", "refused", "supervisor_failed"]
+ProposalCode = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z_]{0,63}$")]
+# Where a finished planning step may send the investigation (see ``lifecycle.TRANSITIONS``).
+_PROPOSAL_TARGETS = frozenset(
+    {
+        InvestigationStatus.AWAITING_PLAN_APPROVAL,
+        InvestigationStatus.PLAN_INVALID,
+        InvestigationStatus.BUDGET_EXHAUSTED,
+        InvestigationStatus.CANCELLED,
+        InvestigationStatus.FAILED,
+        InvestigationStatus.INTERRUPTED,
+    }
+)
+_REFUSAL_TARGETS = _PROPOSAL_TARGETS - {
+    InvestigationStatus.AWAITING_PLAN_APPROVAL,
+    InvestigationStatus.PLAN_INVALID,
+}
+_SUPERVISOR_FAILURES = frozenset({"supervisor_port_error", "supervisor_result_invalid"})
+
+
+class ProposalRecord(_State):
+    """What a finished planning step leaves in state (INV-4 S4, ADR 0024 D7). Write-once.
+
+    Only the outcome, a fixed code, the lifecycle target, the plan digest when a plan was proposed,
+    the planning ledger's own ``BudgetUsage``, and the trusted ``CostEstimate``. Never a prompt,
+    model output, missing-information text, validation text, schema descriptions, or document
+    titles. The Supervisor node writes it with the plan in one validated update, bound to the
+    planning gateway's ledger (``owned_update``); the planning ledger is never the execution
+    ledger, and a proposal is never an approval.
+    """
+
+    outcome: ProposalOutcome
+    code: ProposalCode | None = None
+    lifecycle_target: InvestigationStatus
+    plan_digest: Digest | None = None
+    planning_usage: BudgetUsage
+    cost_estimate: CostEstimate | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> ProposalRecord:
+        target = self.lifecycle_target
+        if target not in _PROPOSAL_TARGETS:
+            raise ValueError("a planning step cannot reach that status")
+        proposed = self.outcome == "proposed"
+        if proposed != (self.plan_digest is not None) or proposed != (
+            target is InvestigationStatus.AWAITING_PLAN_APPROVAL
+        ):
+            raise ValueError("only a proposal has a plan digest and awaits approval")
+        if proposed and self.code is not None:
+            raise ValueError("a proposal has no refusal code")
+        if self.outcome == "plan_invalid" and (
+            self.code != "plan_invalid" or target is not InvestigationStatus.PLAN_INVALID
+        ):
+            raise ValueError("plan_invalid has one code and one target")
+        if self.outcome == "refused" and (self.code is None or target not in _REFUSAL_TARGETS):
+            raise ValueError("a refusal has a code and a refusal target")
+        if self.outcome == "supervisor_failed" and (
+            self.code not in _SUPERVISOR_FAILURES or target is not InvestigationStatus.FAILED
+        ):
+            raise ValueError("a supervisor failure has a fixed code and fails")
+        usage = self.planning_usage
+        if usage.closed_reason is None or usage.outstanding_reservations:
+            raise ValueError("a planning record needs the closed, settled planning ledger")
+        return self
+
+
 def plan_digest(plan: InvestigationPlan) -> str:
     """SHA-256 of the plan's canonical JSON; what an approval binds to."""
     canonical = json.dumps(
@@ -542,6 +615,7 @@ reduce_scope = _write_once(InvestigationScope)
 reduce_plan = _write_once(InvestigationPlan)
 reduce_plan_approval = _write_once(PlanApprovalRecord)
 reduce_terminal = _write_once(TerminalRecord)
+reduce_proposal_record = _write_once(ProposalRecord)
 
 
 Writer = Literal["intake", "lifecycle", "supervisor", "approval", "dispatcher", "terminal"]
@@ -566,6 +640,7 @@ class InvestigationState(TypedDict, total=False):
     decisions: Annotated[list[dict[str, Any]], reduce_decisions]
     budget_usage: Annotated[dict[str, Any], reduce_budget_usage]
     terminal: Annotated[dict[str, Any], reduce_terminal]
+    proposal_record: Annotated[dict[str, Any], reduce_proposal_record]
     step_writer: Writer
 
 
@@ -581,6 +656,7 @@ REDUCERS: dict[str, Reducer] = {
     "decisions": reduce_decisions,
     "budget_usage": reduce_budget_usage,
     "terminal": reduce_terminal,
+    "proposal_record": reduce_proposal_record,
 }
 
 _UNSET: dict[str, Any] = {
@@ -604,6 +680,7 @@ CHANNEL_OWNERS: dict[str, Writer] = {
     "decisions": "dispatcher",
     "budget_usage": "dispatcher",
     "terminal": "terminal",
+    "proposal_record": "supervisor",
 }
 
 
@@ -644,6 +721,7 @@ class InvestigationStateView(_State):
     decisions: tuple[GatewayDecision, ...] = ()
     budget_usage: BudgetUsage | None = None
     terminal: TerminalRecord | None = None
+    proposal_record: ProposalRecord | None = None
     step_writer: Writer | None = None
 
     def admitted_task(self, task_id: str) -> PlanTask | None:
@@ -726,6 +804,29 @@ def _invariant_violation(view: InvestigationStateView) -> StateErrorCode | None:
     # becomes terminal first; once the record exists it must name that same terminal status.
     if view.terminal is not None and view.terminal.status != view.status:
         return "terminal_mismatch"
+    return _proposal_violation(view)
+
+
+def _proposal_violation(view: InvestigationStateView) -> StateErrorCode | None:
+    """A proposal record must agree with the plan and with the lifecycle status.
+
+    A ``proposed`` record names exactly the stored plan's digest; any other record has no plan. A
+    proposal never reaches ``plan_invalid`` or ``budget_exhausted``, and a planning failure stays
+    in ``planning`` until the lifecycle step moves it to the record's own target.
+    """
+    record = view.proposal_record
+    if record is None:
+        return None
+    if record.outcome == "proposed":
+        if view.plan is None or plan_digest(view.plan) != record.plan_digest:
+            return "proposal_mismatch"
+        if view.status in {InvestigationStatus.PLAN_INVALID, InvestigationStatus.BUDGET_EXHAUSTED}:
+            return "proposal_mismatch"
+        return None
+    if view.plan is not None or view.plan_approval is not None:
+        return "proposal_mismatch"
+    if view.status not in {InvestigationStatus.PLANNING, record.lifecycle_target}:
+        return "proposal_mismatch"
     return None
 
 
@@ -738,7 +839,7 @@ def _in_scope(evidence: EvidenceRecord, scope: InvestigationScope) -> bool:
 
 # Budget counters that record spending. ``elapsed_seconds`` keeps advancing in every status.
 _SPENDING = tuple(name for name in _MONOTONIC_USAGE if name != "elapsed_seconds")
-_FROZEN_AFTER_TERMINAL = ("plan", "admitted_follow_ups", "plan_approval")
+_FROZEN_AFTER_TERMINAL = ("plan", "admitted_follow_ups", "plan_approval", "proposal_record")
 
 
 def _activity_violation(
@@ -763,6 +864,8 @@ def _activity_violation(
     After a terminal status the plan, admitted follow-ups, and plan approval are frozen too. The
     code is ``investigation_terminal`` after a terminal status and ``not_running`` otherwise.
     """
+    if "proposal_record" in update and current.get("status") != InvestigationStatus.PLANNING:
+        return "not_running"  # a planning record is written while planning, never later
     if view.status is InvestigationStatus.RUNNING:
         return None
     terminal = view.status in TERMINAL_STATUSES
@@ -826,8 +929,19 @@ def _settlement_violation(
     name; state cannot tell two ledgers apart. ``restore_state`` has no ledger and checks only the
     shape and monotonic rules.
     """
+    if "proposal_record" in update and view.proposal_record is not None:
+        # Bound to the planning gateway's ledger, closed and settled, exactly as recorded.
+        if (
+            ledger is None
+            or type(ledger) is not BudgetLedger
+            or ledger.limits != PLANNING_LIMITS
+            or view.proposal_record.planning_usage != ledger.usage()
+        ):
+            return "settlement_unverified"
     if "budget_usage" not in update or view.budget_usage is None:
         return None
+    if type(ledger) is BudgetLedger and ledger.limits == PLANNING_LIMITS:
+        return "settlement_unverified"  # planning usage never becomes execution budget
     prior_raw = current.get("budget_usage")
     prior = (
         BudgetUsage()

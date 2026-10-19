@@ -61,6 +61,7 @@ Approved plan → background job → EXECUTION SUBGRAPH — execution budget
 | Hypotheses and verdicts | Business Investigation | Verdicts must cite existing evidence |
 | Critiques | Critic | Append-only |
 | Budget usage | Dispatcher, applying gateway ledger snapshots | Cumulative; never reset |
+| Proposal record (INV-4) | Supervisor, bound to the planning ledger | Written once while `planning`; equals the closed planning ledger; matches the plan digest |
 | Approvals | API resume path | Typed decisions only |
 | Report and terminal status | Composer and terminal nodes | Written once |
 
@@ -111,6 +112,12 @@ approval. Plan approval expires after 24 hours, or when the workspace expires if
   monotonic clock; and `estimate_cost`, which returns a `CostEstimate` labelled
   `enforced_upper_bound`, `indicative`, or `unavailable`.
 - `lifecycle.py`: statuses, legal transitions, and the approval deadline.
+- `planning.py` (INV-4 S1): a trusted, scope-bound planning context exposes only the question,
+  schema names/types/descriptions, and document display titles to a future planning adapter. Schema
+  descriptions, titles, and the question remain bounded untrusted data, never instructions or
+  authority. Its strict draft validator reuses `validate_plan`; its proposal wrapper preserves the
+  embedded plan and digest, keeps missing-information text informational, and distinguishes plan
+  approval from SQL approval deferred to statement preparation.
 
 The package imports no LangGraph, `src`, `apps`, or web framework
 (`tests/test_package_boundaries.py`).
@@ -210,12 +217,71 @@ These terms are kept apart, and each claims only what its evidence supports:
 
 `held` is never assigned because an adapter was admitted, or because a call was released.
 `CostEstimate.bound == "enforced_upper_bound"` is a separate, earlier estimate about provider
-profiles. It is not evidence about any settlement.
+profiles. It is not evidence about any settlement. For planning, it also requires trusted
+`ReviewedPlanningEvidence` covering every envelope member exactly; pricing flags and envelope
+declarations alone give at most `indicative`.
 
 **Current production providers remain unsupported for model-executing investigation tools.** No
 production client is a `BoundedModelAdapter`, so document research and any other model-executing
 investigation tool is refused with `metering_unbounded` before any resource is resolved or budget
 reserved.
+
+**Planning (INV-4 S2c/S2d).** `InvestigationPlanningGateway`
+(`src/orchestration/investigation_planning.py`) makes one initial planning call and, only after an
+invalid initial candidate, at most one repair. Before each call it checks cancellation, the
+ledger's remaining time, and `check_planning_authority`, then admits only a
+`DeadlineBoundedModelAdapter` whose single envelope member `ReviewedPlanningEvidence.covering`
+matches exactly (`admit_planning_adapter`). Each call reserves its full 6,000/1,000 stage on the
+same `BudgetLedger(PLANNING_LIMITS)` before exact counting, and runs with what remains of the
+original 30-second deadline. The repair must use exactly the trusted inputs the initial call was
+bound to, and `render_repair_prompt` over the same metadata (equal `metadata_digest`) and the
+initial attempt's fixed validation codes and task IDs; the raw initial candidate is never kept.
+Settlement follows the tool gateway's conservative rules, and additionally requires the reported
+input to equal the exact count. Two invalid candidates end in `plan_invalid`; every refusal and
+every illegal sequence (`planning_sequence_violation`) is terminal, so no third call is possible.
+No production client or reviewed evidence exists, so production planning is refused with
+`metering_unbounded` before the prompt is rendered.
+A count above a stage's 6,000-token input partition closes the ledger `exhausted` without naming
+`exhausted_resource`: no tokens were charged, and the 6,000 limit is the stage's partition, not the
+ledger's limit, so the refusal code `budget_exhausted` carries the cause (kept as is in S2e).
+
+The Supervisor holds only `PlannerPort` (`initial()` and `repair()`). The trusted lifecycle owner
+that built the gateway (in S3/S4, the proposal-graph node that owns the planning step) is the only
+caller of `close(PlanningCloseReason)`, for an abandoned repair, cancellation, revoked authority, an
+expired planning deadline, or shutdown. Closure is idempotent and permanent, makes no model call,
+never resets the ledger or deadline, and seals an in-flight call so its answer is discarded and
+settled by that call. `planning_lifecycle_target` maps a result to the status the owner may set:
+a proposal reaches only `awaiting_plan_approval`, never `queued` or `running`.
+Once a proposal is published the gateway is terminal: later calls and closes return
+`gateway_closed` (no new status) and cannot cancel or fail it. Withdrawing a proposal that awaits
+approval belongs to the investigation lifecycle owner, not to the planning gateway.
+
+**Supervisor (INV-4 S3).** `src/investigation/supervisor.py:plan_investigation(port)` calls
+`initial()` once and, only after an `invalid` initial result, `repair()` once, returning the
+gateway's result unchanged. It checks every result's type, shape, and stage-legal status before it
+can cause another call; a malformed result or a raising port ends with a fixed
+`SupervisorFailureCode` (`supervisor_result_invalid`, `supervisor_port_error`) and no further call,
+which the S4 lifecycle owner records as `failed` after closing the gateway. It imports only the
+port, the result types, and the pure planning enums.
+
+**Proposal graph (INV-4 S4).** `InvestigationProposalRun`
+(`src/orchestration/investigation_proposal.py`) is the trusted lifecycle owner of one planning step.
+It builds the planning gateway from server-side inputs and compiles a proposal-mode graph with
+`InvestigationGraphBuilder`, which in that mode registers only `intake`, `supervisor`, and
+`lifecycle` steps, binds the Supervisor writer to the planning ledger, and refuses any dispatcher
+(no execution ledger, no tool gateway); an execution graph, conversely, refuses any ledger-bound
+Supervisor writer, so it can never write a planning record. The steps are intake (version and
+scope), lifecycle (`planning`), Supervisor (`plan_investigation` with `planner_port()` only, then
+the plan and a `proposal_record` in one guarded update), and lifecycle (the record's target).
+`proposal_record` is a write-once, Supervisor-owned channel: outcome, a fixed code, the lifecycle
+target, the plan digest for a proposal, the closed planning ledger's `BudgetUsage` (which must equal
+the bound ledger), and the `CostEstimate`; never prompts, candidates, missing-information text, or
+errors. State invariants tie a proposed record to the stored plan's digest, keep a failed planning
+step at its own target, and allow the record only while `planning`. The owner closes the gateway
+(`abandoned` on a Supervisor failure, `shutdown` on an exception) before recording. A proposal
+reaches `awaiting_plan_approval` only; queuing and running still require a plan approval the
+proposal graph cannot write. `STATE_VERSION` stays 1: the channel is optional, existing states
+restore unchanged, and checkpoints are process-local.
 
 ### Supported model clients
 
@@ -380,10 +446,11 @@ convention:
   another ledger. `load_investigation_state` repeats the check before reading a thread.
 - **Specialist modules.** INV-4 and INV-5 modules go in `src/investigation/`.
   `tests/test_investigation_boundaries.py` allows them only the contracts, the typed requests, the
-  port, and the builder. It forbids services, executors, retrievers, model clients, storage,
+  port, and the builder, and for planning only `PlannerPort`, the planning result types, and the
+  `PlanningStage` and `PlanningOutcomeCode` enums. It forbids services, executors, retrievers, model clients, storage,
   `BudgetLedger`, authority types, LangGraph, evaluation code, private attributes, and dynamic
   access, and it tests the checker on synthetic violations. Only `investigation_graph.py` may
   construct `StateGraph(InvestigationState)`.
 
-Actual Supervisor, specialist, and dispatcher wiring is deferred to INV-4 and INV-5, which must use
-these interfaces. Behavioural attacks on each boundary are in `tests/test_investigation_bypass.py`.
+The Supervisor and the proposal-only graph are delivered by INV-4 (ADR 0024 Amendment 2);
+specialist and dispatcher wiring is deferred to INV-5, which must use these interfaces. Behavioural attacks on each boundary are in `tests/test_investigation_bypass.py`.

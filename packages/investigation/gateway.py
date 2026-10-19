@@ -22,9 +22,10 @@ The checks here run before any tool, budget reservation, or resource resolution.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import (
     AwareDatetime,
@@ -36,7 +37,13 @@ from pydantic import (
     model_validator,
 )
 
-from packages.investigation.budget import BudgetRequest
+from packages.investigation.budget import (
+    PLANNING_LIMITS,
+    BudgetLedger,
+    BudgetRequest,
+    InvalidChargeError,
+    Reservation,
+)
 from packages.investigation.lifecycle import InvestigationStatus, approval_expired
 from packages.investigation.refusals import RefusalCode, RefusalSeverity, severity_of
 from packages.investigation.state import (
@@ -54,6 +61,8 @@ ANALYSIS_RUN_CAPABILITY = "analysis:run"
 
 MAX_PROVIDER_MEMBERS = 8
 MAX_ATTEMPTS_PER_MEMBER = 10
+PLANNING_STAGE_INPUT_TOKENS = 6_000
+PLANNING_STAGE_OUTPUT_TOKENS = 1_000
 
 Token = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 StrictPositive = Annotated[int, Strict(), Field(ge=1)]
@@ -167,6 +176,53 @@ class ProviderEnvelope(_Authority):
         )
 
 
+class PlanningStage(StrEnum):
+    """The only two planning reservations; sequencing is enforced by the later gateway."""
+
+    INITIAL = "initial"
+    REPAIR = "repair"
+
+
+class PlanningOutcomeCode(StrEnum):
+    """Planning-only terminal outcomes that do not widen execution refusal semantics."""
+
+    PLAN_INVALID = "plan_invalid"
+    PROVIDER_FAILURE = "provider_failure"
+    SEQUENCE_VIOLATION = "planning_sequence_violation"
+    # Explicit closure by the trusted lifecycle owner (S2e): a planning session it abandoned, or
+    # one it interrupted at shutdown. Neither runs or charges anything.
+    ABANDONED = "planning_abandoned"
+    INTERRUPTED = "planning_interrupted"
+
+
+@dataclass(frozen=True)
+class PlanningStageReservation:
+    """A stage label bound to a reservation issued by the shared planning ledger."""
+
+    stage: PlanningStage
+    reservation: Reservation
+
+
+def reserve_planning_stage(ledger: BudgetLedger, stage: PlanningStage) -> PlanningStageReservation:
+    """Reserve one fixed 6k/1k stage against the caller's cumulative planning ledger.
+
+    The function accepts no caller-supplied amounts. It deliberately does not implement the
+    initial/repair state machine; the S2 gateway will own that sequencing while retaining this
+    single ledger for both stages.
+    """
+    if not isinstance(ledger, BudgetLedger) or ledger.limits != PLANNING_LIMITS:
+        raise InvalidChargeError("Planning stages require the fixed planning ledger.")
+    if not isinstance(stage, PlanningStage):
+        raise InvalidChargeError("Unknown planning stage.")
+    reservation = ledger.authorize(
+        BudgetRequest.model_call(
+            input_tokens=PLANNING_STAGE_INPUT_TOKENS,
+            output_tokens=PLANNING_STAGE_OUTPUT_TOKENS,
+        )
+    )
+    return PlanningStageReservation(stage=stage, reservation=reservation)
+
+
 class AuthorityStatus(StrEnum):
     VALID = "valid"
     REVOKED = "revoked"
@@ -203,6 +259,85 @@ class InvestigationAuthority(_Authority):
     def consent_recipients(self) -> frozenset[str]:
         """Who must have consent before data leaves: adapter-declared and envelope-derived."""
         return frozenset(self.required_recipients) | self.provider_envelope.data_recipients
+
+
+class PlanningAuthority(_Authority):
+    """Trusted pre-approval authority for proposal generation only.
+
+    It intentionally has no plan approval, SQL approval, budget, price, prompt, or execution
+    permission. The trusted intake adapter binds it to the separately constructed planning
+    context; models and agents never construct it.
+    """
+
+    scope: InvestigationScope
+    capabilities: frozenset[Token]
+    consent: ConsentSnapshot
+    required_recipients: tuple[Token, ...] = Field(default=(), max_length=16)
+    epoch: Annotated[int, Strict(), Field(ge=0)]
+    provider_envelope: ProviderEnvelope
+
+    @model_validator(mode="after")
+    def _consent_covers_the_envelope(self) -> PlanningAuthority:
+        if not self.provider_envelope.data_recipients <= set(self.required_recipients):
+            raise ValueError("required_recipients must name every provider data recipient")
+        return self
+
+    @property
+    def consent_recipients(self) -> frozenset[str]:
+        return frozenset(self.required_recipients) | self.provider_envelope.data_recipients
+
+
+class ReviewedPlanningCapability(_Authority):
+    """Separately reviewed provider evidence; never an adapter self-declaration.
+
+    Literal true fields make absence explicit. They record the result of provider-specific review,
+    but do not prove it at runtime; the later gateway must still verify every observable report.
+    """
+
+    bound: ProviderAttemptBound
+    evidence_version: Token
+    provider_deadline_enforced: Literal[True]
+    termination_confirmed: Literal[True]
+
+    @model_validator(mode="after")
+    def _planning_bound(self) -> ReviewedPlanningCapability:
+        if (
+            self.bound.max_attempts != 1
+            or self.bound.input_bounded is not True
+            or self.bound.max_output_tokens != PLANNING_STAGE_OUTPUT_TOKENS
+        ):
+            raise ValueError("reviewed planning capability must match the fixed stage bound")
+        return self
+
+
+class ReviewedPlanningEvidence(_Authority):
+    """The trusted, versioned set of reviewed planning capabilities; the one bounded-path record.
+
+    The configuration adapter that holds the current review constructs it; models, agents,
+    pricing tables and adapters never do. Every capability must carry the set's
+    ``evidence_version``, so a stale or mixed review is rejected rather than partly trusted, and
+    each provider/model is reviewed at most once. ``covering`` binds by exact equality with the
+    envelope member, the same identity ``admit_planning_adapter`` requires, so a cost estimate
+    and a later admission cannot disagree about which path is bounded.
+    """
+
+    evidence_version: Token
+    capabilities: tuple[ReviewedPlanningCapability, ...] = Field(
+        min_length=1, max_length=MAX_PROVIDER_MEMBERS
+    )
+
+    @model_validator(mode="after")
+    def _current_unique_reviews(self) -> ReviewedPlanningEvidence:
+        if any(item.evidence_version != self.evidence_version for item in self.capabilities):
+            raise ValueError("every reviewed capability must carry the current evidence version")
+        identities = [(item.bound.provider, item.bound.model) for item in self.capabilities]
+        if len(identities) != len(set(identities)):
+            raise ValueError("provider/model capability identities must be unique")
+        return self
+
+    def covering(self, member: ProviderAttemptBound) -> ReviewedPlanningCapability | None:
+        """The review whose bound is exactly ``member``; aliases and near matches never count."""
+        return next((item for item in self.capabilities if item.bound == member), None)
 
 
 class AuthorityCheck(Protocol):
@@ -258,6 +393,40 @@ def check_authority(
     try:
         status = live.current(authority.scope, authority.epoch)
     except Exception:  # unavailable is not "still valid": fail closed
+        return RefusalCode.AUTHORITY_UNAVAILABLE
+    if status is AuthorityStatus.REVOKED:
+        return RefusalCode.AUTHORITY_REVOKED
+    if status is not AuthorityStatus.VALID:
+        return RefusalCode.AUTHORITY_UNAVAILABLE
+    return None
+
+
+def check_planning_authority(
+    authority: PlanningAuthority,
+    scope: InvestigationScope,
+    *,
+    live: AuthorityCheck,
+) -> RefusalCode | None:
+    """Bind scope, then check capability, consent, and live authority for planning.
+
+    There is no approval-expiry check because proposal generation precedes plan approval. Every
+    input comes from trusted server-side construction; malformed bypassed values fail closed.
+    """
+    if not isinstance(authority, PlanningAuthority) or not isinstance(scope, InvestigationScope):
+        return RefusalCode.AUTHORITY_UNAVAILABLE
+    if scope != authority.scope:
+        return RefusalCode.SCOPE_MISMATCH
+    try:
+        if ANALYSIS_RUN_CAPABILITY not in authority.capabilities:
+            return RefusalCode.CAPABILITY_MISSING
+        recipients = authority.consent_recipients
+        if not authority.consent.satisfies(recipients):
+            return RefusalCode.CONSENT_MISSING
+    except Exception:
+        return RefusalCode.AUTHORITY_UNAVAILABLE
+    try:
+        status = live.current(authority.scope, authority.epoch)
+    except Exception:
         return RefusalCode.AUTHORITY_UNAVAILABLE
     if status is AuthorityStatus.REVOKED:
         return RefusalCode.AUTHORITY_REVOKED
