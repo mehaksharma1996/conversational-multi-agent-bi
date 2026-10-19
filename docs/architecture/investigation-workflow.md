@@ -11,7 +11,9 @@ updates (`packages/investigation/state.py`), the gateway refusal and authority v
 (`refusals.py`, `gateway.py`), and strict process-local checkpoints
 (`src/orchestration/investigation_checkpoint.py`). S5 adds the tool gateway's guarded attempts and
 document research (`src/orchestration/tool_gateway.py`). SQL handles (S6) and bypass enforcement
-(S7) are not built yet, and nothing below runs in a route or graph yet.
+(S7) are not built yet, and nothing below runs in a route or graph yet. INV-4 (#137) adds the
+proposal phase and INV-5 (#138) sequential execution of an approved plan (see "Execution phase
+(INV-5)"); routing stays off (#142).
 
 These services are not access controls. The API authorizes the caller, enforces consent, and
 resolves the tenant's table and documents before building them. For investigations, the INV-3 tool
@@ -307,8 +309,8 @@ call also ends refused. Investigation-severity refusals close the gateway and it
 lifecycle target. Results carry JSON updates for the ledger-bound dispatcher: decisions, task
 records, evidence metadata (collection, source number, page, chunk index, score, citation counts,
 and evidence statuses), and the ledger snapshot. Passages, filenames, prompts, model output, and
-provider error messages stay out of results and state. The research payload stays in process
-(`evidence_payload`) until INV-5.
+provider error messages stay out of results and state. The research payload stays in process; INV-5
+exposes it to the trusted owner only as a typed payload (`evidence_payloads`).
 
 Limitations: an adapter's exact count, single attempt, and provider-enforced cap are a reviewed,
 code-level claim that subclassing `BoundedModelAdapter` makes. The gateway verifies identity
@@ -414,8 +416,9 @@ query (`EXPLAIN`, never executed) against an empty in-memory copy of the table's
 
 Policy: with no trusted `PolicyCriteriaSource` criteria, SQL may run only for a task that cites no
 evidence (`not_applicable`). A task that cites evidence without trusted criteria cannot run SQL:
-the task fails with `policy_refused`, because INV-5 has not yet provided document-derived
-criteria. With criteria, only `structurally_verified` SQL gets a handle.
+the task fails with `policy_refused`. Document-derived criteria are deferred to the first milestone
+in which tasks cite evidence (INV-6 or INV-7, INV-5 decision R4); INV-5 plans cite no evidence. With
+criteria, only `structurally_verified` SQL gets a handle.
 
 Approval: no INV-10 approval binding exists yet, so any SQL that needs approval is refused before a
 model call, and a handle bound to an approval requirement never executes.
@@ -444,7 +447,10 @@ convention:
   `guarded_node` records the nodes it builds in a private registry. A raw function, a lambda, or a
   function with copied attributes is refused (`graph_not_guarded`), as is a dispatcher bound to
   another ledger. `load_investigation_state` repeats the check before reading a thread.
-- **Specialist modules.** INV-4 and INV-5 modules go in `src/investigation/`.
+- **Specialist modules.** The Supervisor and the INV-5 specialists go in `src/investigation/`. The
+  INV-5 dispatcher node and run owner are trusted and live in
+  `src/orchestration/investigation_execution.py`, and the pure dispatch policy in
+  `packages/investigation/dispatch.py` (INV-5 decision R7).
   `tests/test_investigation_boundaries.py` allows them only the contracts, the typed requests, the
   port, and the builder, and for planning only `PlannerPort`, the planning result types, and the
   `PlanningStage` and `PlanningOutcomeCode` enums. It forbids services, executors, retrievers, model clients, storage,
@@ -452,5 +458,72 @@ convention:
   access, and it tests the checker on synthetic violations. Only `investigation_graph.py` may
   construct `StateGraph(InvestigationState)`.
 
-The Supervisor and the proposal-only graph are delivered by INV-4 (ADR 0024 Amendment 2);
-specialist and dispatcher wiring is deferred to INV-5, which must use these interfaces. Behavioural attacks on each boundary are in `tests/test_investigation_bypass.py`.
+The Supervisor and the proposal-only graph are delivered by INV-4 (ADR 0024 Amendment 2), and the
+specialists and dispatcher by INV-5 (Amendment 3), through these interfaces. Behavioural attacks on
+each boundary are in `tests/test_investigation_bypass.py`, and on the owner-only operations in
+`tests/test_investigation_gateway_owner_ops.py`.
+
+## Execution phase (INV-5)
+
+An approved plan runs sequentially through the tool gateway (ADR 0024 Amendment 3; brief
+`docs/agents/briefs/138-inv5-dispatcher-specialists.md`). Everything runs under scripted bounded
+adapters; with any production client, every model-executing operation is refused with
+`metering_unbounded`.
+
+**Handoff and seeding.** `InvestigationExecutionRun` reads the proposal thread only through
+`load_investigation_state` and verifies it against the trusted `InvestigationAuthority`: the
+proposal awaits approval, the three digests and the scopes agree, the approval has not expired,
+and every task is executable (a `sql_analysis` task for the SQL Analyst or a `document_research`
+task for Document Research). It refuses a second execution of the same approval in the same
+process; nothing durable prevents re-execution elsewhere (#143/#144). It then builds the execution
+ledger and gateway and runs a new strict thread, `<tenant>:<workspace>:<investigation>:execution`:
+intake, `planning`, the plan (unbound Supervisor writer), `awaiting_plan_approval`, the approval
+copied from the authority, `queued`, every task registered `pending`, and `running`. INV-5 never
+constructs an approval or an authority.
+
+**Dispatch.** The `dispatch` step, bound to the execution ledger, takes exactly one action per
+step from the pure policy (`packages/investigation/dispatch.py:next_action`), each with one
+gateway operation:
+
+| Order | Action | Gateway operation |
+|---|---|---|
+| first | Check resources | `resource_status` (records only the ledger snapshot) |
+| 1 | Stop: the first investigation-severity refusal in state, or owner-observed cancellation | `close`, then closing bookkeeping |
+| 2 | The running task: continue its specialist, retry if eligible, otherwise finish | port call, `begin_attempt`, or `finish_attempt` |
+| 3 | Skip a pending document task with no index, or a task whose dependency did not succeed | `skip_task` |
+| 4 | Start the first pending task, in plan order, whose dependencies all succeeded | `begin_attempt` |
+| 5 | Nothing pending or running: finish | `close(completed)` |
+
+At most one task runs. Cancellation is read before every action, and an unreadable token counts as
+cancelled. A result that lands after cancellation is refused by the gateway, keeps no evidence,
+and still charges what ran. A stop writes the closed ledger snapshot and closes every open task as
+`cancelled` (category `cancelled`, `budget_exhausted`, `policy_refused`, or `internal` after a
+defect). A node error, a bare
+gateway refusal, or the step bound (an explicit LangGraph recursion limit derived from the plan) is
+a defect: the owner closes the gateway (`shutdown`) and reports `failed` in process.
+
+**Retries.** Only the dispatcher decides one: `max_attempts == 2`, a last failure in
+`sql_generation` or `retrieval_or_grounding`, an open ledger, and a shared task attempt left.
+Timeouts, security and policy refusals, provider configuration, and the unknown outcomes
+`provider_failure` and `internal` are finished, never retried; the execution gateway enforces the
+same set (`retry_categories`).
+
+**Final status.** A defect is `failed`; then the first investigation-severity refusal decides
+(`cancelled`, `budget_exhausted`, or `failed`); then owner-observed cancellation; then all tasks
+succeeded is `completed`, some `completed_partial`, none `failed`. The terminal record's category is
+the first unsuccessful task's category in plan order.
+
+**Specialists.** `SQLAnalyst` runs `begin_attempt → prepare_sql → execute_sql`, and after a failed
+execution with the gateway holding the task's one correction, `prepare_correction → execute_sql`.
+`DocumentResearcher` runs `begin_attempt → research_documents`. Both hold only the port and keep
+tokens and handles in memory.
+
+**Evidence and the interim report.** The gateway builds a typed payload with each evidence record
+and verifies it against the record before issuing it: query rows of JSON scalars (at most 500, with
+`truncated`) without SQL, and document sources with their complete location, citations, statuses,
+and the answer typed as untrusted model output. `compose_interim_report(view, payloads)` re-verifies
+every payload and produces a deterministic, content-limited report labelled "interim, unverified,
+association only": task rows, verified query cells (at most 50 rows per table), verified citation
+locations only, and fixed limitation codes with reviewed wording. A `failed` report carries codes
+only. Payloads and the report stay in process; checkpoints and decisions hold identifiers, counts,
+and fixed codes only.

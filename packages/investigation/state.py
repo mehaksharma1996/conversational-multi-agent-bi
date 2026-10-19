@@ -293,6 +293,8 @@ GatewayTool = Literal[
     "prepare_correction",
     "research_documents",
     "finish_attempt",
+    # INV-5 S2: the owner-only, gateway-verified skip of a pending task.
+    "skip_task",
 ]
 DecisionResult = Literal["succeeded", "refused", "failed", "cancelled"]
 

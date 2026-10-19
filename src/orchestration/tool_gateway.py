@@ -68,8 +68,31 @@ The gateway writes no state. Each result carries JSON updates for the dispatcher
 bound to ``gateway.ledger`` (``guarded_node(..., ledger=)``), so recorded budget usage always equals
 the ledger's own snapshot. Results, decisions, and evidence metadata hold identifiers, counts, and
 fixed codes only: never passages, filenames, prompts, SQL, rows, model output, or provider or
-database error messages. Evidence payloads stay in this process (``evidence_payload``); INV-5
-decides how they are exposed.
+database error messages. Evidence payloads stay in this process (``evidence_payload``).
+
+**INV-5 S2: owner-only execution operations.** The trusted run owner
+(``src/orchestration/investigation_execution.py``) holds the gateway itself; specialists hold only
+``SpecialistGateway``, which has none of these:
+
+- ``resource_status(state)``: content-free availability of the scope's table and document index,
+  through the trusted resolvers. Nothing is reserved or recorded.
+- ``skip_task(state, SkipTask)``: moves a pending task to ``skipped`` with no attempt, after the
+  gateway re-verifies the reason (a dependency ended without succeeding, or the task's resource
+  is absent now). It charges nothing and records a ``skip_task`` decision.
+- ``finish_attempt(state, FinishAttempt)``: ends a running task the dispatcher will not retry. Its
+  category is the gateway's own record of the attempt's last failure, which must agree with the
+  last decision in state. It revokes the task's handles and pending correction and charges nothing.
+- ``close(reason)``: ``completed``, ``cancelled``, or ``shutdown``. Permanent and idempotent; the
+  first closure (by refusal or by the owner) wins. It revokes every token, handle, and pending
+  correction and closes the ledger; later calls are refused with ``gateway_closed``.
+- ``evidence_payloads(view)``: the typed, process-local payloads
+  (``packages.investigation.evidence``) of evidence present in ``view``, re-verified against its
+  records. Each payload is built at issuance from the same values as its ``EvidenceRecord`` and
+  verified before the evidence is issued; a payload that cannot be built fails the task.
+
+A gateway built with ``retry_categories`` (the run owner passes ``RETRYABLE_CATEGORIES``) also
+refuses a second attempt unless the attempt's last recorded failure is in that set, so an unknown
+invocation outcome is never retried even by a misbehaving caller.
 """
 
 from __future__ import annotations
@@ -84,9 +107,11 @@ import threading
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import closing
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
-from typing import Annotated, Any, Literal, Protocol
+from datetime import date, datetime, timedelta
+from numbers import Integral, Real
+from typing import Annotated, Any, Literal, Protocol, get_args
 
+import numpy as np
 import pandas as pd
 import sqlparse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
@@ -97,6 +122,7 @@ from packages.investigation.budget import (
     BudgetExhaustedError,
     BudgetLedger,
     BudgetRequest,
+    CloseReason,
     InvalidChargeError,
     Reservation,
     ReservationExceededError,
@@ -113,6 +139,17 @@ from packages.investigation.contracts import (
     TaskId,
     TaskKind,
     TaskOutcome,
+)
+from packages.investigation.evidence import (
+    MAX_ANSWER_CHARS,
+    MAX_CELL_CHARS,
+    MAX_FILENAME_CHARS,
+    MAX_QUERY_ROWS,
+    DocumentEvidencePayload,
+    DocumentSource,
+    QueryEvidencePayload,
+    UntrustedModelText,
+    verify_payload,
 )
 from packages.investigation.gateway import (
     AuthorityCheck,
@@ -239,7 +276,38 @@ class PrepareCorrection(_Request):
     role: AgentRole
 
 
-_TaskRequest = BeginAttempt | ResearchDocuments | PrepareSQL | ExecuteSQL | PrepareCorrection
+class SkipTask(_Request):
+    """Owner-only: skip a pending task for a reason the gateway re-verifies."""
+
+    task_id: TaskId
+    role: AgentRole
+    reason: Literal["dependency_failed", "resource_unavailable"]
+
+
+class FinishAttempt(_Request):
+    """Owner-only: end a running task with its last failure, instead of retrying it."""
+
+    task_id: TaskId
+    role: AgentRole
+
+
+_TaskRequest = (
+    BeginAttempt
+    | ResearchDocuments
+    | PrepareSQL
+    | ExecuteSQL
+    | PrepareCorrection
+    | SkipTask
+    | FinishAttempt
+)
+
+# How the run owner closes the gateway, and the ledger close reason each one records.
+ExecutionCloseReason = Literal["completed", "cancelled", "shutdown"]
+_OWNER_LEDGER_CLOSE: dict[str, CloseReason] = {
+    "completed": "completed",
+    "cancelled": "cancelled",
+    "shutdown": "policy_refused",
+}
 
 
 # --- results ------------------------------------------------------------------------------------
@@ -259,6 +327,15 @@ class GatewayResult:
     attempt: AttemptToken | None = None
     evidence_id: str | None = None
     handle: SQLHandle | None = None
+    resources: ResourceStatus | None = None
+
+
+@dataclass(frozen=True)
+class ResourceStatus:
+    """Whether the scope's own table and document index resolve now. Content-free."""
+
+    table_available: bool
+    documents_available: bool
 
 
 @dataclass(frozen=True)
@@ -270,6 +347,7 @@ class SQLEvidencePayload:
 
 
 type EvidencePayload = DocumentResearchOutcome | SQLEvidencePayload
+type TypedEvidencePayload = QueryEvidencePayload | DocumentEvidencePayload
 
 
 # --- trusted ports ------------------------------------------------------------------------------
@@ -594,12 +672,15 @@ class InvestigationToolGateway:
         policy_criteria: PolicyCriteriaSource | None = None,
         sql_executor: SQLExecutor = execute_sql,
         fingerprint_key: bytes | None = None,
+        retry_categories: frozenset[str] | None = None,
     ) -> None:
         """``llm_client`` that is not an admitted adapter leaves model-executing tools disabled.
 
         Without a ``table_resolver`` no SQL task can resolve a table (``resource_absent``).
         ``fingerprint_key`` keys the SQL fingerprints recorded in state; by default it is random
         per gateway, so fingerprints identify SQL within one investigation run only.
+        ``retry_categories``, when given, are the only failure categories a second attempt may
+        follow (INV-5 passes ``RETRYABLE_CATEGORIES``); ``None`` keeps INV-3's attempt rule.
         """
         if type(authority) is not InvestigationAuthority or type(ledger) is not BudgetLedger:
             raise TypeError("The gateway needs a trusted authority and a BudgetLedger.")
@@ -609,6 +690,11 @@ class InvestigationToolGateway:
             type(fingerprint_key) is not bytes or len(fingerprint_key) < 32
         ):
             raise ValueError("fingerprint_key must be at least 32 bytes.")
+        if retry_categories is not None and (
+            type(retry_categories) is not frozenset
+            or not all(type(category) is str for category in retry_categories)
+        ):
+            raise TypeError("retry_categories must be a frozenset of category names.")
         self._authority = authority
         self._live = live
         self._clock = clock
@@ -631,6 +717,11 @@ class InvestigationToolGateway:
         self._handle_state: dict[str, Literal["open", "spent", "revoked"]] = {}
         self._pending: dict[str, _PendingCorrection] = {}  # a correctable failure, by task
         self._corrections_used: dict[str, int] = {}  # counted here, never by a specialist
+        self._retry_categories = retry_categories
+        # INV-5 S2: the attempt and category of each running task's last failed tool call.
+        self._failures: dict[str, tuple[int, str]] = {}
+        self._typed: dict[str, TypedEvidencePayload] = {}  # built with each evidence record
+        self._owner_closed: ExecutionCloseReason | None = None
 
     @property
     def ledger(self) -> BudgetLedger:
@@ -641,9 +732,28 @@ class InvestigationToolGateway:
     def closed(self) -> RefusalCode | None:
         return self._closed
 
+    @property
+    def closed_by(self) -> ExecutionCloseReason | None:
+        """The owner's close reason, when the owner closed the gateway before any refusal."""
+        return self._owner_closed
+
     def evidence_payload(self, evidence_id: str) -> EvidencePayload | None:
         """The process-local result behind gateway-issued evidence; never checkpointed."""
         return self._payloads.get(evidence_id)
+
+    def evidence_payloads(self, view: InvestigationStateView) -> dict[str, TypedEvidencePayload]:
+        """Typed payloads of evidence present in ``view``, each re-verified against its record.
+
+        Payloads of evidence absent from the view, or bound to another scope, are never returned.
+        """
+        if type(view) is not InvestigationStateView or view.scope != self._authority.scope:
+            return {}
+        found: dict[str, TypedEvidencePayload] = {}
+        for evidence_id, record in view.evidence.items():
+            payload = self._typed.get(evidence_id)
+            if payload is not None and verify_payload(record, payload) is None:
+                found[evidence_id] = payload
+        return found
 
     def specialist_port(self) -> SpecialistGateway:
         """The only object a specialist may hold: the tool operations, and nothing else."""
@@ -675,6 +785,185 @@ class InvestigationToolGateway:
             "prepare_correction", PrepareCorrection, state, request, self._prepare_correction
         )
 
+    # --- owner-only operations (INV-5 S2) -------------------------------------------------------
+
+    def resource_status(self, state: Mapping[str, Any]) -> GatewayResult:
+        """Resolve the scope's table and document index; report availability only."""
+        return self._operate_owner(state, self._resources)
+
+    def skip_task(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """Skip a pending task after re-verifying the reason; no attempt is charged."""
+        return self._operate("skip_task", SkipTask, state, request, self._skip)
+
+    def finish_attempt(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """End a running task with the gateway's record of its last failure."""
+        return self._operate("finish_attempt", FinishAttempt, state, request, self._finish)
+
+    def close(self, reason: ExecutionCloseReason) -> None:
+        """Close permanently: revoke every token, handle, and correction, and close the ledger.
+
+        Idempotent; the first closure wins. A call in flight is refused when it returns.
+        """
+        if reason not in get_args(ExecutionCloseReason):
+            raise ValueError("Unknown gateway close reason.")
+        if self._closed is None and self._owner_closed is None:
+            self._owner_closed = reason
+        self._ledger.close(_OWNER_LEDGER_CLOSE[reason])
+        if self._lock.acquire(blocking=False):  # a call in flight revokes on its own refusal
+            try:
+                self._attempts.clear()
+                self._revoke_handles()
+                self._failures.clear()
+            finally:
+                self._lock.release()
+
+    def _operate_owner(
+        self,
+        state: Mapping[str, Any],
+        body: Callable[[InvestigationStateView], GatewayResult],
+    ) -> GatewayResult:
+        """The shared pre-flight for an owner operation that records no decision.
+
+        Its refusals are bare (no decision, since no tool is named); an investigation-severity
+        refusal still closes the gateway and names its lifecycle target.
+        """
+        if not self._lock.acquire(blocking=False):
+            self._close(RefusalCode.CONCURRENT_CALL)
+            return _bare(RefusalCode.CONCURRENT_CALL)
+        try:
+            try:
+                view = restore_state(state)
+            except Exception:
+                self._close(RefusalCode.STATE_INVALID)
+                return _bare(RefusalCode.STATE_INVALID)
+            if self._decisions_issued is None:
+                self._decisions_issued = len(view.decisions)
+            elif len(view.decisions) != self._decisions_issued:
+                self._close(RefusalCode.STATE_INVALID)
+                return _bare(RefusalCode.STATE_INVALID)
+            try:
+                if self._closure() is not None:
+                    raise _Refused(RefusalCode.GATEWAY_CLOSED)
+                if self._cancel_requested():
+                    raise _Refused(RefusalCode.CANCELLED)
+                code = check_binding(self._authority, view)
+                if code is not None:
+                    raise _Refused(code)
+                self._check_authority()
+                return body(view)
+            except _Refused as refused:
+                code = refused.code
+                if SEVERITY[code] is RefusalSeverity.INVESTIGATION:
+                    already = code is RefusalCode.GATEWAY_CLOSED
+                    self._close(code)
+                    result = _bare(code)
+                    return replace(result, lifecycle_target=None) if already else result
+                return _bare(code)
+        finally:
+            self._lock.release()
+
+    def _resources(self, view: InvestigationStateView) -> GatewayResult:
+        scope = view.scope
+        assert scope is not None  # bound by ``check_binding``
+        documents = False
+        if scope.document_collection_id is not None:
+            documents = self._resolve_documents(scope) is not None
+        table = False
+        if scope.dataset_id is not None and self._table_resolver is not None:
+            try:
+                resolved = self._table_resolver.resolve(scope, self._authority.epoch)
+            except Exception:
+                raise _Refused(RefusalCode.RESOURCE_RESOLUTION_FAILED) from None
+            if resolved is not None and type(resolved) is not StoredTable:
+                raise _Refused(RefusalCode.RESOURCE_RESOLUTION_FAILED)
+            table = resolved is not None
+        return GatewayResult(
+            updates={},
+            resources=ResourceStatus(table_available=table, documents_available=documents),
+        )
+
+    def _resolve_documents(self, scope: InvestigationScope) -> Retriever | None:
+        try:
+            retriever = self._resolver.resolve(scope, self._authority.epoch)
+        except Exception:
+            raise _Refused(RefusalCode.RESOURCE_RESOLUTION_FAILED) from None
+        if retriever is not None and not callable(getattr(retriever, "retrieve", None)):
+            raise _Refused(RefusalCode.RESOURCE_RESOLUTION_FAILED)
+        return retriever
+
+    def _resource_absent(self, view: InvestigationStateView, task: PlanTask) -> bool:
+        """Whether the resource ``task`` needs is absent now, by the trusted resolvers."""
+        scope = view.scope
+        assert scope is not None
+        if _researches_documents(task):
+            if scope.document_collection_id is None:
+                return True
+            return self._resolve_documents(scope) is None
+        if scope.dataset_id is None or self._table_resolver is None:
+            return True
+        try:
+            return self._table_resolver.resolve(scope, self._authority.epoch) is None
+        except Exception:
+            raise _Refused(RefusalCode.RESOURCE_RESOLUTION_FAILED) from None
+
+    def _skip(self, call: _Call, request: SkipTask) -> GatewayResult:
+        task, record = self._admitted(call)
+        if record.status != "pending":
+            raise _Refused(RefusalCode.TASK_NOT_RUNNING)
+        self._check_authority()
+        if request.reason == "dependency_failed":
+            verified = any(
+                (prior := call.view.tasks.get(dependency)) is not None
+                and prior.status not in {"pending", "running", "succeeded"}
+                for dependency in task.depends_on
+            )
+        else:
+            verified = self._resource_absent(call.view, task)
+        if not verified:
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)  # a reason the gateway cannot confirm
+        outcome = TaskOutcome(
+            task_id=call.task_id, status="skipped", error_category=request.reason, attempts=0
+        )
+        skipped = TaskRecord(task_id=call.task_id, status="skipped", attempts=0, outcome=outcome)
+        return self._result(call, "succeeded", tasks={call.task_id: _dump(skipped)})
+
+    def _finish(self, call: _Call, request: FinishAttempt) -> GatewayResult:
+        task, record = self._admitted(call)
+        if record.status != "running":
+            raise _Refused(RefusalCode.TASK_NOT_RUNNING)
+        failure = self._failures.get(call.task_id)
+        if (
+            call.task_id in self._attempts
+            or self._open_handles(call.task_id)
+            or failure is None
+            or failure[0] != record.attempts
+        ):
+            raise _Refused(RefusalCode.ATTEMPT_MISMATCH)  # nothing the gateway saw fail
+        last = next(
+            (item for item in reversed(call.view.decisions) if item.task_id == call.task_id), None
+        )
+        if last is None or last.result != "failed" or last.category != failure[1]:
+            raise _Refused(RefusalCode.STATE_INVALID)  # state disagrees with the gateway's record
+        self._check_authority()
+        self._revoke_handles(call.task_id)
+        del self._failures[call.task_id]
+        outcome = TaskOutcome(
+            task_id=call.task_id,
+            status="failed",
+            error_category=failure[1],
+            attempts=record.attempts,
+        )
+        ended = TaskRecord(
+            task_id=call.task_id, status="failed", attempts=record.attempts, outcome=outcome
+        )
+        return self._result(call, "succeeded", tasks={call.task_id: _dump(ended)})
+
+    def _closure(self) -> RefusalCode | None:
+        """The refusal a call meets once the gateway is closed, by refusal or by the owner."""
+        if self._closed is not None:
+            return self._closed
+        return RefusalCode.GATEWAY_CLOSED if self._owner_closed is not None else None
+
     # --- pre-flight -----------------------------------------------------------------------------
 
     def _operate(
@@ -705,7 +994,7 @@ class InvestigationToolGateway:
                 return _bare(RefusalCode.STATE_INVALID)
             call = _Call(tool, view, request.task_id, request.role)
             try:
-                if self._closed is not None:
+                if self._closure() is not None:
                     raise _Refused(RefusalCode.GATEWAY_CLOSED)
                 if self._cancel_requested():
                     raise _Refused(RefusalCode.CANCELLED)
@@ -792,12 +1081,21 @@ class InvestigationToolGateway:
             prior = call.view.tasks.get(dependency)
             if prior is None or prior.status != "succeeded":
                 raise _Refused(RefusalCode.DEPENDENCY_INCOMPLETE)
+        if attempt > 1 and self._retry_categories is not None:
+            failure = self._failures.get(call.task_id)
+            if (
+                failure is None
+                or failure[0] != record.attempts
+                or failure[1] not in self._retry_categories
+            ):
+                raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)  # never retry an unknown outcome
         self._check_authority()
         reservation = self._reserve(BudgetRequest(task_attempts=1))
         self._ledger.settle(reservation)  # an attempt is counted in full once it starts
         token = AttemptToken(task_id=call.task_id, attempt=attempt, nonce=self._nonce())
         self._attempts[call.task_id] = token
         self._pending.pop(call.task_id, None)  # a new attempt replaces an unused correction
+        self._failures.pop(call.task_id, None)
         running = TaskRecord(task_id=call.task_id, status="running", attempts=attempt)
         return self._result(call, "succeeded", tasks={call.task_id: _dump(running)}, attempt=token)
 
@@ -855,8 +1153,8 @@ class InvestigationToolGateway:
             violation = self._settle_retrieval(retrieval_reservation, bounded)
             violation = self._settle(model_reservation, client) or violation
         refusal = violation or refusal
-        if refusal is None and self._closed is not None:
-            refusal = self._closed  # an overlapping call closed the gateway while this one ran
+        if refusal is None and self._closure() is not None:
+            refusal = self._closure()  # the gateway closed while this call ran
         if refusal is None and self._cancel_requested():
             refusal = RefusalCode.CANCELLED
         if refusal is not None:
@@ -970,8 +1268,8 @@ class InvestigationToolGateway:
             client.sealed = True
             violation = self._settle(reservation, client)
         refusal = violation or refusal
-        if refusal is None and self._closed is not None:
-            refusal = self._closed
+        if refusal is None and self._closure() is not None:
+            refusal = self._closure()
         if refusal is None and self._cancel_requested():
             refusal = RefusalCode.CANCELLED
         if refusal is not None:
@@ -1070,8 +1368,8 @@ class InvestigationToolGateway:
         finally:
             violation = self._settle_execution(reservation, executor)
         refusal = violation
-        if refusal is None and self._closed is not None:
-            refusal = self._closed
+        if refusal is None and self._closure() is not None:
+            refusal = self._closure()
         if refusal is None and self._cancel_requested():
             refusal = RefusalCode.CANCELLED
         if refusal is not None:
@@ -1090,6 +1388,7 @@ class InvestigationToolGateway:
             self._pending[call.task_id] = _PendingCorrection(
                 attempt=record.attempts, prepared=prepared, error_text=outcome.error_text
             )
+            self._failures[call.task_id] = (record.attempts, "sql_generation")
             return self._result(call, "failed", category="sql_generation")
         return self._failed(call, task, record, "sql_generation")
 
@@ -1130,9 +1429,14 @@ class InvestigationToolGateway:
             succeeded = TaskRecord(
                 task_id=call.task_id, status="succeeded", attempts=record.attempts, outcome=done
             )
-        except (ValidationError, TypeError, ValueError, AttributeError):
+            typed = _query_payload(evidence, dataframe)
+            if verify_payload(evidence, typed) is not None:
+                raise ValueError("payload")
+        except (ValidationError, TypeError, ValueError, AttributeError, OverflowError):
             return self._failed(call, None, record, "internal", final=True)
         self._payloads[evidence_id] = SQLEvidencePayload(dataframe=dataframe, sql=prepared.sql)
+        self._typed[evidence_id] = typed
+        self._failures.pop(call.task_id, None)
         self._pending.pop(call.task_id, None)
         return self._result(
             call,
@@ -1349,9 +1653,14 @@ class InvestigationToolGateway:
             succeeded = TaskRecord(
                 task_id=call.task_id, status="succeeded", attempts=record.attempts, outcome=done
             )
+            typed = _document_payload(evidence, outcome)
+            if verify_payload(evidence, typed) is not None:
+                raise ValueError("payload")
         except (ValidationError, TypeError, ValueError, AttributeError):
             return self._failed(call, None, record, "internal", final=True)
         self._payloads[evidence_id] = outcome
+        self._typed[evidence_id] = typed
+        self._failures.pop(call.task_id, None)
         return self._result(
             call,
             "succeeded",
@@ -1371,6 +1680,7 @@ class InvestigationToolGateway:
     ) -> GatewayResult:
         """A tool call that ran and failed. The task stays running while a retry remains."""
         tasks: dict[str, Any] = {}
+        self._failures[call.task_id] = (record.attempts, category)
         if final or task is None or record.attempts >= task.max_attempts:
             outcome = TaskOutcome(
                 task_id=call.task_id,
@@ -1459,6 +1769,7 @@ class InvestigationToolGateway:
             self._closed = code
         self._attempts.clear()
         self._revoke_handles()
+        self._failures.clear()
         self._ledger.close(LEDGER_CLOSE_REASON.get(code, "policy_refused"))
 
     def _nonce(self) -> str:
@@ -1589,3 +1900,88 @@ def _location(source: Any) -> SourceLocation:
 
 def _dump(model: BaseModel) -> Any:
     return model.model_dump(mode="json")
+
+
+# --- typed payloads (INV-5 S2) ------------------------------------------------------------------
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _researches_documents(task: PlanTask) -> bool:
+    task_input = task.input
+    return task.kind is TaskKind.DOCUMENT_RESEARCH or (
+        isinstance(task_input, HypothesisTestInput) and task_input.method == "document_check"
+    )
+
+
+def _cell(value: object) -> object:
+    """One result cell as a JSON scalar: SQL NULL (and NaN) as ``None``; never an object."""
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or value is pd.NaT or value is pd.NA:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, Integral):
+        return int(value)
+    if isinstance(value, Real):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    if isinstance(value, str):
+        return str(value)[:MAX_CELL_CHARS]
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    raise TypeError("unsupported cell type")  # bytes or any other object fails the task
+
+
+def _query_payload(record: EvidenceRecord, dataframe: pd.DataFrame) -> QueryEvidencePayload:
+    rows = tuple(
+        tuple(_cell(value) for value in row) for row in dataframe.itertuples(index=False, name=None)
+    )
+    return QueryEvidencePayload.model_validate(
+        {
+            "evidence_id": record.id,
+            "task_id": record.task_id,
+            "attempt": record.attempt,
+            "columns": tuple(str(name) for name in dataframe.columns),
+            "rows": rows,
+            "row_limit": MAX_QUERY_ROWS,
+            "truncated": len(rows) == MAX_QUERY_ROWS,
+        }
+    )
+
+
+def _display_name(value: object) -> str:
+    name = _CONTROL.sub("", str(value))[:MAX_FILENAME_CHARS]
+    return name or "unknown"
+
+
+def _document_payload(
+    record: EvidenceRecord, outcome: DocumentResearchOutcome
+) -> DocumentEvidencePayload:
+    """Built from the same source locations as the record's ``DocumentProvenance``."""
+    answer = outcome.answer
+    sources = []
+    for source in outcome.sources:
+        location = _location(source)
+        sources.append(
+            DocumentSource(
+                number=location.number,
+                filename=_display_name(source.filename),
+                page_number=location.page_number,
+                chunk_index=location.chunk_index,
+                relevance_score=location.relevance_score,
+            )
+        )
+    return DocumentEvidencePayload.model_validate(
+        {
+            "evidence_id": record.id,
+            "task_id": record.task_id,
+            "attempt": record.attempt,
+            "sources": tuple(sources),
+            "cited_source_numbers": tuple(answer.cited_source_numbers),
+            "invalid_citations": tuple(answer.invalid_citations),
+            "evidence_statuses": tuple(answer.evidence_statuses[:MAX_EVIDENCE_STATUSES]),
+            "answer": UntrustedModelText(text=str(answer.answer)[:MAX_ANSWER_CHARS]),
+        }
+    )
