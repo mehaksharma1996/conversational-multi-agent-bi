@@ -591,3 +591,40 @@ follow from the approved specs, the thresholds, and the evidence.
       documented.
 - [x] No contract, gateway, specialist, graph, test, evaluation, ADR, or GitHub change in S0; no
       commit.
+
+## Readiness (S6, 2026-10-19)
+
+Delivered locally on `feat/iteration2-inv6-business-investigation`, one commit per stage after
+`c9d72cd`:
+
+| Stage | Delivered |
+|---|---|
+| S0 | This brief, with D1 to D4 and the D2 measurement |
+| S1 | `hypotheses.py`, plan v2 and `parse_plan`, the v1 digest pin; state vocabulary (derived kind, `derive_evidence`, `verdicts`, `investigator`) and invariants |
+| S2 | `verdicts.py` (`evaluate_hypothesis`, `validate_verdict`); the derived payload contract |
+| S3 | v2 drafts, Business Investigator proposer validation, `inv6-planning-prompt-v2`, the 2,000/4,000 output budget |
+| S4 | Gateway `derive_evidence` and the typed-spec question; method routing; `business_investigator.py`; the `investigate` step; report verdict rows |
+| S5 | H1 to H4 acceptance on the real data, and adversarial end-to-end tests |
+| S6 | ADR 0024 Amendment 4, the workflow document, this section |
+
+Results:
+
+- H1 and H2 `supported_association`, H3 `untestable` (`required_data_absent`), H4 `refuted`.
+- Counts and rates equal `oracle.json` facts within its tolerances, read only by the tests.
+- The S3 gate passed: the compact churn response is 825 to 1,369 tokens by every proxy, under
+  1,800.
+
+Deviations and choices:
+
+- The v2 prompt is versioned and pinned by golden digests, but not registered in
+  `evals/v1/prompt-registry.json` (a reviewed baseline change, left as a follow-up).
+- The mean metric ignores NULL values (`value_count` counts non-NULL rows).
+- A decisive verdict whose observation has no matching derived evidence is recorded as
+  `untestable/evidence_missing`.
+
+Known limits:
+
+- tokens are measured by proxy only;
+- thresholds are model-proposed and human-approved;
+- all tests of a multi-test hypothesis must support;
+- process-local checkpoints and replay protection, as in INV-5.

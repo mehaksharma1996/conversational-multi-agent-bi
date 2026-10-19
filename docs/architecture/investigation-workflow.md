@@ -233,7 +233,7 @@ reserved.
 invalid initial candidate, at most one repair. Before each call it checks cancellation, the
 ledger's remaining time, and `check_planning_authority`, then admits only a
 `DeadlineBoundedModelAdapter` whose single envelope member `ReviewedPlanningEvidence.covering`
-matches exactly (`admit_planning_adapter`). Each call reserves its full 6,000/1,000 stage on the
+matches exactly (`admit_planning_adapter`). Each call reserves its full 6,000/2,000 stage (INV-6 D2) on the
 same `BudgetLedger(PLANNING_LIMITS)` before exact counting, and runs with what remains of the
 original 30-second deadline. The repair must use exactly the trusted inputs the initial call was
 bound to, and `render_repair_prompt` over the same metadata (equal `metadata_digest`) and the
@@ -527,3 +527,44 @@ association only": task rows, verified query cells (at most 50 rows per table), 
 locations only, and fixed limitation codes with reviewed wording. A `failed` report carries codes
 only. Payloads and the report stay in process; checkpoints and decisions hold identifiers, counts,
 and fixed codes only.
+
+## Hypotheses and verdicts (INV-6)
+
+ADR 0024 Amendment 4; brief `docs/agents/briefs/139-inv6-business-investigation.md`.
+
+**Before approval.** The planning call (`inv6-planning-prompt-v2`, question, schema, and titles
+only) may return a `schema_version: 2` plan with hypotheses and typed `hypothesis_test` tasks on
+behalf of the Business Investigator. `validate_plan` checks those tasks with the Business
+Investigator's permission and only when a hypothesis binds them, resolves every test against the
+plan's `test_defaults`, and requires real schema fields, empty `evidence_refs`, and a
+`min_denominator` of at least the floor (30). The approval digest binds all of it; v1 digests are
+unchanged. Planning output is 2,000 tokens per stage and 4,000 in total.
+
+| Contract | Holds |
+|---|---|
+| `Hypothesis` | ID, untrusted statement, `relationship: "association"`, testability, missing data, tests, context tasks |
+| `HypothesisTestSpec` | method, metric (rate or mean), equality filters, period, comparison group, claim (direction, `min_effect`, `min_denominator`) |
+| `Verdict` (in process) | verdict, reasons, recomputed observations, verified context citations |
+| `VerdictRecord` (state) | verdict, reasons, cited evidence IDs, test task IDs |
+
+**After the tests ran.** On a normal end, one step at a time:
+
+1. `derive_evidence` (owner-only, no charge) recomputes each usable test's observation from its own
+   typed query payload and records derived evidence (`rate_difference` or `mean_difference`);
+2. the guarded `investigate` step: the Business Investigator proposes verdicts, the owner
+   re-validates them, and the `investigator` writer records them;
+3. `close(completed)`.
+
+| Evidence | Verdict |
+|---|---|
+| Every test's effect in the claimed direction reaches `min_effect` (and required context is verified) | `supported_association` |
+| Every test usable, and an effect of zero or in the opposite direction | `refuted` |
+| No data for the hypothesis | `untestable` (`required_data_absent`) |
+| A failed, skipped, or missing test | `untestable` (`test_not_completed`, `evidence_missing`) |
+| Truncated, NULL, too-small, wrongly shaped, inconsistent, or conflicting evidence | `untestable` (matching reason) |
+| An effect between zero and `min_effect` | `untestable` (`effect_below_threshold`) |
+
+Numbers come only from typed payload counts, never from a model, the plan, or document prose; NULL
+is never zero. No verdict is written after a stop or a defect (the report states
+`verdicts_not_evaluated`), and verdicts never change the final status. Checkpoints hold verdict codes,
+derived-evidence metadata, and IDs only.

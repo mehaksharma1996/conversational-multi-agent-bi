@@ -31,7 +31,7 @@ The approved architecture (October 13, 2026) is a required Iteration 2 deliverab
    investigation is a dedicated subgraph with its own state schema. No custom agent framework.
 3. **The router proposes; a person approves.** The router may select `investigation`, which runs only
    a *proposal phase*: the Supervisor plans under a small enforced budget (2 model calls, 12k input
-   and 2k output tokens, 30 seconds, no tools) from the schema and document titles alone, so no rows
+   and 4k output tokens since Amendment 4, 30 seconds, no tools) from the schema and document titles alone, so no rows
    or passages reach a model before approval. Execution starts only after explicit plan approval.
    Investigation routing stays behind a feature flag, off by default, until the full proposal,
    approval, execution, and report path exists (#142).
@@ -198,8 +198,9 @@ adapters. It also refines decisions 4, 7, 9, and 11 for planning. It does not ch
    never the gateway, ledger, authority, adapter, prompts, or model client. For planning,
    specialist modules may import only the port, the result types, and two pure planning enums.
 3. **Planning budget (decisions 3 and 7).** One `BudgetLedger(PLANNING_LIMITS)` per session: at most
-   2 model calls, 12,000 input and 2,000 output tokens, 30 seconds, and zero SQL, retrieval, or
-   tool calls. Each stage reserves its full 6,000/1,000 partition before the provider-backed exact
+   2 model calls, 12,000 input and 4,000 output tokens (2,000 before Amendment 4), 30 seconds, and
+   zero SQL, retrieval, or tool calls. Each stage reserves its full 6,000/2,000 partition (6,000/1,000
+   before Amendment 4) before the provider-backed exact
    count; the ledger and its original deadline are never reset or extended. The sequence is one
    initial call and, only after a deterministically invalid candidate, at most one repair; every
    other call is a terminal `planning_sequence_violation`.
@@ -355,6 +356,75 @@ jobs, and report storage (#144); Business Investigation, hypothesis tests, and d
 (#140); the verified report (#141); observability (#146); evaluation (#145, #147, #148); durable
 checkpoints (#149); parallel dispatch (#150); UI (#155, #156); security review (#157); and
 deployment (#159).
+
+## Amendment 4: hypotheses, tests, and verdicts (INV-6, #139, 2026-10-19)
+
+INV-6 makes decisions 6 and 12 concrete: the Business Investigation Agent's hypotheses are tested
+on approved evidence and receive deterministic, evidence-cited verdicts. Routing stays off (#142),
+and production stays fail-closed without a reviewed bounded adapter. Details are in
+`docs/architecture/investigation-workflow.md` and
+`docs/agents/briefs/139-inv6-business-investigation.md` (decisions D1 to D4).
+
+1. **Plan-embedded hypotheses (D1).** Hypotheses and their typed tests are part of the plan a
+   person approves: the plan digest binds every hypothesis and executable test specification
+   (fields, filters, periods, metric, direction, thresholds, method, dependencies, and task
+   bindings). Hypothesis tests are validated as the Business Investigator's proposals
+   (`TASK_PROPOSERS` is unchanged), only when a plan hypothesis binds them; the Supervisor gains no
+   authority to create specialist tasks. Nothing is inserted after approval, and admitted follow-ups
+   stay unused (INV-7 and #143).
+2. **Planning output budget (D2).** Output is 2,000 tokens per stage and 4,000 in total; 2 calls,
+   6,000 input per stage and 12,000 in total, 30 seconds, and no tools are unchanged. Exact adapter
+   admission requires the new cap, so reviewed capability evidence for the old 1,000-token bound is
+   refused. The cost estimate prices the new limits; its classification is unchanged. No reviewed
+   provider tokenizer was available: the compact churn response measured 825 to 1,369 tokens by
+   proxies (bytes, characters ÷ 3 and ÷ 4, WordPiece), against a 1,800-token gate, and the adapter's
+   exact count remains the runtime authority. A live, reviewed measurement is owed before any
+   production activation.
+3. **Versioned plans (D3).** Hypothesis-bearing plans are `schema_version: 2`
+   (`InvestigationPlanV2`). Version-1 canonical bytes and approval digests are unchanged (a pinned
+   test). `parse_plan` dispatches on an exact integer version and refuses missing, boolean, float,
+   string, and unknown versions. `STATE_VERSION` stays 1: the state additions are optional, every
+   earlier checkpoint restores unchanged, and an older reader refuses new vocabulary rather than
+   misreading it. The planning prompt is versioned `inv6-planning-prompt-v2`.
+4. **Observational verdicts only.** A hypothesis's `relationship` has the single value
+   `association`. Verdicts are `supported_association`, `untestable`, or `refuted`, with fixed
+   reasons; no value, reason, or report field expresses causation, and statements are untrusted
+   display text that never reaches a report.
+5. **Deterministic evaluation.** `evaluate_hypothesis` recomputes every observation with exact
+   rational arithmetic from integer counts in verified typed query payloads, matching each group
+   and period exactly. A test supports when the effect in the claimed direction reaches the approved
+   `min_effect`, and refutes when it is zero or opposite. Absent, failed, truncated, NULL, too-small
+   (below the configurable floor of 30, a data-sufficiency rule rather than a significance test),
+   inconsistent, wrongly shaped, or conflicting evidence makes the hypothesis `untestable`, never
+   `refuted`. Required document context counts only through verified citations. Document prose is
+   never a measurement or an instruction.
+6. **Derived evidence (D4).** The owner-only gateway operation `derive_evidence` recomputes a
+   test's observation from the typed payload it issued and records derived evidence: a fixed
+   operation (`rate_difference` or `mean_difference`) bound to the test task and its single source
+   query evidence. The value and counts stay in process. No model call, no charge, and no caller
+   number is accepted.
+7. **Business Investigator and verdict writer.** `src/investigation/business_investigator.py` is
+   deterministic and holds nothing: it reads what the trusted owner hands it and proposes verdicts.
+   The owner re-validates each (`validate_verdict`, and derived evidence must restate the
+   observation exactly) and writes content-free `VerdictRecord`s through a new `investigator`
+   writer into a write-once `verdicts` channel, during `running`, before the normal close. A
+   decisive verdict must cite derived evidence of its own tests. No verdict is written after a stop
+   or a defect, and verdicts never change the final status.
+8. **Execution integration.** Approved hypothesis tests run through the INV-5 dispatcher and
+   specialists, routed by method (SQL methods to the SQL Analyst, `document_check` to Document
+   Research). The gateway renders each test's resolved specification into its SQL question; the
+   registered SQL prompt builder is unchanged. Retry, cancellation, budget, and terminal semantics
+   are unchanged.
+9. **Interim report.** Verdict rows carry the hypothesis ID, verdict, reasons, and cited evidence
+   IDs only. A v2 run that stopped before evaluation states `verdicts_not_evaluated`.
+
+**Known limitations and deferred work.** The planning token measurement is by proxy only; the v2
+planning prompt is versioned and pinned by tests but not yet registered in
+`evals/v1/prompt-registry.json` (a reviewed baseline change); thresholds are model-proposed and
+human-approved, so the approval UI (#144) must show them; the SQL model may return the wrong shape,
+which makes a hypothesis `untestable` (evaluation #145, #147); multi-test hypotheses require every
+test to support; the Critic, follow-ups, and document-derived policy criteria are INV-7 (#140); the
+verified report is #141.
 
 ## Alternatives rejected
 
