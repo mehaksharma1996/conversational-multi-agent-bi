@@ -69,6 +69,8 @@ from packages.investigation.interim_report import (
     ReportCitation,
     ReportQueryTable,
     ReportTaskRow,
+    compose_interim_report,
+    limitation_text,
     report_status,
 )
 from packages.investigation.lifecycle import (
@@ -190,11 +192,13 @@ __all__ = [
     "build_investigation_proposal",
     "canonical_json",
     "check_execution_limits",
+    "compose_interim_report",
     "document_citations_valid",
     "estimate_cost",
     "final_status",
     "is_investigation_terminal",
     "is_terminal",
+    "limitation_text",
     "limitations_for",
     "next_action",
     "parse_evidence_payload",

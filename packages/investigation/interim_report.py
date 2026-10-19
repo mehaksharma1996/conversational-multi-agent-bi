@@ -1,7 +1,8 @@
 """Contracts for the deterministic interim investigation report (ADR 0024, issue #138 INV-5).
 
-The composer (``compose_interim_report``, INV-5 S5) is not implemented yet. These contracts fix
-what it may produce, so an interim report can never present unverified material as confirmed:
+``compose_interim_report`` (INV-5 S5) builds the report from the final validated state and the
+gateway's typed payloads, deterministically and without a model call. The contracts fix what any
+report may contain, so an interim report can never present unverified material as confirmed:
 
 - The label and the verification state are fixed literals: every report is "interim, unverified,
   association only". No field can claim a finding is verified or causal.
@@ -15,17 +16,30 @@ what it may produce, so an interim report can never present unverified material 
   ``budget_exhausted`` report states its run limitation.
 - A table shown in part, or from a truncated query, must state that limitation for its task.
 
+The composer re-verifies every payload against its record (``verify_payload``): a missing or
+inconsistent payload is excluded and stated as a limitation. Document evidence contributes only the
+locations of its citations, and only when every citation resolves (``document_citations_valid``);
+otherwise it is stated as ``document_evidence_unverified``. The answer prose is never a finding,
+so instructions inside documents (the board memo's injection text) cannot reach the report.
+
 The report lives in process only; persistence belongs to #144.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, Strict, field_validator, model_validator
 
 from packages.investigation.contracts import MAX_PLAN_TASKS, OUTCOME_CATEGORIES, TaskId, TaskKind
-from packages.investigation.dispatch import RUN_LIMITATIONS, Limitation, LimitationCode
+from packages.investigation.dispatch import (
+    RUN_LIMITATIONS,
+    Limitation,
+    LimitationCode,
+    limitations_for,
+    ordered_tasks,
+)
 from packages.investigation.evidence import (
     MAX_QUERY_COLUMNS,
     Cell,
@@ -34,7 +48,9 @@ from packages.investigation.evidence import (
     DocumentEvidencePayload,
     Filename,
     QueryEvidencePayload,
+    document_citations_valid,
     exact_rows,
+    verify_payload,
 )
 from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.state import (
@@ -214,3 +230,127 @@ class InterimReportRequest(_Report):
         if any(evidence_id not in self.view.evidence for evidence_id in ids):
             raise ValueError("a payload must name evidence in state")
         return self
+
+
+# --- the composer (S5) ----------------------------------------------------------------------------
+
+# Reviewed, fixed wording for each limitation code. Nothing else in a report is prose.
+LIMITATION_TEMPLATES: dict[LimitationCode, str] = {
+    LimitationCode.TASK_FAILED: "This task failed; its question is unanswered.",
+    LimitationCode.TASK_TIMED_OUT: "This query exceeded its time limit and was not retried.",
+    LimitationCode.TASK_REFUSED: "This task was refused by policy and did not run.",
+    LimitationCode.TASK_CANCELLED: "This task was closed before it finished.",
+    LimitationCode.DEPENDENCY_FAILED: "This task was skipped because a task it needs failed.",
+    LimitationCode.RESOURCE_UNAVAILABLE: "The data or documents this task needs were unavailable.",
+    LimitationCode.BUDGET_EXHAUSTED: "The investigation stopped when its budget ran out.",
+    LimitationCode.INVESTIGATION_CANCELLED: "The investigation was cancelled.",
+    LimitationCode.INVESTIGATION_FAILED: "The investigation failed; no evidence is reported.",
+    LimitationCode.EVIDENCE_MISSING: "Evidence recorded for this task is not available.",
+    LimitationCode.EVIDENCE_INCONSISTENT: "Evidence for this task did not match its record.",
+    LimitationCode.DOCUMENT_EVIDENCE_UNVERIFIED: (
+        "Document citations for this task could not be verified and are not shown."
+    ),
+    LimitationCode.QUERY_ROWS_TRUNCATED: (
+        "The query result reached its row limit; rows may be missing."
+    ),
+    LimitationCode.REPORT_ROWS_LIMITED: "Only the first rows of this result are shown.",
+}
+
+_Payload = QueryEvidencePayload | DocumentEvidencePayload
+
+
+def compose_interim_report(
+    view: InvestigationStateView,
+    payloads: Mapping[str, _Payload] | Iterable[_Payload] = (),
+) -> InterimReport:
+    """The deterministic interim report for a finished investigation. Pure; no model call.
+
+    Identical inputs give byte-identical ``canonical_json`` output. ``payloads`` are the gateway's
+    typed payloads (``evidence_payloads(view)``); each is re-verified here before use.
+    """
+    items = tuple(payloads.values() if isinstance(payloads, Mapping) else payloads)
+    request = InterimReportRequest(view=view, payloads=items)
+    view = request.view
+    assert view.status is not None
+    status = report_status(view.status)
+    by_id = {payload.evidence_id: payload for payload in request.payloads}
+    rows: list[ReportTaskRow] = []
+    tables: list[ReportQueryTable] = []
+    citations: list[ReportCitation] = []
+    evidence_limits: list[Limitation] = []
+    for task in ordered_tasks(view):
+        record = view.tasks[task.id]
+        if record.outcome is None:
+            raise ReportContractError("task_open")
+        category = None if record.status == "succeeded" else record.outcome.error_category
+        rows.append(
+            ReportTaskRow(task_id=task.id, kind=task.kind, status=record.status, category=category)
+        )
+        if status == "failed" or record.status != "succeeded":
+            continue  # R8: a failed report carries codes only
+        for ref in record.outcome.evidence_refs:
+            evidence = view.evidence.get(ref.id)
+            payload = by_id.get(ref.id)
+            if evidence is None or payload is None:
+                evidence_limits.append(
+                    Limitation(code=LimitationCode.EVIDENCE_MISSING, task_id=task.id)
+                )
+                continue
+            if verify_payload(evidence, payload) is not None:
+                evidence_limits.append(
+                    Limitation(code=LimitationCode.EVIDENCE_INCONSISTENT, task_id=task.id)
+                )
+                continue
+            if isinstance(payload, QueryEvidencePayload):
+                tables.append(
+                    ReportQueryTable(
+                        evidence_id=payload.evidence_id,
+                        task_id=task.id,
+                        columns=payload.columns,
+                        rows=payload.rows[:MAX_REPORT_QUERY_ROWS],
+                        source_row_count=len(payload.rows),
+                        source_truncated=payload.truncated,
+                    )
+                )
+                if len(payload.rows) > MAX_REPORT_QUERY_ROWS:
+                    evidence_limits.append(
+                        Limitation(code=LimitationCode.REPORT_ROWS_LIMITED, task_id=task.id)
+                    )
+                if payload.truncated:
+                    evidence_limits.append(
+                        Limitation(code=LimitationCode.QUERY_ROWS_TRUNCATED, task_id=task.id)
+                    )
+            elif document_citations_valid(payload):
+                sources = {source.number: source for source in payload.sources}
+                for number in dict.fromkeys(payload.cited_source_numbers):
+                    source = sources[number]
+                    citations.append(
+                        ReportCitation(
+                            evidence_id=payload.evidence_id,
+                            task_id=task.id,
+                            filename=source.filename,
+                            page_number=source.page_number,
+                        )
+                    )
+            else:
+                evidence_limits.append(
+                    Limitation(code=LimitationCode.DOCUMENT_EVIDENCE_UNVERIFIED, task_id=task.id)
+                )
+    base = limitations_for(view, view.status)
+    limitations = [
+        *(item for item in base if item.task_id is not None),
+        *evidence_limits,
+        *(item for item in base if item.task_id is None),
+    ]
+    return InterimReport(
+        status=status,
+        tasks=tuple(rows),
+        query_tables=tuple(tables),
+        citations=tuple(citations),
+        limitations=tuple(dict.fromkeys(limitations)),
+    )
+
+
+def limitation_text(report: InterimReport) -> tuple[str, ...]:
+    """The reviewed wording of each stated limitation, in report order."""
+    return tuple(LIMITATION_TEMPLATES[item.code] for item in report.limitations)

@@ -551,7 +551,7 @@ def test_limitations_are_fixed_codes_in_plan_order() -> None:
 
 # --- purity --------------------------------------------------------------------------------------
 
-_ALLOWED_IMPORTS = {"__future__", "enum", "typing", "pydantic"}
+_ALLOWED_IMPORTS = {"__future__", "collections.abc", "enum", "typing", "pydantic"}
 
 
 @pytest.mark.parametrize("name", ["dispatch.py", "evidence.py", "interim_report.py"])

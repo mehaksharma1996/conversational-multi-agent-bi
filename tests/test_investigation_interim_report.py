@@ -268,8 +268,9 @@ def test_a_request_needs_a_reportable_terminal_state() -> None:
         InterimReportRequest(view=restore_state(running_state()))
 
 
-def test_compose_is_not_implemented_in_s1() -> None:
-    assert not hasattr(interim_report, "compose_interim_report")
+def test_every_limitation_code_has_reviewed_wording() -> None:
+    assert set(interim_report.LIMITATION_TEMPLATES) == set(LimitationCode)
+    assert all(text.endswith(".") for text in interim_report.LIMITATION_TEMPLATES.values())
 
 
 # --- S1 leaves checkpointed state unchanged ------------------------------------------------------
