@@ -323,6 +323,15 @@ class InvestigationPlanningGateway:
     def usage(self) -> BudgetUsage:
         return self._ledger.usage()
 
+    @property
+    def ledger(self) -> BudgetLedger:
+        """The planning ledger, for trusted graph wiring only (``InvestigationGraphBuilder``).
+
+        Like ``InvestigationToolGateway.ledger``: it binds the Supervisor's proposal-record writes
+        to this ledger. ``PlannerPort`` never exposes it, and investigation modules may not name it.
+        """
+        return self._ledger
+
     def planner_port(self) -> PlannerPort:
         """The Supervisor's view: ``initial()`` and ``repair()`` only."""
         return PlannerPort(self)
@@ -881,7 +890,9 @@ def _revalidated[T: _Trusted](value: object, kind: type[T]) -> T:
     if type(value) is not kind:
         raise _Untrusted()
     try:
-        return kind.model_validate(value.model_dump())
+        # ``warnings=False``: a forged field would otherwise be quoted in a serializer warning,
+        # which reaches logs. Validation below still refuses it.
+        return kind.model_validate(value.model_dump(warnings=False))
     except (ValidationError, TypeError, ValueError, AttributeError):
         raise _Untrusted() from None
 

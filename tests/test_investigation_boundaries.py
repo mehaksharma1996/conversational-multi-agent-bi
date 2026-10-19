@@ -27,6 +27,7 @@ RUNTIME_MODULES = (
     ROOT / "src" / "orchestration" / "investigation_graph.py",
     ROOT / "src" / "orchestration" / "planning_prompt.py",
     ROOT / "src" / "orchestration" / "investigation_planning.py",
+    ROOT / "src" / "orchestration" / "investigation_proposal.py",
     ROOT / "src" / "llm" / "bounded.py",
 )
 
@@ -116,6 +117,8 @@ BANNED_NAMES = frozenset(
         "ProviderPricingTable",
         "ProviderCostProfile",
         "planner_port",
+        # the proposal graph's trusted lifecycle owner (INV-4 S4)
+        "InvestigationProposalRun",
         # state is written through guarded graph steps only
         "StateGraph",
         "InMemorySaver",
@@ -330,6 +333,9 @@ def test_investigation_runtime_cannot_reach_evaluator_only_data(path: Path) -> N
         "from packages.investigation.gateway import ProviderEnvelope",
         "from packages.investigation.gateway import PLANNING_STAGE_INPUT_TOKENS",
         "from packages.investigation.gateway import check_planning_authority",
+        # INV-4 S4: the proposal graph owner stays trusted
+        "from src.orchestration.investigation_proposal import InvestigationProposalRun",
+        "import src.orchestration.investigation_proposal",
     ],
 )
 def test_the_checker_detects_each_violation(source: str) -> None:

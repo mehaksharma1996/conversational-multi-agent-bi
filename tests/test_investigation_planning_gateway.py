@@ -248,11 +248,13 @@ def test_a_success_closes_the_gateway_to_any_further_call() -> None:
 def test_the_supervisor_port_exposes_two_operations_and_no_tool_surface() -> None:
     h = _harness()
     public = {name for name in dir(InvestigationPlanningGateway) if not name.startswith("_")}
-    assert public == {"initial", "repair", "closed", "usage", "close", "planner_port"}
+    assert public == {"initial", "repair", "closed", "usage", "close", "planner_port", "ledger"}
     port: PlannerGateway = h.gateway.planner_port()
     assert {name for name in dir(port) if not name.startswith("_")} == {"initial", "repair"}
-    for forbidden in ("execute_sql", "prepare_sql", "research_documents", "ledger"):
+    for forbidden in ("execute_sql", "prepare_sql", "research_documents"):
         assert not hasattr(h.gateway, forbidden) and not hasattr(port, forbidden)
+    # Trusted graph wiring reads the gateway's ledger; the Supervisor's port never exposes it.
+    assert not hasattr(port, "ledger")
 
 
 # --- invalid candidates are fixed codes, never repaired here ----------------------------------

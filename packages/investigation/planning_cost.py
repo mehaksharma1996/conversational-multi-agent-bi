@@ -110,6 +110,7 @@ def _revalidated[T: (ProviderEnvelope, ProviderPricingTable, ReviewedPlanningEvi
     if type(value) is not kind:
         raise CostInputInvalid()
     try:
-        return kind.model_validate(value.model_dump())
+        # ``warnings=False``: a forged field would otherwise be quoted in a serializer warning.
+        return kind.model_validate(value.model_dump(warnings=False))
     except (ValidationError, TypeError, ValueError, AttributeError):
         raise CostInputInvalid() from None

@@ -21,11 +21,15 @@ pickle or class revival. This module keeps them that way:
   in one step make LangGraph refuse the step (``InvalidUpdateError``) and the thread unreadable:
   writers run one at a time, because each is validated only against the state before its step.
   The dispatcher's node is bound to the trusted gateway's ``BudgetLedger``; every change to
-  budget usage must equal that ledger's snapshot, and is refused without one.
+  budget usage must equal that ledger's snapshot, and is refused without one. In a proposal graph
+  (INV-4 S4) the Supervisor's node is bound the same way to the planning gateway's ledger, which
+  its ``proposal_record`` must match.
 - ``guarded_node`` records every node it builds (owner and bound ledger) in a private registry.
   ``require_guarded_graph`` refuses a compiled graph with any node the registry does not know, so a
   raw function, a lambda, or a function carrying a copied marker cannot be registered as an
-  investigation node. With ``ledger=``, every budget writer must also be bound to that ledger.
+  investigation node. With ``ledger=``, every budget writer must also be bound to that ledger;
+  with ``planning_ledger=``, every Supervisor writer must be bound to that one and no budget writer
+  may exist.
   ``investigation_graph.InvestigationGraphBuilder`` is the registration interface that applies all
   of this by construction (S7).
 - ``load_investigation_state`` first checks that the graph is guarded and that its checkpointer is
@@ -61,6 +65,9 @@ from packages.investigation.state import (
 )
 
 NodeStep = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+# Writers whose channels must match a trusted ledger: execution budget usage, and the planning
+# proposal record (INV-4 S4).
+_LEDGER_WRITERS = frozenset({CHANNEL_OWNERS["budget_usage"], CHANNEL_OWNERS["proposal_record"]})
 
 
 @dataclass(frozen=True)
@@ -123,12 +130,11 @@ def guarded_node(
 
     The validated update is returned with ``step_writer`` set to ``owner``, so LangGraph refuses a
     step in which two guarded nodes write. ``ledger`` binds the budget writer to the trusted
-    gateway's ledger when the graph is built; the step itself never supplies it.
+    gateway's ledger, or the proposal-record writer to the planning gateway's ledger, when the
+    graph is built; the step itself never supplies it.
     """
-    if ledger is not None and (
-        type(ledger) is not BudgetLedger or owner != CHANNEL_OWNERS["budget_usage"]
-    ):
-        raise ValueError("Only the budget writer may be bound, and only to a BudgetLedger.")
+    if ledger is not None and (type(ledger) is not BudgetLedger or owner not in _LEDGER_WRITERS):
+        raise ValueError("Only a ledger-bound writer may be bound, and only to a BudgetLedger.")
 
     def node(state: Mapping[str, Any]) -> dict[str, Any]:
         try:
@@ -147,12 +153,21 @@ def guarded_node(
     return node
 
 
-def require_guarded_graph(graph: Any, *, ledger: BudgetLedger | None = None) -> None:
+def require_guarded_graph(
+    graph: Any,
+    *,
+    ledger: BudgetLedger | None = None,
+    planning_ledger: BudgetLedger | None = None,
+) -> None:
     """Refuse a compiled investigation graph unless every node was built by ``guarded_node``.
 
     With ``ledger``, every budget writer must be bound to exactly that ledger, so the dispatcher
-    can record only the trusted gateway's own usage. Raises ``StateInvalid("graph_not_guarded")``.
-    Anything that cannot be inspected (an unknown graph type, a library change) counts as unguarded.
+    can record only the trusted gateway's own usage, and no Supervisor writer may be bound to any
+    ledger (an execution graph never writes a planning record). With ``planning_ledger`` (a
+    proposal graph), every Supervisor writer must be bound to exactly that ledger and no budget
+    writer may exist.
+    Raises ``StateInvalid("graph_not_guarded")``. Anything that cannot be inspected (an unknown
+    graph type, a library change) counts as unguarded.
     """
     try:
         specs = dict(graph.builder.nodes)
@@ -167,6 +182,16 @@ def require_guarded_graph(graph: Any, *, ledger: BudgetLedger | None = None) -> 
             raise StateInvalid("graph_not_guarded")
         if ledger is not None and registration.owner == CHANNEL_OWNERS["budget_usage"]:
             if registration.ledger is not ledger:
+                raise StateInvalid("graph_not_guarded")
+        if ledger is not None and registration.owner == CHANNEL_OWNERS["proposal_record"]:
+            if registration.ledger is not None:
+                raise StateInvalid("graph_not_guarded")  # no planning record in execution
+        if planning_ledger is not None:
+            if registration.owner == CHANNEL_OWNERS["budget_usage"]:
+                raise StateInvalid("graph_not_guarded")  # no execution budget in planning
+            if registration.owner == CHANNEL_OWNERS["proposal_record"] and (
+                registration.ledger is not planning_ledger
+            ):
                 raise StateInvalid("graph_not_guarded")
 
 

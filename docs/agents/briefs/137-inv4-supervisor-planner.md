@@ -862,11 +862,12 @@ the S2e changes. S2 delivers the bounded planning gateway; it is not yet the Sup
   usage the Supervisor never sees, a Supervisor-detected failure is a separate fixed
   `SupervisorFailureCode` in `SupervisorOutcome`, not a fabricated result. S4 must pass
   `planner_port()`, never the gateway, to `plan_investigation`.
-- **S4:** proposal mode in `InvestigationGraphBuilder`; a planning node that constructs the gateway
-  from trusted authority/context, owns `close(...)`, applies `planning_lifecycle_target` through the
-  existing guarded transitions, writes the proposal record and planning `BudgetUsage` with strict
-  owner rules, and closes an abandoned `repair_available` session (the state's `ledger_open` check
-  requires a closed ledger at any terminal status).
+- **S4 (delivered):** proposal mode in `InvestigationGraphBuilder`;
+  `src/orchestration/investigation_proposal.py:InvestigationProposalRun` builds the gateway from
+  trusted inputs, passes only `planner_port()` to `plan_investigation`, owns `close(...)`, writes
+  the plan and a write-once Supervisor-owned `proposal_record` bound to the planning ledger, and
+  moves status through guarded lifecycle steps; `tests/test_investigation_proposal_graph.py`.
+  `STATE_VERSION` stays 1 (optional channel, process-local checkpoints).
 - **S5:** consolidated documentation (ADR 0024 amendment) and the readiness review.
 - **Proposal withdrawal:** after `proposed`, the planning gateway is terminal and every later
   call or `close(...)` is `gateway_closed`. Cancelling or withdrawing a proposal that awaits

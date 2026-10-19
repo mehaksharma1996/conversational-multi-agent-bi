@@ -263,6 +263,25 @@ can cause another call; a malformed result or a raising port ends with a fixed
 which the S4 lifecycle owner records as `failed` after closing the gateway. It imports only the
 port, the result types, and the pure planning enums.
 
+**Proposal graph (INV-4 S4).** `InvestigationProposalRun`
+(`src/orchestration/investigation_proposal.py`) is the trusted lifecycle owner of one planning step.
+It builds the planning gateway from server-side inputs and compiles a proposal-mode graph with
+`InvestigationGraphBuilder`, which in that mode registers only `intake`, `supervisor`, and
+`lifecycle` steps, binds the Supervisor writer to the planning ledger, and refuses any dispatcher
+(no execution ledger, no tool gateway); an execution graph, conversely, refuses any ledger-bound
+Supervisor writer, so it can never write a planning record. The steps are intake (version and
+scope), lifecycle (`planning`), Supervisor (`plan_investigation` with `planner_port()` only, then
+the plan and a `proposal_record` in one guarded update), and lifecycle (the record's target).
+`proposal_record` is a write-once, Supervisor-owned channel: outcome, a fixed code, the lifecycle
+target, the plan digest for a proposal, the closed planning ledger's `BudgetUsage` (which must equal
+the bound ledger), and the `CostEstimate`; never prompts, candidates, missing-information text, or
+errors. State invariants tie a proposed record to the stored plan's digest, keep a failed planning
+step at its own target, and allow the record only while `planning`. The owner closes the gateway
+(`abandoned` on a Supervisor failure, `shutdown` on an exception) before recording. A proposal
+reaches `awaiting_plan_approval` only; queuing and running still require a plan approval the
+proposal graph cannot write. `STATE_VERSION` stays 1: the channel is optional, existing states
+restore unchanged, and checkpoints are process-local.
+
 ### Supported model clients
 
 The gateway runs model calls only for a `BoundedModelAdapter` (`src/llm/bounded.py`). No production
