@@ -318,8 +318,10 @@ def test_derived_payload_is_a_closed_contract(changes: dict[str, Any]) -> None:
         derived_payload(**changes)
 
 
-def test_derived_evidence_has_no_producer_record_kind_or_computation() -> None:
-    assert "derived" not in EvidenceRecord.model_fields["kind"].annotation.__args__
+def test_derived_evidence_has_no_payload_side_computation() -> None:
+    # INV-6 D4 adds the ``derived`` record kind and an owner-only gateway producer; the payload
+    # contract itself still computes nothing, and a query record never verifies a derived payload.
+    assert "derived" in EvidenceRecord.model_fields["kind"].annotation.__args__
     public = {name for name, value in vars(DerivedEvidencePayload).items() if callable(value)}
     assert not {name for name in public if not name.startswith("_")}
     assert (
