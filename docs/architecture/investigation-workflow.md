@@ -225,6 +225,17 @@ production client is a `BoundedModelAdapter`, so document research and any other
 investigation tool is refused with `metering_unbounded` before any resource is resolved or budget
 reserved.
 
+**Planning (INV-4 S2c).** `InvestigationPlanningGateway`
+(`src/orchestration/investigation_planning.py`) makes at most one initial planning call. It checks
+cancellation, the ledger's remaining time, and `check_planning_authority`, then admits only a
+`DeadlineBoundedModelAdapter` whose single envelope member `ReviewedPlanningEvidence.covering`
+matches exactly (`admit_planning_adapter`). It reserves the full 6,000/1,000 initial stage on one
+`BudgetLedger(PLANNING_LIMITS)` before exact counting, and calls once with the ledger's remaining
+original deadline. Settlement follows the tool gateway's conservative rules, and additionally
+requires the reported input to equal the exact count. No production client or reviewed evidence
+exists, so production planning is refused with `metering_unbounded` before the prompt is rendered.
+The one repair attempt is S2d.
+
 ### Supported model clients
 
 The gateway runs model calls only for a `BoundedModelAdapter` (`src/llm/bounded.py`). No production
