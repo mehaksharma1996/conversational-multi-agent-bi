@@ -90,6 +90,16 @@ database error messages. Evidence payloads stay in this process (``evidence_payl
   records. Each payload is built at issuance from the same values as its ``EvidenceRecord`` and
   verified before the evidence is issued; a payload that cannot be built fails the task.
 
+**INV-6 S4.** ``derive_evidence(state, DeriveEvidence)`` is owner-only too. For a succeeded SQL
+hypothesis test of an approved v2 plan, it recomputes the test's observation from the typed query
+payload it issued (``packages.investigation.verdicts.observe``), refuses unless the observation is
+usable, and issues derived evidence: a ``DerivedProvenance`` record (the fixed operation and the
+source evidence ID) and a process-local ``DerivedEvidencePayload`` (the counts and their exact
+difference). It runs no tool, calls no model, and charges nothing; no caller can supply a number.
+A hypothesis test's SQL question is rendered deterministically from its approved, resolved
+specification (``_sql_question``), so the model sees the exact groups, periods, and the count
+columns the verdict needs.
+
 A gateway built with ``retry_categories`` (the run owner passes ``RETRYABLE_CATEGORIES``) also
 refuses a second attempt unless the attempt's last recorded failure is in that set, so an unknown
 invocation outcome is never retried even by a misbehaving caller.
@@ -145,6 +155,7 @@ from packages.investigation.evidence import (
     MAX_CELL_CHARS,
     MAX_FILENAME_CHARS,
     MAX_QUERY_ROWS,
+    DerivedEvidencePayload,
     DocumentEvidencePayload,
     DocumentSource,
     QueryEvidencePayload,
@@ -161,6 +172,14 @@ from packages.investigation.gateway import (
     check_authority,
     check_binding,
 )
+from packages.investigation.hypotheses import (
+    HypothesisTestSpec,
+    InvestigationPlanV2,
+    RateMetric,
+    ResolvedTest,
+    SpecIncomplete,
+    resolve_test,
+)
 from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.refusals import (
     LEDGER_CLOSE_REASON,
@@ -172,6 +191,7 @@ from packages.investigation.refusals import (
 )
 from packages.investigation.state import (
     MAX_EVIDENCE_STATUSES,
+    DerivedProvenance,
     DocumentProvenance,
     EvidenceRecord,
     GatewayDecision,
@@ -184,6 +204,7 @@ from packages.investigation.state import (
     TaskRecord,
     restore_state,
 )
+from packages.investigation.verdicts import derived_payload_for, observe
 from src.agents.rag_agent import RAGAgentError
 from src.agents.sql_agent import execute_sql
 from src.documents.retriever import RetrievalResult, Retriever
@@ -291,6 +312,13 @@ class FinishAttempt(_Request):
     role: AgentRole
 
 
+class DeriveEvidence(_Request):
+    """Owner-only (INV-6): derive the approved test's observation from its own query evidence."""
+
+    task_id: TaskId
+    role: AgentRole
+
+
 _TaskRequest = (
     BeginAttempt
     | ResearchDocuments
@@ -299,6 +327,7 @@ _TaskRequest = (
     | PrepareCorrection
     | SkipTask
     | FinishAttempt
+    | DeriveEvidence
 )
 
 # How the run owner closes the gateway, and the ledger close reason each one records.
@@ -347,7 +376,7 @@ class SQLEvidencePayload:
 
 
 type EvidencePayload = DocumentResearchOutcome | SQLEvidencePayload
-type TypedEvidencePayload = QueryEvidencePayload | DocumentEvidencePayload
+type TypedEvidencePayload = QueryEvidencePayload | DocumentEvidencePayload | DerivedEvidencePayload
 
 
 # --- trusted ports ------------------------------------------------------------------------------
@@ -799,6 +828,10 @@ class InvestigationToolGateway:
         """End a running task with the gateway's record of its last failure."""
         return self._operate("finish_attempt", FinishAttempt, state, request, self._finish)
 
+    def derive_evidence(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """Issue derived evidence for a succeeded SQL hypothesis test; no tool, model, or charge."""
+        return self._operate("derive_evidence", DeriveEvidence, state, request, self._derive)
+
     def close(self, reason: ExecutionCloseReason) -> None:
         """Close permanently: revoke every token, handle, and correction, and close the ledger.
 
@@ -957,6 +990,68 @@ class InvestigationToolGateway:
             task_id=call.task_id, status="failed", attempts=record.attempts, outcome=outcome
         )
         return self._result(call, "succeeded", tasks={call.task_id: _dump(ended)})
+
+    def _derive(self, call: _Call, request: DeriveEvidence) -> GatewayResult:
+        task, record = self._admitted(call)
+        plan = call.view.plan
+        if (
+            not isinstance(plan, InvestigationPlanV2)
+            or task.kind is not TaskKind.HYPOTHESIS_TEST
+            or record.status != "succeeded"
+            or record.outcome is None
+        ):
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)
+        try:
+            test = resolve_test(plan, task)
+        except SpecIncomplete:
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED) from None
+        refs = [ref.id for ref in record.outcome.evidence_refs if ref.kind == "query"]
+        source = call.view.evidence.get(refs[0]) if len(refs) == 1 else None
+        payload = self._typed.get(refs[0]) if len(refs) == 1 else None
+        if (
+            source is None
+            or not isinstance(payload, QueryEvidencePayload)
+            or verify_payload(source, payload) is not None
+            or any(
+                isinstance(item.provenance, DerivedProvenance)
+                and item.provenance.source_evidence_ids == (source.id,)
+                for item in call.view.evidence.values()
+            )
+        ):
+            raise _Refused(RefusalCode.INVALID_REQUEST)  # nothing usable, or already derived
+        self._check_authority()
+        observation = observe(test, source.id, payload)
+        if observation.outcome == "unusable":
+            raise _Refused(RefusalCode.INVALID_REQUEST)  # the verdict says why; nothing to derive
+        scope = call.view.scope
+        assert scope is not None
+        evidence_id = "ev_" + self._nonce()
+        try:
+            derived = derived_payload_for(
+                test, observation, evidence_id=evidence_id, attempt=source.attempt
+            )
+            evidence = EvidenceRecord(
+                id=evidence_id,
+                kind="derived",
+                task_id=call.task_id,
+                attempt=source.attempt,
+                provenance=DerivedProvenance(
+                    dataset_id=scope.dataset_id or "",
+                    operation=derived.operation,
+                    source_evidence_ids=derived.source_evidence_ids,
+                ),
+            )
+            if verify_payload(evidence, derived) is not None:
+                raise ValueError("derived")
+        except (ValidationError, TypeError, ValueError):
+            raise _Refused(RefusalCode.INVALID_REQUEST) from None
+        self._typed[evidence_id] = derived
+        return self._result(
+            call,
+            "succeeded",
+            evidence={evidence_id: _dump(evidence)},
+            evidence_id=evidence_id,
+        )
 
     def _closure(self) -> RefusalCode | None:
         """The refusal a call meets once the gateway is closed, by refusal or by the owner."""
@@ -1168,7 +1263,7 @@ class InvestigationToolGateway:
     def _prepare_sql(self, call: _Call, request: PrepareSQL) -> GatewayResult:
         task, record = self._admitted(call)
         self._require_attempt(call, record, request.attempt)
-        question = _sql_question(task)
+        question = _sql_question(task, call.view.plan)
         if self._authority.sql_approval_required:
             raise _Refused(RefusalCode.SQL_APPROVAL_REQUIRED)  # no approval binding until INV-10
         adapter, model_request = self._model_admission()
@@ -1199,7 +1294,7 @@ class InvestigationToolGateway:
         pending = self._pending.get(call.task_id)
         if pending is None or pending.attempt != record.attempts:
             raise _Refused(RefusalCode.ATTEMPT_MISMATCH)  # nothing the gateway saw fail
-        question = _sql_question(task)
+        question = _sql_question(task, call.view.plan)
         if self._authority.sql_approval_required:
             raise _Refused(RefusalCode.SQL_APPROVAL_REQUIRED)
         adapter, model_request = self._model_admission()
@@ -1354,7 +1449,7 @@ class InvestigationToolGateway:
         if (
             revalidated != prepared.sql
             or not hmac.compare_digest(self._fingerprint(revalidated), prepared.fingerprint)
-            or self._policy_status(scope, task, revalidated, _sql_question(task))
+            or self._policy_status(scope, task, revalidated, _sql_question(task, call.view.plan))
             != prepared.policy_status
         ):
             raise _Refused(RefusalCode.HANDLE_STALE)
@@ -1838,11 +1933,16 @@ def _document_instruction(task: PlanTask) -> tuple[str, int]:
     raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)
 
 
-def _sql_question(task: PlanTask) -> str:
+def _sql_question(task: PlanTask, plan: object = None) -> str:
     """The analysis question of an admitted task that may run SQL, built from the plan only."""
     task_input = task.input
     if task.kind is TaskKind.SQL_ANALYSIS and isinstance(task_input, SQLAnalysisInput):
         return f"{task_input.objective}\nUse these fields: {', '.join(task_input.fields)}."
+    if isinstance(task_input, HypothesisTestSpec) and isinstance(plan, InvestigationPlanV2):
+        try:
+            return _hypothesis_question(resolve_test(plan, task))
+        except SpecIncomplete:
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED) from None
     if (
         task.kind is TaskKind.HYPOTHESIS_TEST
         and isinstance(task_input, HypothesisTestInput)
@@ -1984,4 +2084,48 @@ def _document_payload(
             "evidence_statuses": tuple(answer.evidence_statuses[:MAX_EVIDENCE_STATUSES]),
             "answer": UntrustedModelText(text=str(answer.answer)[:MAX_ANSWER_CHARS]),
         }
+    )
+
+
+def _hypothesis_question(test: ResolvedTest) -> str:
+    """A deterministic rendering of an approved, resolved hypothesis test (INV-6 S4).
+
+    Literal values are validated to contain no quotes or control characters, so quoting them is
+    safe; the read-only guard still checks the SQL the model returns.
+    """
+    period = test.period
+    groups = [(item.field, item.value) for item in test.filters]
+    keys = [period.field, *(field for field, _ in groups)]
+    rows = f"{period.field} in ('{period.baseline}', '{period.comparison}')"
+    if test.comparison_group is not None:
+        other = test.comparison_group
+        keys.append(other.field)
+        rows = f"{period.field} = '{period.comparison}'"
+        groups_text = " and ".join(f"{field} = '{value}'" for field, value in groups)
+        group_rows = (
+            f"either ({groups_text}) or ({other.field} = '{other.value}')"
+            if groups_text
+            else f"{other.field} = '{other.value}'"
+        )
+    else:
+        group_rows = " and ".join(f"{field} = '{value}'" for field, value in groups) or "all rows"
+    metric = test.metric
+    if isinstance(metric, RateMetric):
+        counts = (
+            f"denominator = the number of rows where {metric.population} is true; numerator = the "
+            f"number of those rows where {metric.event} is true"
+        )
+        count_columns = "numerator, denominator"
+    else:
+        counts = (
+            f"value_sum = the sum of {metric.value}; value_count = the number of rows where "
+            f"{metric.value} is not null"
+        )
+        count_columns = "value_sum, value_count"
+    key_list = ", ".join(dict.fromkeys(keys))
+    return (
+        f"Measure for hypothesis {test.hypothesis_id} ({test.method.replace('_', ' ')}). "
+        f"Return exactly one row per combination of {key_list}, with the columns {key_list}, "
+        f"{count_columns}. Keep only rows where {rows} and {group_rows}. Compute {counts}. "
+        "Return raw counts only; do not compute rates."
     )

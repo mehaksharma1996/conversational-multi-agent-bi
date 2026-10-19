@@ -67,6 +67,10 @@ SPECIALIST_IMPORTS: dict[str, frozenset[str] | None] = {
     "packages.investigation.lifecycle": ANY,
     "packages.investigation.validation": ANY,
     "packages.investigation.budget": frozenset({"BudgetUsage", "BudgetLimits"}),
+    # INV-6 S4: the pure hypothesis, evidence-payload, and verdict contracts (no tool or model).
+    "packages.investigation.hypotheses": ANY,
+    "packages.investigation.evidence": ANY,
+    "packages.investigation.verdicts": ANY,
     "src.orchestration.tool_gateway": _TOOL_REQUESTS,
     "src.orchestration.investigation_graph": frozenset({"InvestigationGraphBuilder"}),
     # INV-4 S2e: the Supervisor plans only through the two-operation port.
@@ -107,6 +111,10 @@ BANNED_NAMES = frozenset(
         "ExecutionCloseReason",
         "ApprovedPlanHandoff",
         "InvestigationExecutionRun",
+        # INV-6: derivation and verdict writing stay with the trusted owner
+        "derive_evidence",
+        "DeriveEvidence",
+        "derived_payload_for",
         # authority and consent come from the trusted adapter, never from investigation code
         "InvestigationAuthority",
         "ConsentSnapshot",

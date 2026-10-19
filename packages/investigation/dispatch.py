@@ -381,6 +381,8 @@ class LimitationCode(StrEnum):
     DOCUMENT_EVIDENCE_UNVERIFIED = "document_evidence_unverified"
     QUERY_ROWS_TRUNCATED = "query_rows_truncated"
     REPORT_ROWS_LIMITED = "report_rows_limited"
+    # INV-6: a hypothesis-bearing run stopped before its verdicts could be evaluated.
+    VERDICTS_NOT_EVALUATED = "verdicts_not_evaluated"
 
 
 # A run that ended this way always states it.
