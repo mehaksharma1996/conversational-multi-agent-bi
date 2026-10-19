@@ -43,6 +43,7 @@ from packages.investigation.contracts import (
     PlanTask,
     TaskKind,
 )
+from packages.investigation.hypotheses import PLAN_V2, AnyPlan
 from packages.investigation.state import InvestigationScope
 from packages.investigation.validation import (
     PlanViolation,
@@ -145,9 +146,12 @@ class PlanningContext(_PlanningContract):
 
 
 class PlanningDraft(_PlanningContract):
-    """The only shape accepted from a planning model before deterministic validation."""
+    """The only shape accepted from a planning model before deterministic validation.
 
-    plan: InvestigationPlan
+    ``plan`` is a version-1 plan, or a version-2 plan with hypotheses (INV-6), by strict dispatch.
+    """
+
+    plan: AnyPlan
     missing_information: tuple[MissingInformation, ...] = Field(
         default=(), max_length=MAX_MISSING_INFORMATION
     )
@@ -216,7 +220,7 @@ class InvestigationProposal(_PlanningContract):
     """Non-executable review wrapper around one already validated ``InvestigationPlan``."""
 
     proposal_schema_version: Literal[1] = 1
-    plan: InvestigationPlan
+    plan: AnyPlan
     missing_information: tuple[MissingInformation, ...] = Field(
         default=(), max_length=MAX_MISSING_INFORMATION
     )
@@ -244,8 +248,11 @@ def validate_planning_draft(
     plan_value = candidate.get("plan")
     if isinstance(plan_value, Mapping):
         version = plan_value.get("schema_version", SCHEMA_VERSION)
-        if version != SCHEMA_VERSION:
+        # Exact integers only: ``True`` and ``1.0`` equal 1 but are not a version.
+        if type(version) is not int or version not in (SCHEMA_VERSION, PLAN_V2):
             return _invalid("unsupported_plan_version")
+        if "schema_version" not in plan_value:  # a v1 plan may omit its default version
+            candidate = {**candidate, "plan": {**plan_value, "schema_version": SCHEMA_VERSION}}
     try:
         draft = PlanningDraft.model_validate(candidate)
     except ValidationError:

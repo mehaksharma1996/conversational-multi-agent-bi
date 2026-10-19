@@ -214,11 +214,19 @@ def test_malformed_proposals_return_one_content_free_code(candidate: object) -> 
     )
 
 
-def test_unsupported_plan_version_has_a_distinct_content_free_code() -> None:
+@pytest.mark.parametrize("version", [3, 0, True, 1.0, "1"])
+def test_unsupported_plan_version_has_a_distinct_content_free_code(version: object) -> None:
     candidate = _candidate()
-    candidate["plan"]["schema_version"] = 2
+    candidate["plan"]["schema_version"] = version
     result = validate_planning_draft(candidate, context=_context())
     assert result.errors == (PlanningValidationError(code="unsupported_plan_version"),)
+
+
+def test_a_v1_shaped_plan_labelled_v2_is_an_invalid_v2_draft() -> None:
+    candidate = _candidate()
+    candidate["plan"]["schema_version"] = 2  # INV-6: version 2 exists but needs hypotheses
+    result = validate_planning_draft(candidate, context=_context())
+    assert result.errors == (PlanningValidationError(code="planning_draft_invalid"),)
 
 
 def test_nested_unknown_plan_fields_are_rejected_before_plan_validation() -> None:

@@ -95,7 +95,7 @@ class BudgetLimits(BaseModel):
 PLANNING_LIMITS = BudgetLimits(
     model_calls=2,
     input_tokens=12_000,
-    output_tokens=2_000,
+    output_tokens=4_000,  # INV-6 D2: two 2,000-token stages
     sql_executions=0,
     retrievals=0,
     task_attempts=0,

@@ -756,11 +756,12 @@ def test_hidden_retries_are_charged_as_extra_calls_and_mark_the_bound_exceeded()
 
 
 def test_output_over_the_cap_is_charged_as_reported_and_exceeded() -> None:
-    script = _answer(reports=({"prompt_tokens": 1_234, "output_tokens": 1_001},))
+    over = PLANNING_STAGE_OUTPUT_TOKENS + 1
+    script = _answer(reports=({"prompt_tokens": 1_234, "output_tokens": over},))
     h = _harness(adapter=_scripted(script))
     _refused(h.initial(), C.METERING_VIOLATION)
     usage = h.gateway.usage()
-    assert usage.output_tokens == 1_001 and usage.reservation_bound == "exceeded"
+    assert usage.output_tokens == over and usage.reservation_bound == "exceeded"
     assert usage.closed_reason == "reservation_exceeded"
 
 

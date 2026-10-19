@@ -34,9 +34,9 @@ Both stages run the same pre-flight, stopping at the first failure before any mo
    the repair ``render_repair_prompt`` with the initial attempt's fixed validation codes and
    task IDs, whose ``metadata_digest`` must equal the initial one (``state_invalid``). The raw
    initial candidate is never kept, so it cannot reach the repair prompt;
-8. the stage's full allowance (1 call, 6,000 input, 1,000 output) reserved on the one
+8. the stage's full allowance (1 call, 6,000 input, 2,000 output) reserved on the one
    ``BudgetLedger(PLANNING_LIMITS)``, which is never reset and whose 30-second deadline is never
-   extended; the two stages together cannot exceed 2 calls, 12,000 input, and 2,000 output.
+   extended; the two stages together cannot exceed 2 calls, 12,000 input, and 4,000 output.
 
 Then, with a provider-call meter installed, the adapter counts the complete request exactly
 (a non-integer or non-positive count, or a counter that raises, is ``metering_unbounded``; a count
