@@ -818,3 +818,59 @@ No conflict requires weakening ADR 0024, INV-3 authorization, S1 validation, cos
 Supervisor prohibition on `hypothesis_test`. The only architectural tension is ADR 0024's honest
 statement that ordinary in-flight calls may finish: S2 resolves it by admitting no planning adapter
 unless provider-side deadline/termination behavior is a reviewed guarantee.
+
+## S2e integration-readiness audit
+
+Audit date: 2026-10-19, on `feat/iteration2-inv4-supervisor-planner` after S2a-S2d (`9d60c86`) plus
+the S2e changes. S2 delivers the bounded planning gateway; it is not yet the Supervisor component
+(S3) or the proposal subgraph (S4) that this brief names as INV-4's end state, so issue #137 is
+**not complete**.
+
+### Issue #137 acceptance against S0-S2e
+
+| Requirement | Status | Evidence (tests) |
+|---|---|---|
+| Scripted churn plan validates | Met at gateway level | `test_investigation_planning_gateway.py::test_one_scripted_call_returns_a_validated_non_executable_proposal`; `test_investigation_planning_repair.py::test_end_to_end_churn_planning_repairs_an_unknown_field_once` |
+| Invalid initial plan repaired once | Met at gateway level | `test_investigation_planning_repair.py::test_invalid_initial_then_valid_repair_is_proposed_within_one_ledger` |
+| Still invalid after one repair ends in `plan_invalid` | Met at gateway level | `test_investigation_planning_repair.py::test_two_invalid_candidates_are_the_terminal_plan_invalid`, `test_end_to_end_churn_unknown_field_twice_is_plan_invalid_with_task_ids` |
+| 2 calls / 12k input / 2k output / 30 s / zero tools | Met | `test_two_maximal_stages_exactly_fill_the_planning_budget`, `test_the_repair_deadline_is_what_remains_of_the_original_thirty_seconds`, `test_illegal_sequences_are_refused_without_any_new_allowance`, tool/network spies in all three gateway suites, `test_planning_runtime_cannot_reach_sql_retrieval_models_or_test_code` |
+| Planner input has no rows or passages (schema and titles only) | Met | `test_investigation_planning_prompt.py` allowlist, injection, and forged-field tests; `test_end_to_end_churn_planning_repairs_an_unknown_field_once` (no row values, oracle, or reference SQL in either prompt) |
+| Estimate follows `CostEstimate.bound`; nothing guaranteed unless enforceable for every eligible provider, fallbacks included | Met for classification; no user-facing wording exists yet | `test_investigation_planning_prompt.py` reviewed-evidence cost tests; `test_investigation_planning_gateway_contracts.py` evidence tests; `test_unknown_pricing_does_not_block_planning_but_is_reported_honestly` |
+| Not reachable from the router | Met (by design) | No router, API, or graph imports the gateway; `test_planning_runtime_cannot_reach_sql_retrieval_models_or_test_code` |
+| Legacy workflows unaffected | Met | `test_langgraph_orchestrator.py`, `test_evaluation_baseline.py`, `python -m scripts.check_all` evaluations; no legacy module changed |
+| `check_all` passes; no evaluation case removed or worsened | Met | `python -m scripts.check_all` 5/5; `evals/` untouched |
+
+### Production exclusion (S2e)
+
+- `test_investigation_boundaries.py::test_production_code_has_no_test_fakes_deadline_adapters_or_fabricated_records`
+  scans `src/`, `apps/`, `packages/`, and `config/`: no `tests` import, no production
+  `DeadlineBoundedModelAdapter` subclass, and no constructed `ReviewedPlanningCapability`,
+  `ReviewedPlanningEvidence`, or `ProviderPricingTable` (only `planning_cost.py` derives effective
+  `ProviderCostProfile` values).
+- `test_planning_runtime_cannot_reach_sql_retrieval_models_or_test_code` forbids the planning
+  modules from importing SQL, retrieval, document research, the execution gateway, graphs,
+  checkpoints, real model clients, `sqlite3`, `socket`, `logging`, `importlib`, tests, or evaluators.
+- Specialist rules ban the planning gateway, authority, context, admission, pricing, evidence, and
+  `planner_port`; a Supervisor may import only `PlannerPort` and the result types.
+- Each checker has synthetic negative cases, so an empty scan cannot pass vacuously.
+
+### Remaining for S3/S4 and production
+
+- **S3:** `src/investigation/supervisor.py` driving `PlannerPort` (initial, then at most one repair)
+  under the specialist boundary; the brief's S3 test list.
+- **S4:** proposal mode in `InvestigationGraphBuilder`; a planning node that constructs the gateway
+  from trusted authority/context, owns `close(...)`, applies `planning_lifecycle_target` through the
+  existing guarded transitions, writes the proposal record and planning `BudgetUsage` with strict
+  owner rules, and closes an abandoned `repair_available` session (the state's `ledger_open` check
+  requires a closed ledger at any terminal status).
+- **S5:** consolidated documentation (ADR 0024 amendment) and the readiness review.
+- **Proposal withdrawal:** after `proposed`, the planning gateway is terminal and every later
+  call or `close(...)` is `gateway_closed`. Cancelling or withdrawing a proposal that awaits
+  approval is a lifecycle-owner transition from `awaiting_plan_approval` (S4 or later), not a
+  gateway operation.
+- **Production:** a reviewed real `DeadlineBoundedModelAdapter`, and a trusted owner and version
+  format for reviewed evidence and pricing (open approvals 4-5). Until then, production planning is
+  refused with `metering_unbounded`.
+- **Deferred accounting display:** an over-input count records `budget_exhausted` without
+  `exhausted_resource`; the 6,000 limit is a stage partition, not a ledger limit, so no ledger
+  change was made.

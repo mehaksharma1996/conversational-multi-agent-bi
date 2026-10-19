@@ -236,8 +236,10 @@ def test_the_deadline_is_the_ledgers_original_remaining_time_never_extended() ->
 def test_a_success_closes_the_gateway_to_any_further_call() -> None:
     h = _harness()
     assert h.initial().status is PlanningCallStatus.PROPOSED
+    before = h.gateway.usage()
     again = h.initial()
-    _refused(again, PlanningOutcomeCode.SEQUENCE_VIOLATION)
+    _refused(again, C.GATEWAY_CLOSED)  # a published proposal is terminal and never rewritten
+    assert h.gateway.usage() == before and h.gateway.closed is None
     assert h.model_calls == 1 and h.counts == 1
     assert h.initial().code == C.GATEWAY_CLOSED
     assert h.model_calls == 1
@@ -245,12 +247,12 @@ def test_a_success_closes_the_gateway_to_any_further_call() -> None:
 
 def test_the_supervisor_port_exposes_two_operations_and_no_tool_surface() -> None:
     h = _harness()
-    port: PlannerGateway = h.gateway
     public = {name for name in dir(InvestigationPlanningGateway) if not name.startswith("_")}
-    assert public == {"initial", "repair", "closed", "usage"}
-    assert callable(port.initial) and callable(port.repair)
+    assert public == {"initial", "repair", "closed", "usage", "close", "planner_port"}
+    port: PlannerGateway = h.gateway.planner_port()
+    assert {name for name in dir(port) if not name.startswith("_")} == {"initial", "repair"}
     for forbidden in ("execute_sql", "prepare_sql", "research_documents", "ledger"):
-        assert not hasattr(h.gateway, forbidden)
+        assert not hasattr(h.gateway, forbidden) and not hasattr(port, forbidden)
 
 
 # --- invalid candidates are fixed codes, never repaired here ----------------------------------
@@ -1003,6 +1005,7 @@ def test_the_gateway_module_reaches_no_tool_storage_graph_or_logging() -> None:
         "pydantic",
         "packages.investigation.budget",
         "packages.investigation.gateway",
+        "packages.investigation.lifecycle",
         "packages.investigation.planning",
         "packages.investigation.planning_cost",
         "packages.investigation.refusals",

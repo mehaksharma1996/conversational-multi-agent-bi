@@ -9,8 +9,11 @@ has no tool, SQL, retrieval, or resolver surface, and returns only a non-executa
 The state machine is monotonic: ``new`` -> ``initial()`` -> ``complete`` (valid) or
 ``repair_available`` (invalid); ``repair_available`` -> ``repair()`` -> ``complete`` (valid) or
 ``plan_invalid`` (invalid again). Any refusal closes the gateway. Every other call is a terminal
-``planning_sequence_violation`` (or ``gateway_closed`` once closed) before any reservation, so no
-call can create a third planning allowance.
+``planning_sequence_violation`` before any reservation, so no call can create a third planning
+allowance. Once the gateway is terminal (a refusal, ``plan_invalid``, or a published proposal),
+every later call and every ``close`` returns ``gateway_closed`` and changes nothing: no cleanup or
+stray call can turn a valid proposal into a cancellation or failure. Withdrawing a proposal that
+awaits approval belongs to the investigation lifecycle owner, not to this gateway.
 
 Both stages run the same pre-flight, stopping at the first failure before any model invocation:
 
@@ -63,7 +66,19 @@ the result's status and code.
 A count above 6,000 closes the ledger ``exhausted`` through ``BudgetLedger.close``, after releasing
 the unused reservation. ``BudgetUsage.exhausted_resource`` stays unset: the ledger names a resource
 only when an authorization or a settlement exceeds a limit, and naming ``input_tokens`` here would
-mean charging tokens that were never sent. Whether to add a ledger seam for this is left to S2e.
+mean charging tokens that were never sent. S2e kept this: the 6,000-token limit is the stage's
+partition, not the ledger's 12,000-token limit, so naming ``input_tokens`` as the exhausted ledger
+resource would misreport the ledger itself. The refusal code ``budget_exhausted`` carries the cause.
+
+Closure and ownership (S2e). The Supervisor holds only ``PlannerPort`` (``planner_port()``):
+``initial()`` and ``repair()``, nothing else. The trusted lifecycle owner, which constructed the
+gateway (in S3/S4 the proposal-graph node that owns the planning step), holds the gateway and is
+the only caller of ``close(reason)``: when it abandons an available repair, cancels, sees authority
+revoked or the planning deadline pass, or shuts down. Closure is idempotent and permanent, makes no
+model call, never resets the ledger or deadline, and seals an in-flight call so its answer is
+discarded and settled by that call under the usual rules. ``planning_lifecycle_target`` maps any
+result to the investigation status the owner may move to, and never to ``queued`` or ``running``:
+a proposal only reaches ``awaiting_plan_approval``.
 
 The gateway logs nothing, writes no state or checkpoint, and emits no telemetry. Prompts, provider
 text, candidates, exception messages, and metadata never appear in a result.
@@ -107,6 +122,7 @@ from packages.investigation.gateway import (
     check_planning_authority,
     reserve_planning_stage,
 )
+from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.planning import (
     InvestigationProposal,
     PlanningContext,
@@ -116,7 +132,7 @@ from packages.investigation.planning import (
     validate_planning_draft,
 )
 from packages.investigation.planning_cost import CostInputInvalid, estimate_planning_cost
-from packages.investigation.refusals import RefusalCode
+from packages.investigation.refusals import LIFECYCLE_TARGET, RefusalCode
 from src.llm.base import LLMResponse
 from src.llm.bounded import (
     DeadlineBoundedModelAdapter,
@@ -177,6 +193,16 @@ class PlannerGateway(Protocol):
     def initial(self) -> PlanningCallResult: ...
 
     def repair(self) -> PlanningCallResult: ...
+
+
+class PlanningCloseReason(StrEnum):
+    """Why the trusted lifecycle owner closes a planning session; each maps to one fixed code."""
+
+    ABANDONED = "abandoned"  # e.g. an available repair the owner chose not to make
+    CANCELLED = "cancelled"
+    AUTHORITY_REVOKED = "authority_revoked"
+    DEADLINE_EXPIRED = "deadline_expired"  # recorded only if the ledger's own clock agrees
+    SHUTDOWN = "shutdown"
 
 
 class _Phase(StrEnum):
@@ -278,7 +304,8 @@ class InvestigationPlanningGateway:
         self._live = live
         self._cancellation = cancellation
         self._ledger = BudgetLedger(PLANNING_LIMITS, clock=clock)
-        self._lock = Lock()
+        self._lock = Lock()  # one call at a time; held for a whole attempt
+        self._seal_lock = Lock()  # guards every terminal transition, never held across a call
         self._phase = _Phase.NEW
         self._stage = PlanningStage.INITIAL
         self._closed: PlanningCode | None = None
@@ -290,11 +317,40 @@ class InvestigationPlanningGateway:
 
     @property
     def closed(self) -> PlanningCode | None:
-        """The code that closed the gateway, or ``None`` while it is open."""
+        """The code that closed the gateway, or ``None`` while open or after a proposal."""
         return self._closed
 
     def usage(self) -> BudgetUsage:
         return self._ledger.usage()
+
+    def planner_port(self) -> PlannerPort:
+        """The Supervisor's view: ``initial()`` and ``repair()`` only."""
+        return PlannerPort(self)
+
+    def close(self, reason: PlanningCloseReason) -> PlanningCallResult:
+        """Permanently close the session for the trusted lifecycle owner; never calls a model.
+
+        Idempotent: a gateway that is already terminal, including one that published a proposal,
+        keeps its outcome (``closed`` stays its first code, or ``None`` after a proposal) and this
+        returns ``gateway_closed``, which moves no lifecycle status. A call in flight is sealed, so
+        its answer is discarded and it settles its own reservation under the proven-invocation
+        rules; with no call in flight nothing is outstanding. ``DEADLINE_EXPIRED`` is recorded as
+        ``budget_exhausted`` only when the ledger's own clock shows the deadline passed, and as
+        ``planning_abandoned`` otherwise, so the owner cannot misreport the cause.
+        """
+        if not isinstance(reason, PlanningCloseReason):
+            raise ValueError("unknown planning close reason")
+        code: PlanningCode = _CLOSE_CODES[reason]
+        if reason is PlanningCloseReason.DEADLINE_EXPIRED:
+            try:
+                self._ledger.remaining_wall_clock()
+            except BudgetExhaustedError:
+                code = RefusalCode.BUDGET_EXHAUSTED
+            except BudgetClosedError:
+                pass  # already closed: _seal keeps the first code
+        if not self._seal(code):
+            return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=None)
+        return self._result_refused(code, cost=None)
 
     def initial(self) -> PlanningCallResult:
         """Make the one initial planning attempt, or refuse with a fixed code."""
@@ -308,10 +364,10 @@ class InvestigationPlanningGateway:
         if not self._lock.acquire(blocking=False):
             return self._refuse(RefusalCode.CONCURRENT_CALL)
         try:
+            if self._terminal:
+                return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=None)
             ready = _Phase.NEW if stage is PlanningStage.INITIAL else _Phase.REPAIR_AVAILABLE
             if self._phase is not ready:
-                if self._closed is not None:
-                    return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=None)
                 self._stage = stage
                 return self._refuse(PlanningOutcomeCode.SEQUENCE_VIOLATION)
             self._stage = stage
@@ -627,8 +683,11 @@ class InvestigationPlanningGateway:
             else validate_planning_draft(candidate, context=context)
         )
         if result.errors and stage is PlanningStage.INITIAL:
-            self._feedback = result.errors  # fixed codes and syntactic task IDs only
-            self._phase = _Phase.REPAIR_AVAILABLE
+            with self._seal_lock:
+                if self._closed is not None:  # closed by the owner while this call settled
+                    return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=cost)
+                self._feedback = result.errors  # fixed codes and syntactic task IDs only
+                self._phase = _Phase.REPAIR_AVAILABLE
             return PlanningCallResult(
                 status=PlanningCallStatus.INVALID,
                 stage=stage,
@@ -637,9 +696,8 @@ class InvestigationPlanningGateway:
                 cost_estimate=cost,
             )
         if result.errors:
-            self._closed = PlanningOutcomeCode.PLAN_INVALID
-            self._phase = _Phase.CLOSED
-            self._ledger.close("completed")
+            if not self._seal(PlanningOutcomeCode.PLAN_INVALID):
+                return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=cost)
             return PlanningCallResult(
                 status=PlanningCallStatus.PLAN_INVALID,
                 stage=stage,
@@ -649,8 +707,11 @@ class InvestigationPlanningGateway:
                 cost_estimate=cost,
             )
         proposal = build_investigation_proposal(result, cost_estimate=cost)
-        self._phase = _Phase.COMPLETE
-        self._ledger.close("completed")
+        with self._seal_lock:
+            if self._closed is not None:  # closed by the owner while this call settled
+                return self._result_refused(RefusalCode.GATEWAY_CLOSED, cost=cost)
+            self._phase = _Phase.COMPLETE
+            self._ledger.close("completed")
         return PlanningCallResult(
             status=PlanningCallStatus.PROPOSED,
             stage=stage,
@@ -660,11 +721,22 @@ class InvestigationPlanningGateway:
         )
 
     def _refuse(self, code: PlanningCode, cost: CostEstimate | None = None) -> PlanningCallResult:
-        if self._closed is None:
+        self._seal(code)
+        return self._result_refused(code, cost=cost)
+
+    @property
+    def _terminal(self) -> bool:
+        return self._closed is not None or self._phase is _Phase.COMPLETE
+
+    def _seal(self, code: PlanningCode) -> bool:
+        """The one terminal transition: first code wins, the ledger closes once. True if sealed."""
+        with self._seal_lock:
+            if self._terminal:  # a refusal, plan_invalid, or a published proposal: never rewritten
+                return False
             self._closed = code
             self._phase = _Phase.CLOSED
             self._ledger.close(_CLOSE_REASONS.get(code, "policy_refused"))
-        return self._result_refused(code, cost=cost)
+            return True
 
     def _result_refused(
         self, code: PlanningCode, *, cost: CostEstimate | None
@@ -681,7 +753,87 @@ class InvestigationPlanningGateway:
 _CLOSE_REASONS: dict[PlanningCode, CloseReason] = {
     RefusalCode.CANCELLED: "cancelled",
     RefusalCode.BUDGET_EXHAUSTED: "exhausted",
+    PlanningOutcomeCode.PLAN_INVALID: "completed",  # accounting complete, not planning success
+    PlanningOutcomeCode.ABANDONED: "cancelled",
+    PlanningOutcomeCode.INTERRUPTED: "cancelled",
 }
+
+_CLOSE_CODES: dict[PlanningCloseReason, PlanningCode] = {
+    PlanningCloseReason.ABANDONED: PlanningOutcomeCode.ABANDONED,
+    PlanningCloseReason.CANCELLED: RefusalCode.CANCELLED,
+    PlanningCloseReason.AUTHORITY_REVOKED: RefusalCode.AUTHORITY_REVOKED,
+    PlanningCloseReason.DEADLINE_EXPIRED: PlanningOutcomeCode.ABANDONED,
+    PlanningCloseReason.SHUTDOWN: PlanningOutcomeCode.INTERRUPTED,
+}
+
+
+class PlannerPort:
+    """The Supervisor's view of a planning gateway: ``initial()`` and ``repair()``, nothing else.
+
+    It exposes no close, ledger, usage, authority, evidence, pricing, or adapter, and it cannot be
+    modified. As with ``SpecialistGateway``, Python cannot hide the wrapped gateway from code that
+    reaches for private names; ``tests/test_investigation_boundaries.py`` forbids that, and the
+    gateway class itself, in investigation modules.
+    """
+
+    __slots__ = ("__gateway",)
+    __gateway: InvestigationPlanningGateway
+
+    def __init__(self, gateway: InvestigationPlanningGateway) -> None:
+        if type(gateway) is not InvestigationPlanningGateway:
+            raise TypeError("A planner port wraps a trusted InvestigationPlanningGateway.")
+        object.__setattr__(self, "_PlannerPort__gateway", gateway)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("A planner port cannot be modified.")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("A planner port cannot be modified.")
+
+    def initial(self) -> PlanningCallResult:
+        return self.__gateway.initial()
+
+    def repair(self) -> PlanningCallResult:
+        return self.__gateway.repair()
+
+
+# Where the lifecycle owner may move an investigation in ``planning`` after a planning result.
+# Every target is in ``TRANSITIONS[PLANNING]``; none is ``queued`` or ``running``, because a
+# proposal is never an approval and planning grants no execution authority.
+_PLANNING_TARGETS: dict[PlanningOutcomeCode, InvestigationStatus] = {
+    PlanningOutcomeCode.PLAN_INVALID: InvestigationStatus.PLAN_INVALID,
+    PlanningOutcomeCode.PROVIDER_FAILURE: InvestigationStatus.FAILED,
+    PlanningOutcomeCode.SEQUENCE_VIOLATION: InvestigationStatus.FAILED,
+    PlanningOutcomeCode.ABANDONED: InvestigationStatus.CANCELLED,
+    PlanningOutcomeCode.INTERRUPTED: InvestigationStatus.INTERRUPTED,
+}
+
+
+def planning_lifecycle_target(result: PlanningCallResult) -> InvestigationStatus | None:
+    """The status a planning result moves an investigation in ``planning`` to, or ``None``.
+
+    Pure and total. ``proposed`` -> ``awaiting_plan_approval`` (a human must still approve);
+    ``invalid`` -> ``None`` (still planning: the one repair may follow); ``plan_invalid`` ->
+    ``plan_invalid``; ``gateway_closed`` -> ``None`` (the closing result already moved it); any
+    other refusal -> the INV-3 ``LIFECYCLE_TARGET`` for that code (``cancelled``,
+    ``budget_exhausted``, or ``failed``), or ``failed`` for codes INV-3 treats as recoverable,
+    because every planning refusal is terminal.
+    """
+    if type(result) is not PlanningCallResult:
+        raise TypeError("map a PlanningCallResult")
+    status = result.status
+    if status is PlanningCallStatus.PROPOSED:
+        return InvestigationStatus.AWAITING_PLAN_APPROVAL
+    if status is PlanningCallStatus.INVALID:
+        return None
+    code = result.code
+    if isinstance(code, PlanningOutcomeCode):
+        return _PLANNING_TARGETS[code]
+    if code is RefusalCode.GATEWAY_CLOSED:
+        return None
+    if isinstance(code, RefusalCode):
+        return LIFECYCLE_TARGET.get(code, InvestigationStatus.FAILED)
+    raise ValueError("unknown planning result code")
 
 
 def strict_json_object(text: object) -> dict[str, Any] | None:

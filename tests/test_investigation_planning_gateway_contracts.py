@@ -240,6 +240,8 @@ def test_stage_reservations_reject_wrong_ledgers_stages_and_caller_amounts() -> 
         PlanningOutcomeCode.PLAN_INVALID,
         PlanningOutcomeCode.PROVIDER_FAILURE,
         PlanningOutcomeCode.SEQUENCE_VIOLATION,
+        PlanningOutcomeCode.ABANDONED,
+        PlanningOutcomeCode.INTERRUPTED,
     }
 
 

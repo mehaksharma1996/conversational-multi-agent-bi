@@ -189,6 +189,10 @@ class PlanningOutcomeCode(StrEnum):
     PLAN_INVALID = "plan_invalid"
     PROVIDER_FAILURE = "provider_failure"
     SEQUENCE_VIOLATION = "planning_sequence_violation"
+    # Explicit closure by the trusted lifecycle owner (S2e): a planning session it abandoned, or
+    # one it interrupted at shutdown. Neither runs or charges anything.
+    ABANDONED = "planning_abandoned"
+    INTERRUPTED = "planning_interrupted"
 
 
 @dataclass(frozen=True)

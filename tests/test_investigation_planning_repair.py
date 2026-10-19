@@ -301,7 +301,7 @@ def test_a_valid_initial_plan_needs_no_repair_and_refuses_one() -> None:
     h = Harness()
     assert h.gateway.initial().status is PlanningCallStatus.PROPOSED
     before = _usage_counts(h)
-    _refused(h.gateway.repair(), P.SEQUENCE_VIOLATION)
+    _refused(h.gateway.repair(), C.GATEWAY_CLOSED)
     assert h.model_calls == 1 and h.counts == 1
     assert _usage_counts(h) == before
 
@@ -349,11 +349,17 @@ def _failed(h: Harness) -> None:
     ("answers", "setup", "call", "code", "calls"),
     [
         ((), None, "repair", P.SEQUENCE_VIOLATION, 0),
-        ((), _valid_initial, "repair", P.SEQUENCE_VIOLATION, 1),
-        ((), _valid_initial, "initial", P.SEQUENCE_VIOLATION, 1),
+        ((), _valid_initial, "repair", C.GATEWAY_CLOSED, 1),
+        ((), _valid_initial, "initial", C.GATEWAY_CLOSED, 1),
         ((INVALID_TEXT,), _invalid_initial, "initial", P.SEQUENCE_VIOLATION, 1),
-        ((INVALID_TEXT, valid_response_text()), _invalid_then_valid, "repair", None, 2),
-        ((INVALID_TEXT, valid_response_text()), _invalid_then_valid, "initial", None, 2),
+        ((INVALID_TEXT, valid_response_text()), _invalid_then_valid, "repair", C.GATEWAY_CLOSED, 2),
+        (
+            (INVALID_TEXT, valid_response_text()),
+            _invalid_then_valid,
+            "initial",
+            C.GATEWAY_CLOSED,
+            2,
+        ),
         ((INVALID_TEXT, INVALID_TEXT), _invalid_twice, "repair", C.GATEWAY_CLOSED, 2),
         ((INVALID_TEXT, INVALID_TEXT), _invalid_twice, "initial", C.GATEWAY_CLOSED, 2),
         ((), _cancelled, "repair", C.GATEWAY_CLOSED, 0),
@@ -563,7 +569,7 @@ def test_cancellation_after_a_completed_repair_changes_nothing_and_allows_nothin
     assert h.gateway.repair().status is PlanningCallStatus.PROPOSED
     h.cancellation.cancel_requested = True
     before = _usage_counts(h)
-    _refused(h.gateway.repair(), P.SEQUENCE_VIOLATION)
+    _refused(h.gateway.repair(), C.GATEWAY_CLOSED)
     assert _usage_counts(h) == before and h.model_calls == 2
 
 

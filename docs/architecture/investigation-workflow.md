@@ -241,7 +241,19 @@ every illegal sequence (`planning_sequence_violation`) is terminal, so no third 
 No production client or reviewed evidence exists, so production planning is refused with
 `metering_unbounded` before the prompt is rendered.
 A count above a stage's 6,000-token input partition closes the ledger `exhausted` without naming
-`exhausted_resource`, because no tokens were charged; adding a ledger seam for it is an S2e item.
+`exhausted_resource`: no tokens were charged, and the 6,000 limit is the stage's partition, not the
+ledger's limit, so the refusal code `budget_exhausted` carries the cause (kept as is in S2e).
+
+The Supervisor holds only `PlannerPort` (`initial()` and `repair()`). The trusted lifecycle owner
+that built the gateway (in S3/S4, the proposal-graph node that owns the planning step) is the only
+caller of `close(PlanningCloseReason)`, for an abandoned repair, cancellation, revoked authority, an
+expired planning deadline, or shutdown. Closure is idempotent and permanent, makes no model call,
+never resets the ledger or deadline, and seals an in-flight call so its answer is discarded and
+settled by that call. `planning_lifecycle_target` maps a result to the status the owner may set:
+a proposal reaches only `awaiting_plan_approval`, never `queued` or `running`.
+Once a proposal is published the gateway is terminal: later calls and closes return
+`gateway_closed` (no new status) and cannot cancel or fail it. Withdrawing a proposal that awaits
+approval belongs to the investigation lifecycle owner, not to the planning gateway.
 
 ### Supported model clients
 
