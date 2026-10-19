@@ -28,6 +28,8 @@ RUNTIME_MODULES = (
     ROOT / "src" / "orchestration" / "planning_prompt.py",
     ROOT / "src" / "orchestration" / "investigation_planning.py",
     ROOT / "src" / "orchestration" / "investigation_proposal.py",
+    # INV-5 S4: the trusted execution run owner
+    ROOT / "src" / "orchestration" / "investigation_execution.py",
     ROOT / "src" / "llm" / "bounded.py",
 )
 
