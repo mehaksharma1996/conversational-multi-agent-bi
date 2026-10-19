@@ -306,6 +306,36 @@ class ReviewedPlanningCapability(_Authority):
         return self
 
 
+class ReviewedPlanningEvidence(_Authority):
+    """The trusted, versioned set of reviewed planning capabilities; the one bounded-path record.
+
+    The configuration adapter that holds the current review constructs it; models, agents,
+    pricing tables and adapters never do. Every capability must carry the set's
+    ``evidence_version``, so a stale or mixed review is rejected rather than partly trusted, and
+    each provider/model is reviewed at most once. ``covering`` binds by exact equality with the
+    envelope member, the same identity ``admit_planning_adapter`` requires, so a cost estimate
+    and a later admission cannot disagree about which path is bounded.
+    """
+
+    evidence_version: Token
+    capabilities: tuple[ReviewedPlanningCapability, ...] = Field(
+        min_length=1, max_length=MAX_PROVIDER_MEMBERS
+    )
+
+    @model_validator(mode="after")
+    def _current_unique_reviews(self) -> ReviewedPlanningEvidence:
+        if any(item.evidence_version != self.evidence_version for item in self.capabilities):
+            raise ValueError("every reviewed capability must carry the current evidence version")
+        identities = [(item.bound.provider, item.bound.model) for item in self.capabilities]
+        if len(identities) != len(set(identities)):
+            raise ValueError("provider/model capability identities must be unique")
+        return self
+
+    def covering(self, member: ProviderAttemptBound) -> ReviewedPlanningCapability | None:
+        """The review whose bound is exactly ``member``; aliases and near matches never count."""
+        return next((item for item in self.capabilities if item.bound == member), None)
+
+
 class AuthorityCheck(Protocol):
     """Live re-check by the trusted adapter. Raising, or returning a non-status, refuses."""
 

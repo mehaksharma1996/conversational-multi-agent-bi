@@ -35,6 +35,7 @@ from packages.investigation.gateway import (
     ProviderAttemptBound,
     ProviderEnvelope,
     ReviewedPlanningCapability,
+    ReviewedPlanningEvidence,
     check_planning_authority,
     reserve_planning_stage,
 )
@@ -386,6 +387,67 @@ def test_forged_or_incomplete_deadline_capabilities_fail_closed() -> None:
         _capability(bound=unbounded)
 
 
+# --- reviewed planning evidence --------------------------------------------------------------
+
+
+def _evidence(*capabilities: ReviewedPlanningCapability) -> ReviewedPlanningEvidence:
+    return ReviewedPlanningEvidence(
+        evidence_version="scripted-test-v1", capabilities=capabilities or (_capability(),)
+    )
+
+
+def test_reviewed_evidence_covers_only_exact_members_and_agrees_with_admission() -> None:
+    evidence = _evidence()
+    capability = evidence.covering(BOUND)
+    assert capability == _capability()
+    adapter = DeadlineAdapter()
+    assert admit_planning_adapter(adapter, envelope=ENVELOPE, capability=capability) is adapter
+    for update in (
+        {"provider": "SCRIPTED"},
+        {"model": "planner-v1 "},
+        {"model": "planner-v2"},
+        {"data_recipient": "gemini"},
+        {"max_attempts": 2},
+        {"max_output_tokens": PLANNING_STAGE_OUTPUT_TOKENS - 1},
+        {"input_bounded": False},
+    ):
+        near = BOUND.model_copy(update=update)
+        assert evidence.covering(near) is None
+        with pytest.raises(MeteringUnbounded):
+            admit_planning_adapter(
+                adapter, envelope=ProviderEnvelope(members=(near,)), capability=_capability()
+            )
+
+
+def test_reviewed_evidence_rejects_stale_mixed_duplicate_empty_or_forged_records() -> None:
+    with pytest.raises(ValidationError):  # stale: a review from an older evidence version
+        ReviewedPlanningEvidence(evidence_version="scripted-test-v2", capabilities=(_capability(),))
+    fallback = BOUND.model_copy(update={"provider": "scripted-fallback"})
+    with pytest.raises(ValidationError):  # mixed versions across eligible providers
+        _evidence(_capability(), _capability(bound=fallback, evidence_version="scripted-test-v0"))
+    with pytest.raises(ValidationError):
+        _evidence(_capability(), _capability())
+    with pytest.raises(ValidationError):
+        ReviewedPlanningEvidence(evidence_version="scripted-test-v1", capabilities=())
+    with pytest.raises(ValidationError):
+        ReviewedPlanningEvidence.model_validate(
+            {"evidence_version": "", "capabilities": [_capability().model_dump()]}
+        )
+    with pytest.raises(ValidationError):
+        ReviewedPlanningEvidence.model_validate(
+            {
+                "evidence_version": "scripted-test-v1",
+                "capabilities": [_capability().model_dump()],
+                "self_declared": True,
+            }
+        )
+    with pytest.raises(ValidationError):  # an adapter-style declaration is not a review
+        ReviewedPlanningEvidence.model_validate(
+            {"evidence_version": "scripted-test-v1", "capabilities": [BOUND.model_dump()]}
+        )
+    assert _evidence(_capability(), _capability(bound=fallback)).covering(fallback) is not None
+
+
 # --- trusted versioned pricing ---------------------------------------------------------------
 
 
@@ -393,8 +455,8 @@ def _profile(**overrides: Any) -> ProviderCostProfile:
     values: dict[str, Any] = {
         "provider": BOUND.provider,
         "model": BOUND.model,
-        "input_per_million_usd": None,
-        "output_per_million_usd": None,
+        "input_per_million_usd": 0.3,
+        "output_per_million_usd": 2.5,
         "output_cap_enforced": True,
         "input_bounded_before_call": True,
         "retries_metered": True,
@@ -403,24 +465,39 @@ def _profile(**overrides: Any) -> ProviderCostProfile:
 
 
 def test_versioned_pricing_has_no_defaults_or_identity_inference() -> None:
-    table = ProviderPricingTable(version="reviewed-2026.10", profiles=(_profile(),))
+    table = ProviderPricingTable(version="reviewed-2026.10", currency="USD", profiles=(_profile(),))
     assert table.profile_for(provider=BOUND.provider, model=BOUND.model) == _profile()
     assert table.profile_for(provider=BOUND.provider.upper(), model=BOUND.model) is None
-    assert table.profiles[0].input_per_million_usd is None
+    for unpriced in ("input_per_million_usd", "output_per_million_usd"):
+        with pytest.raises(ValidationError):
+            ProviderPricingTable(
+                version="v1", currency="USD", profiles=(_profile(**{unpriced: None}),)
+            )
+    with pytest.raises(ValidationError):
+        ProviderPricingTable.model_validate(
+            {"version": "v1", "profiles": [_profile().model_dump()]}
+        )
+    with pytest.raises(ValidationError):
+        ProviderPricingTable(version="v1", currency="EUR", profiles=(_profile(),))
 
 
 @pytest.mark.parametrize("version", ["", "contains space", "../secret"])
 def test_malformed_pricing_versions_are_rejected(version: str) -> None:
     with pytest.raises(ValidationError):
-        ProviderPricingTable(version=version, profiles=(_profile(),))
+        ProviderPricingTable(version=version, currency="USD", profiles=(_profile(),))
 
 
 def test_pricing_profiles_reject_duplicates_unknown_fields_and_invalid_numbers() -> None:
     with pytest.raises(ValidationError):
-        ProviderPricingTable(version="v1", profiles=(_profile(), _profile()))
+        ProviderPricingTable(version="v1", currency="USD", profiles=(_profile(), _profile()))
     with pytest.raises(ValidationError):
         ProviderPricingTable.model_validate(
-            {"version": "v1", "profiles": [_profile().model_dump()], "authority": "forged"}
+            {
+                "version": "v1",
+                "currency": "USD",
+                "profiles": [_profile().model_dump()],
+                "authority": "forged",
+            }
         )
     with pytest.raises(ValidationError):
         _profile(input_per_million_usd=True)

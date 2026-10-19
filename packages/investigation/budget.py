@@ -497,19 +497,27 @@ MAX_PRICING_PROFILES = 8
 class ProviderPricingTable(BaseModel):
     """Trusted, versioned pricing input; never accepted from model or agent output.
 
-    The contract carries no default prices. Configuration must identify every eligible
-    provider/model explicitly, and duplicate identities are rejected so lookup cannot depend on
-    ordering. Trust comes from the configuration adapter that constructs this value, not from
-    schema validation alone.
+    The contract carries no default prices or currency. Configuration must identify every eligible
+    provider/model explicitly with both rates, and duplicate identities are rejected so lookup
+    cannot depend on ordering. An unpriced model is simply absent, which ``estimate_planning_cost``
+    reports as ``pricing_unknown``. Trust comes from the backend configuration adapter that
+    constructs this value, not from schema validation alone, and a price never proves that a call
+    is bounded: the enforcement flags here can only lower an estimate's bound, never raise it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     version: PriceTableVersion
+    currency: Literal["USD"]
     profiles: tuple[ProviderCostProfile, ...] = Field(min_length=1, max_length=MAX_PRICING_PROFILES)
 
     @model_validator(mode="after")
-    def _unique_provider_models(self) -> ProviderPricingTable:
+    def _priced_unique_provider_models(self) -> ProviderPricingTable:
+        if any(
+            profile.input_per_million_usd is None or profile.output_per_million_usd is None
+            for profile in self.profiles
+        ):
+            raise ValueError("every pricing profile must state both rates")
         identities = [(profile.provider, profile.model) for profile in self.profiles]
         if len(identities) != len(set(identities)):
             raise ValueError("provider/model pricing identities must be unique")

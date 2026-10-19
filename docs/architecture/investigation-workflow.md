@@ -216,7 +216,9 @@ These terms are kept apart, and each claims only what its evidence supports:
 
 `held` is never assigned because an adapter was admitted, or because a call was released.
 `CostEstimate.bound == "enforced_upper_bound"` is a separate, earlier estimate about provider
-profiles. It is not evidence about any settlement.
+profiles. It is not evidence about any settlement. For planning, it also requires trusted
+`ReviewedPlanningEvidence` covering every envelope member exactly; pricing flags and envelope
+declarations alone give at most `indicative`.
 
 **Current production providers remain unsupported for model-executing investigation tools.** No
 production client is a `BoundedModelAdapter`, so document research and any other model-executing

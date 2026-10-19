@@ -25,6 +25,7 @@ RUNTIME_MODULES = (
     ROOT / "src" / "orchestration" / "tool_gateway.py",
     ROOT / "src" / "orchestration" / "investigation_checkpoint.py",
     ROOT / "src" / "orchestration" / "investigation_graph.py",
+    ROOT / "src" / "orchestration" / "planning_prompt.py",
     ROOT / "src" / "llm" / "bounded.py",
 )
 
