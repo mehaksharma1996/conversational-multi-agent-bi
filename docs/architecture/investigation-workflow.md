@@ -61,6 +61,7 @@ Approved plan → background job → EXECUTION SUBGRAPH — execution budget
 | Hypotheses and verdicts | Business Investigation | Verdicts must cite existing evidence |
 | Critiques | Critic | Append-only |
 | Budget usage | Dispatcher, applying gateway ledger snapshots | Cumulative; never reset |
+| Proposal record (INV-4) | Supervisor, bound to the planning ledger | Written once while `planning`; equals the closed planning ledger; matches the plan digest |
 | Approvals | API resume path | Typed decisions only |
 | Report and terminal status | Composer and terminal nodes | Written once |
 
@@ -445,10 +446,11 @@ convention:
   another ledger. `load_investigation_state` repeats the check before reading a thread.
 - **Specialist modules.** INV-4 and INV-5 modules go in `src/investigation/`.
   `tests/test_investigation_boundaries.py` allows them only the contracts, the typed requests, the
-  port, and the builder. It forbids services, executors, retrievers, model clients, storage,
+  port, and the builder, and for planning only `PlannerPort`, the planning result types, and the
+  `PlanningStage` and `PlanningOutcomeCode` enums. It forbids services, executors, retrievers, model clients, storage,
   `BudgetLedger`, authority types, LangGraph, evaluation code, private attributes, and dynamic
   access, and it tests the checker on synthetic violations. Only `investigation_graph.py` may
   construct `StateGraph(InvestigationState)`.
 
-Actual Supervisor, specialist, and dispatcher wiring is deferred to INV-4 and INV-5, which must use
-these interfaces. Behavioural attacks on each boundary are in `tests/test_investigation_bypass.py`.
+The Supervisor and the proposal-only graph are delivered by INV-4 (ADR 0024 Amendment 2);
+specialist and dispatcher wiring is deferred to INV-5, which must use these interfaces. Behavioural attacks on each boundary are in `tests/test_investigation_bypass.py`.

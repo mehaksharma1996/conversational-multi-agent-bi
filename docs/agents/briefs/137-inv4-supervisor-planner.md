@@ -879,3 +879,85 @@ the S2e changes. S2 delivers the bounded planning gateway; it is not yet the Sup
 - **Deferred accounting display:** an over-input count records `budget_exhausted` without
   `exhausted_resource`; the 6,000 limit is a stage partition, not a ledger limit, so no ledger
   change was made.
+
+
+## S5 final acceptance matrix and readiness review
+
+Review date: 2026-10-19, on `feat/iteration2-inv4-supervisor-planner` at `e3bb3f2` (S1-S4) plus the
+S5 documentation. It supersedes the S2e audit above, which is kept as history. The decisions are
+recorded in ADR 0024 Amendment 2. Test files are under `tests/`; `pg` is
+`test_investigation_proposal_graph.py`, `gw` is `test_investigation_planning_gateway.py`, `rp` is
+`test_investigation_planning_repair.py`, `lc` is `test_investigation_planning_lifecycle.py`, `sv` is
+`test_investigation_supervisor.py`, `pr` is `test_investigation_planning_prompt.py`, `bd` is
+`test_investigation_boundaries.py`.
+
+### Issue #137 acceptance
+
+| Requirement | Implementation | Test evidence | Status | Qualification |
+|---|---|---|---|---|
+| Scripted synthetic churn proposal validates | `InvestigationProposalRun`, `plan_investigation`, `InvestigationPlanningGateway` | `pg::test_a_scripted_churn_proposal_awaits_approval_and_authorizes_nothing`; `rp::test_end_to_end_churn_planning_repairs_an_unknown_field_once` | Met | Scripted test adapter only; the end-to-end case uses the INV-2 CSV header and PDF titles, never the oracle |
+| Initial invalid proposal repaired once | `InvestigationPlanningGateway.repair`, `plan_investigation` | `pg::test_an_invalid_initial_plan_is_repaired_once_and_proposed`; `rp::test_invalid_initial_then_valid_repair_is_proposed_within_one_ledger`; `sv::test_an_invalid_initial_is_repaired_exactly_once` | Met | The repair prompt carries only fixed codes and task IDs |
+| Still invalid after one repair ends in `plan_invalid` | `_validated`, `ProposalRecord` | `pg::test_two_invalid_plans_end_in_plan_invalid_without_a_plan`; `rp::test_two_invalid_candidates_are_the_terminal_plan_invalid`; `sv::test_two_invalid_candidates_end_in_plan_invalid_without_a_third_call` | Met | |
+| 2 calls / 12k input / 2k output / 30 s / zero tools | `PLANNING_LIMITS`, `reserve_planning_stage`, `BudgetLedger.remaining_wall_clock` | `rp::test_two_maximal_stages_exactly_fill_the_planning_budget`; `rp::test_the_repair_deadline_is_what_remains_of_the_original_thirty_seconds`; `rp::test_illegal_sequences_are_refused_without_any_new_allowance`; `gw::test_a_request_over_the_reserved_input_is_refused_before_invocation`; tool/network spies in every planning suite; `bd::test_planning_runtime_cannot_reach_sql_retrieval_models_or_test_code` | Met | Provider-side deadline enforcement is a reviewed adapter claim |
+| Model context is schema and document titles only | `planning_prompt.py`, `PlanningMetadata` | `pr::test_only_planning_metadata_is_accepted_never_the_scoped_context`; `pr::test_forged_control_fields_never_reach_the_prompt`; `pr::test_golden_initial_and_repair_prompts` | Met | Titles and descriptions are untrusted data, framed but not sanitized |
+| No raw data, passages, or evaluator oracle leakage | Prompt allowlist; content-free results and records | `pg::test_sensitive_titles_passages_and_candidates_never_reach_the_checkpoint`; `pg::test_no_prompt_candidate_sql_passage_or_provider_error_is_checkpointed`; `bd::test_investigation_runtime_cannot_reach_evaluator_only_data`; `rp::test_the_runtime_gateway_reads_no_evaluator_or_sample_files` | Met | The validated plan (model-written structured text) is checkpointed by design |
+| Trusted authority, scope, and consent | `PlanningAuthority`, `check_planning_authority` | `gw::test_mismatched_scope_is_refused_before_the_live_check`; `gw::test_absent_or_expired_consent_for_the_provider_recipient_is_refused`; `gw::test_revoked_or_unavailable_live_authority_is_refused`; `rp::test_authority_revoked_or_expired_between_calls_refuses_the_repair` | Met | Consent changes surface through the trusted live check |
+| Strict provider admission; no hidden retries or fallbacks | `admit_planning_adapter`, `ReviewedPlanningEvidence.covering`, `_settle` | `gw::test_production_and_unbounded_clients_are_refused_before_rendering`; `gw::test_admission_requires_exact_reviewed_evidence_for_the_only_member`; `gw::test_hidden_retries_are_charged_as_extra_calls_and_mark_the_bound_exceeded`; `gw::test_contract_breaking_reports_discard_the_candidate` | Met | No production adapter or evidence exists |
+| Estimate follows `CostEstimate.bound`; nothing guaranteed unless enforceable for every eligible provider | `estimate_planning_cost`, `estimate_cost` | `pr::test_forged_pricing_flags_and_envelope_declarations_prove_nothing`; `pr::test_fully_reviewed_test_only_capabilities_give_an_enforced_upper_bound`; `pr::test_missing_pricing_stays_unavailable_whatever_the_evidence`; `pg::test_an_enforced_bound_comes_only_from_the_test_adapters_reviewed_evidence` | Partially met | Classification is met; no user-facing estimate wording exists yet (API milestone) |
+| Proposal-only guarded graph | `InvestigationGraphBuilder` proposal mode, `require_guarded_graph` | `pg::test_a_proposal_graph_refuses_execution_approval_and_terminal_writers`; `pg::test_unguarded_disguised_or_wrongly_bound_nodes_are_refused`; `pg::test_copied_guard_attributes_do_not_make_a_node_guarded`; `pg::test_concurrent_proposal_writers_make_the_thread_unreadable`; `pg::test_the_proposal_owner_reaches_no_execution_tool_storage_or_model_client` | Met | |
+| Planning ledger separate from execution ledger | `owned_update`, `guarded_node`, `require_guarded_graph` | `pg::test_an_execution_graph_cannot_carry_a_ledger_bound_supervisor`; `pg::test_a_planning_ledger_can_never_record_execution_budget`; `pg::test_a_record_must_match_the_bound_closed_planning_ledger`; `pg::test_the_compiled_proposal_graph_binds_exactly_the_gateways_own_ledger` | Met | Ledger identity is fixed at compile time; state cannot tell equivalent closed ledgers apart |
+| Strict state and checkpoint validation | `ProposalRecord`, `_proposal_violation`, `load_investigation_state` | `pg::test_tampered_proposal_checkpoints_fail_closed`; `pg::test_restoring_a_tampered_or_incompatible_proposal_state_fails_closed`; `pg::test_a_real_pre_s4_checkpoint_restores_unchanged_at_version_one`; `pg::test_a_pre_s4_reader_refuses_a_proposal_state_rather_than_misreading_it` | Met | Process-local checkpoints (#149) |
+| Plan approval required | `approval_requirements_for`, `InvestigationProposal` | `pg::test_a_scripted_churn_proposal_awaits_approval_and_authorizes_nothing`; `lc::test_real_results_map_proposals_only_to_awaiting_approval` | Met | Approval itself is not built in INV-4 |
+| No execution without approval | `_invariant_violation` (`approval_missing`), `planning_lifecycle_target` | `pg::test_a_proposal_can_never_move_to_execution_without_approval`; `pg::test_a_proposal_record_never_implies_plan_approval`; `lc::test_every_planning_code_maps_to_a_legal_target_that_grants_no_execution` | Met | |
+| Cleanup and immutable terminal outcomes | `close`, `_seal`, `InvestigationProposalRun.run` | `pg::test_every_finished_run_leaves_no_usable_gateway_or_ledger`; `pg::test_an_owner_close_racing_from_another_thread_never_coexists_with_a_proposal`; `lc::test_no_cleanup_after_a_proposal_changes_it`; `lc::test_closure_during_provider_invocation_discards_and_settles_the_call` | Met | No background worker; closure happens in the detecting call |
+| Not reachable from the router | No importer outside the planning stack | Repository scan (S5 review); `bd` planning and production-exclusion rules | Met | Routing is #142 |
+| Legacy question-graph compatibility | Legacy modules unchanged | `test_langgraph_orchestrator.py`; `test_evaluation_baseline.py`; `scripts.run_evaluations` in `check_all` | Met | No evaluation case changed |
+| Regression suites and `check_all` | Whole branch | `python -m scripts.check_all` 5/5 on the S5 tree | Met | See the S5 report for counts |
+
+### Security and architecture readiness findings
+
+No finding blocks opening the PR.
+
+- **Medium (resolved in S4 review):** an execution graph could have carried a ledger-bound
+  Supervisor node; `require_guarded_graph(ledger=...)` now refuses it.
+- **Low (documentation, resolved in S5):** the architecture doc lacked the `proposal_record`
+  ownership row and still described the Supervisor as deferred; ADR 0024 decision 4 ("in-flight
+  call finishes and is discarded") is refined for planning by Amendment 2, item 5.
+- **Low (accepted limitation):** `PlannerPort`, `SpecialistGateway`, and the trusted `ledger`
+  accessors cannot stop code reaching for private names; enforced structurally by `bd`.
+- **Low (accepted limitation):** an over-input count leaves `exhausted_resource` unset; the code
+  `budget_exhausted` carries the cause.
+- **Informational:** missing-information text is in-process only and untrusted; the plan's
+  model-written text is checkpointed by design and validated by `validate_plan`.
+
+Checked with no finding: route registration or feature enablement; model-client or tool use outside
+the planning gateway; specialist access to gateway internals; unreviewed adapters or fallback
+chains; invented production pricing or evidence; open planning ledgers after any terminal path;
+proposal-to-execution transitions; unsafe deserialization; cross-mode writer and ledger bypasses;
+weakening of INV-3 checks (every removed line in pre-existing files was replaced by a stricter or
+additive version).
+
+### What INV-4 delivers and what it defers
+
+INV-4 delivers a callable, tested, proposal-only subgraph that runs under reviewed scripted
+adapters and stops at `awaiting_plan_approval`. Production planning fails closed with
+`metering_unbounded`. It does not deliver:
+
+| Not delivered | Owner |
+|---|---|
+| A production real-provider `DeadlineBoundedModelAdapter` | Separately reviewed adapter milestone (approvals 4-5 above) |
+| Production-owned reviewed evidence and pricing configuration | Same adapter milestone |
+| Routing from the question graph (feature-flagged) | #142 |
+| Specialist execution, dispatcher, and terminal records | INV-5 (#138) |
+| SQL plan approval and execution binding | INV-10 (#143) |
+| Investigation API and approval/withdrawal UI | Later milestones under #131 |
+| Durable, restartable checkpoints and their migrations | #149 |
+| Production cost guarantees | Only with matching reviewed evidence from the adapter milestone |
+
+### Versioning
+
+`STATE_VERSION` stays 1: the proposal record is optional, pre-INV-4 states restore unchanged
+(`pg::test_a_real_pre_s4_checkpoint_restores_unchanged_at_version_one`), and an older reader fails
+closed (`pg::test_a_pre_s4_reader_refuses_a_proposal_state_rather_than_misreading_it`). Durable
+checkpoint migrations must be reassessed in #149; no bump without a demonstrated compatibility
+defect and separate approval.
