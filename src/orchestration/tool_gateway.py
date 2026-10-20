@@ -100,6 +100,25 @@ A hypothesis test's SQL question is rendered deterministically from its approved
 specification (``_sql_question``), so the model sees the exact groups, periods, and the count
 columns the verdict needs.
 
+**INV-7 (#140).** Three more owner-only operations, none naming a task:
+
+- ``draft_findings(state, DraftFindings)`` (Business Investigator): one bounded model call that
+  drafts transient, typed claims about the round's verified results. The prompt is rendered here
+  from the view and this gateway's own verified payloads (``review_prompts``); the output is
+  parsed strictly (``FindingsDraft``) and returned in process only, never recorded.
+- ``review_findings(state, ReviewFindings)`` (Critic): reserves and charges one critic round, then
+  one bounded model call that may propose coverage gaps (``CriticReview``). The prompt holds no
+  rows, numbers, document text, or draft.
+- ``open_follow_up_round(state, OpenFollowUpRound)`` (Supervisor): after a critique that admitted
+  a replan, verifies the trusted follow-up approval (round, exact task-set digest, inside the plan
+  approval's window, unexpired), re-checks authority, and charges one replan round.
+
+A prompt that exceeds the per-call input cap is refused before the provider sees it; for these two
+review calls that makes the review ``unavailable`` (nothing ran, nothing is charged) instead of
+ending the investigation. Malformed output is ``invalid`` and never retried. Every operation on an
+admitted follow-up task also requires its round's approval to be present and unexpired, else the
+task is refused with ``follow_up_not_authorized``.
+
 A gateway built with ``retry_categories`` (the run owner passes ``RETRYABLE_CATEGORIES``) also
 refuses a second attempt unless the attempt's last recorded failure is in that set, so an unknown
 invocation outcome is never retried even by a misbehaving caller.
@@ -150,6 +169,12 @@ from packages.investigation.contracts import (
     TaskKind,
     TaskOutcome,
 )
+from packages.investigation.critique import (
+    CriticReview,
+    FindingsDraft,
+    parse_critic_review,
+    parse_findings_draft,
+)
 from packages.investigation.evidence import (
     MAX_ANSWER_CHARS,
     MAX_CELL_CHARS,
@@ -173,12 +198,13 @@ from packages.investigation.gateway import (
     check_binding,
 )
 from packages.investigation.hypotheses import (
+    STRATUM_COLUMN,
     HypothesisTestSpec,
     InvestigationPlanV2,
     RateMetric,
     ResolvedTest,
     SpecIncomplete,
-    resolve_test,
+    resolve_any,
 )
 from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.refusals import (
@@ -191,20 +217,23 @@ from packages.investigation.refusals import (
 )
 from packages.investigation.state import (
     MAX_EVIDENCE_STATUSES,
+    MAX_FOLLOW_UP_ROUNDS,
     DerivedProvenance,
     DocumentProvenance,
     EvidenceRecord,
+    FollowUpApproval,
     GatewayDecision,
     GatewayTool,
     InvestigationScope,
     InvestigationStateView,
     PolicySQLStatusName,
     QueryProvenance,
+    ReviewStatus,
     SourceLocation,
     TaskRecord,
     restore_state,
 )
-from packages.investigation.verdicts import derived_payload_for, observe
+from packages.investigation.verdicts import Verdict, derived_payload_for, evaluate_plan, observe
 from src.agents.rag_agent import RAGAgentError
 from src.agents.sql_agent import execute_sql
 from src.documents.retriever import RetrievalResult, Retriever
@@ -223,6 +252,7 @@ from src.orchestration.guarded_sql import (
     SQLExecutor,
 )
 from src.orchestration.policy_grounding import verify_policy_sql
+from src.orchestration.review_prompts import render_critic_prompt, render_findings_prompt
 from src.storage.query_executor import QueryTimeoutError, UnsafeQueryError, validate_read_query
 from src.storage.sqlite_store import StoredTable
 
@@ -319,6 +349,35 @@ class DeriveEvidence(_Request):
     role: AgentRole
 
 
+RoundIndex = Annotated[int, Field(ge=0, le=MAX_FOLLOW_UP_ROUNDS)]
+
+
+class DraftFindings(_Request):
+    """Owner-only (INV-7): the transient claim draft for critique ``round``. Names no task."""
+
+    task_id: None = None
+    role: AgentRole
+    round: RoundIndex
+
+
+class ReviewFindings(_Request):
+    """Owner-only (INV-7): the Critic's bounded gap review for critique ``round``."""
+
+    task_id: None = None
+    role: AgentRole
+    round: RoundIndex
+
+
+class OpenFollowUpRound(_Request):
+    """Owner-only (INV-7): open follow-up ``round`` under the trusted approval of its task set."""
+
+    task_id: None = None
+    role: AgentRole
+    round: Annotated[int, Field(ge=1, le=MAX_FOLLOW_UP_ROUNDS)]
+    follow_up_digest: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    approval: FollowUpApproval
+
+
 _TaskRequest = (
     BeginAttempt
     | ResearchDocuments
@@ -328,6 +387,9 @@ _TaskRequest = (
     | SkipTask
     | FinishAttempt
     | DeriveEvidence
+    | DraftFindings
+    | ReviewFindings
+    | OpenFollowUpRound
 )
 
 # How the run owner closes the gateway, and the ledger close reason each one records.
@@ -357,6 +419,10 @@ class GatewayResult:
     evidence_id: str | None = None
     handle: SQLHandle | None = None
     resources: ResourceStatus | None = None
+    # INV-7: a review call's parsed, untrusted output (in process only) and its status.
+    draft: FindingsDraft | None = None
+    review: CriticReview | None = None
+    review_status: ReviewStatus | None = None
 
 
 @dataclass(frozen=True)
@@ -523,6 +589,7 @@ class _AdmittedLLMClient:
         self.entered = False
         self.raised = False
         self.sealed = False
+        self.over_input = False  # INV-7: the counted prompt exceeded the cap; nothing was sent
         self.answered_as: tuple[object, object] | None = None
 
     @property
@@ -547,6 +614,7 @@ class _AdmittedLLMClient:
                 except Exception:
                     raise _Refused(RefusalCode.METERING_UNBOUNDED) from None
                 if type(counted) is not int or not 1 <= counted <= self._max_input_tokens:
+                    self.over_input = type(counted) is int and counted > self._max_input_tokens
                     raise _Refused(RefusalCode.METERING_UNBOUNDED)  # before the provider sees it
                 self.counted = counted
                 self.calls += 1  # the invocation marker: set before the provider is entered
@@ -678,7 +746,7 @@ class _NoModel:
 class _Call:
     tool: GatewayTool
     view: InvestigationStateView
-    task_id: str
+    task_id: str  # "" for an owner-only review operation, which names no task
     role: AgentRole
 
 
@@ -702,6 +770,7 @@ class InvestigationToolGateway:
         sql_executor: SQLExecutor = execute_sql,
         fingerprint_key: bytes | None = None,
         retry_categories: frozenset[str] | None = None,
+        numeric_fields: frozenset[str] = frozenset(),
     ) -> None:
         """``llm_client`` that is not an admitted adapter leaves model-executing tools disabled.
 
@@ -710,6 +779,8 @@ class InvestigationToolGateway:
         per gateway, so fingerprints identify SQL within one investigation run only.
         ``retry_categories``, when given, are the only failure categories a second attempt may
         follow (INV-5 passes ``RETRYABLE_CATEGORIES``); ``None`` keeps INV-3's attempt rule.
+        ``numeric_fields`` are the confirmed numeric schema fields the Critic review may name
+        (INV-7); the trusted run owner passes them from the approved proposal's metadata.
         """
         if type(authority) is not InvestigationAuthority or type(ledger) is not BudgetLedger:
             raise TypeError("The gateway needs a trusted authority and a BudgetLedger.")
@@ -751,6 +822,11 @@ class InvestigationToolGateway:
         self._failures: dict[str, tuple[int, str]] = {}
         self._typed: dict[str, TypedEvidencePayload] = {}  # built with each evidence record
         self._owner_closed: ExecutionCloseReason | None = None
+        if type(numeric_fields) is not frozenset or not all(
+            type(name) is str for name in numeric_fields
+        ):
+            raise TypeError("numeric_fields must be a frozenset of field names.")
+        self._numeric_fields = numeric_fields
 
     @property
     def ledger(self) -> BudgetLedger:
@@ -831,6 +907,22 @@ class InvestigationToolGateway:
     def derive_evidence(self, state: Mapping[str, Any], request: object) -> GatewayResult:
         """Issue derived evidence for a succeeded SQL hypothesis test; no tool, model, or charge."""
         return self._operate("derive_evidence", DeriveEvidence, state, request, self._derive)
+
+    # --- owner-only review operations (INV-7) --------------------------------------------------
+
+    def draft_findings(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """One bounded model call drafting transient claims for the round under review."""
+        return self._operate("draft_findings", DraftFindings, state, request, self._draft)
+
+    def review_findings(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """Charge one critic round, then one bounded model call proposing coverage gaps."""
+        return self._operate("review_findings", ReviewFindings, state, request, self._review)
+
+    def open_follow_up_round(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """Verify a follow-up round's trusted approval and charge one replan round."""
+        return self._operate(
+            "open_follow_up_round", OpenFollowUpRound, state, request, self._open_round
+        )
 
     def close(self, reason: ExecutionCloseReason) -> None:
         """Close permanently: revoke every token, handle, and correction, and close the ledger.
@@ -1002,7 +1094,7 @@ class InvestigationToolGateway:
         ):
             raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)
         try:
-            test = resolve_test(plan, task)
+            test = resolve_any(plan, task)
         except SpecIncomplete:
             raise _Refused(RefusalCode.TOOL_NOT_PERMITTED) from None
         refs = [ref.id for ref in record.outcome.evidence_refs if ref.kind == "query"]
@@ -1053,6 +1145,145 @@ class InvestigationToolGateway:
             evidence_id=evidence_id,
         )
 
+    # --- INV-7 review bodies ------------------------------------------------------------------
+
+    def _review_plan(self, call: _Call, role: AgentRole, round_index: int) -> InvestigationPlanV2:
+        plan = call.view.plan
+        if call.role is not role:
+            raise _Refused(RefusalCode.ROLE_NOT_PERMITTED)
+        if not isinstance(plan, InvestigationPlanV2):
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)
+        # Critique n reviews the results of follow-up round n; it is not written yet.
+        if round_index != len(call.view.critiques) or round_index != len(
+            call.view.follow_up_rounds
+        ):
+            raise _Refused(RefusalCode.INVALID_REQUEST)
+        return plan
+
+    def _round_verdicts(
+        self, plan: InvestigationPlanV2, view: InvestigationStateView
+    ) -> tuple[Verdict, ...]:
+        usable = {
+            key: value
+            for key, value in self.evidence_payloads(view).items()
+            if isinstance(value, QueryEvidencePayload | DocumentEvidencePayload)
+        }
+        return evaluate_plan(plan, view, usable)
+
+    def _review_call(self, prompt: str) -> tuple[str | None, str | None]:
+        """One bounded model call: (text, None), or (None, failure category). Refusals raise."""
+        adapter, model_request = self._model_admission()
+        self._check_authority()
+        reservation = self._reserve(model_request)
+        client = _AdmittedLLMClient(
+            adapter,
+            max_input_tokens=self._max_input_tokens,
+            max_output_tokens=model_request.output_tokens,
+        )
+        text: str | None = None
+        failure: str | None = None
+        refusal: RefusalCode | None = None
+        try:
+            text = str(client.generate(prompt).text)
+        except _Refused as refused:
+            refusal = refused.code
+        except LLMConfigurationError:
+            failure = "provider_configuration"
+        except LLMGenerationError:
+            failure = "provider_failure"
+        except Exception:
+            failure = "internal"
+        finally:
+            client.sealed = True
+            violation = self._settle(reservation, client)
+        if (
+            refusal is RefusalCode.METERING_UNBOUNDED
+            and client.over_input
+            and client.provably_not_invoked
+            and violation is None
+        ):
+            refusal, failure = (
+                None,
+                "invalid_input",
+            )  # too large to send: nothing ran or was charged
+        refusal = violation or refusal
+        if refusal is None and self._closure() is not None:
+            refusal = self._closure()  # the gateway closed while this call ran
+        if refusal is None and self._cancel_requested():
+            refusal = RefusalCode.CANCELLED  # a late answer after cancellation is discarded
+        if refusal is not None:
+            raise _Refused(refusal)
+        return (None, failure) if failure is not None else (text, None)
+
+    def _draft(self, call: _Call, request: DraftFindings) -> GatewayResult:
+        plan = self._review_plan(call, AgentRole.BUSINESS_INVESTIGATOR, request.round)
+        prompt = render_findings_prompt(
+            plan,
+            call.view,
+            self.evidence_payloads(call.view),
+            self._round_verdicts(plan, call.view),
+        )
+        text, failure = self._review_call(prompt)
+        if failure is not None:
+            result = self._result(call, "failed", category=failure)
+            return replace(result, review_status="unavailable")
+        draft = parse_findings_draft(text)
+        status: ReviewStatus = "valid" if draft is not None else "invalid"
+        return replace(self._result(call, "succeeded"), draft=draft, review_status=status)
+
+    def _review(self, call: _Call, request: ReviewFindings) -> GatewayResult:
+        plan = self._review_plan(call, AgentRole.CRITIC, request.round)
+        prompt = render_critic_prompt(
+            plan, call.view, self._round_verdicts(plan, call.view), self._numeric_fields
+        )
+        self._check_authority()
+        round_reservation = self._reserve(BudgetRequest(critic_rounds=1))
+        self._ledger.settle(round_reservation)  # a critic round counts in full once it starts
+        text, failure = self._review_call(prompt)
+        if failure is not None:
+            result = self._result(call, "failed", category=failure)
+            return replace(result, review_status="unavailable")
+        review = parse_critic_review(text)
+        status: ReviewStatus = "valid" if review is not None else "invalid"
+        return replace(self._result(call, "succeeded"), review=review, review_status=status)
+
+    def _open_round(self, call: _Call, request: OpenFollowUpRound) -> GatewayResult:
+        view = call.view
+        if call.role is not AgentRole.SUPERVISOR:
+            raise _Refused(RefusalCode.ROLE_NOT_PERMITTED)
+        if not isinstance(view.plan, InvestigationPlanV2):
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)
+        if (
+            request.round != len(view.follow_up_rounds) + 1
+            or len(view.critiques) != request.round
+            or view.critiques[-1].replan != "admitted"
+        ):
+            raise _Refused(RefusalCode.INVALID_REQUEST)
+        approval = request.approval
+        if (
+            type(approval) is not FollowUpApproval
+            or approval.round != request.round
+            or approval.follow_up_digest != request.follow_up_digest
+            or not self._approval_open(approval)
+        ):
+            raise _Refused(RefusalCode.FOLLOW_UP_NOT_AUTHORIZED)
+        self._check_authority()
+        self._ledger.settle(self._reserve(BudgetRequest(replan_rounds=1)))
+        return self._result(call, "succeeded")
+
+    def _approval_open(self, approval: FollowUpApproval) -> bool:
+        """Inside the plan approval's window and unexpired by the trusted clock."""
+        plan_approval = self._authority.approval
+        try:
+            now = self._clock.now()
+        except Exception:
+            return False
+        return (
+            approval.approved_at >= plan_approval.approved_at
+            and approval.deadline <= plan_approval.deadline
+            and approval.approved_at <= now < approval.deadline
+        )
+
     def _closure(self) -> RefusalCode | None:
         """The refusal a call meets once the gateway is closed, by refusal or by the owner."""
         if self._closed is not None:
@@ -1087,7 +1318,7 @@ class InvestigationToolGateway:
             elif len(view.decisions) != self._decisions_issued:
                 self._close(RefusalCode.STATE_INVALID)  # stale or forked: our updates are missing
                 return _bare(RefusalCode.STATE_INVALID)
-            call = _Call(tool, view, request.task_id, request.role)
+            call = _Call(tool, view, request.task_id or "", request.role)
             try:
                 if self._closure() is not None:
                     raise _Refused(RefusalCode.GATEWAY_CLOSED)
@@ -1120,6 +1351,14 @@ class InvestigationToolGateway:
             raise _Refused(RefusalCode.TASK_NOT_ADMITTED)
         if call.role is not task.assignee or call.role not in TASK_EXECUTORS[task.kind]:
             raise _Refused(RefusalCode.ROLE_NOT_PERMITTED)
+        if any(item.id == call.task_id for item in call.view.admitted_follow_ups):
+            # INV-7: a follow-up runs only under its round's present, unexpired approval.
+            round_record = next(
+                (item for item in call.view.follow_up_rounds if call.task_id in item.task_ids),
+                None,
+            )
+            if round_record is None or not self._approval_open(round_record.approval):
+                raise _Refused(RefusalCode.FOLLOW_UP_NOT_AUTHORIZED)
         return task, record
 
     def _model_admission(self) -> tuple[BoundedModelAdapter, BudgetRequest]:
@@ -1800,7 +2039,7 @@ class InvestigationToolGateway:
             # The refusal that closed the gateway already named the target; repeating it after the
             # lifecycle moved on would ask for an illegal transition.
             target = None if code is RefusalCode.GATEWAY_CLOSED else LIFECYCLE_TARGET[code]
-        elif severity is RefusalSeverity.TASK:
+        elif severity is RefusalSeverity.TASK and call.task_id:
             self._attempts.pop(call.task_id, None)
             self._revoke_handles(call.task_id)
             record = call.view.tasks.get(call.task_id)
@@ -1940,7 +2179,7 @@ def _sql_question(task: PlanTask, plan: object = None) -> str:
         return f"{task_input.objective}\nUse these fields: {', '.join(task_input.fields)}."
     if isinstance(task_input, HypothesisTestSpec) and isinstance(plan, InvestigationPlanV2):
         try:
-            return _hypothesis_question(resolve_test(plan, task))
+            return _hypothesis_question(resolve_any(plan, task))
         except SpecIncomplete:
             raise _Refused(RefusalCode.TOOL_NOT_PERMITTED) from None
     if (
@@ -2122,10 +2361,24 @@ def _hypothesis_question(test: ResolvedTest) -> str:
             f"{metric.value} is not null"
         )
         count_columns = "value_sum, value_count"
+    strata = ""
+    if test.stratification is not None:
+        field, cuts = test.stratification.field, test.stratification.cut_points
+        keys.append(STRATUM_COLUMN)
+        bands = [f"'band_0' when {field} < {cuts[0]}"]
+        bands += [
+            f"'band_{index}' when {low} <= {field} < {high}"
+            for index, (low, high) in enumerate(zip(cuts, cuts[1:], strict=False), start=1)
+        ]
+        bands.append(f"'band_{len(cuts)}' when {field} >= {cuts[-1]}")
+        strata = (
+            f" Compute {STRATUM_COLUMN} as {'; '.join(bands)}, comparing {field} as an integer; "
+            f"exclude rows where {field} is null."
+        )
     key_list = ", ".join(dict.fromkeys(keys))
     return (
         f"Measure for hypothesis {test.hypothesis_id} ({test.method.replace('_', ' ')}). "
         f"Return exactly one row per combination of {key_list}, with the columns {key_list}, "
-        f"{count_columns}. Keep only rows where {rows} and {group_rows}. Compute {counts}. "
-        "Return raw counts only; do not compute rates."
+        f"{count_columns}. Keep only rows where {rows} and {group_rows}.{strata} "
+        f"Compute {counts}. Return raw counts only; do not compute rates."
     )

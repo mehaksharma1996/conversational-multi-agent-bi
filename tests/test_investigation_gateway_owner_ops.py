@@ -557,5 +557,15 @@ def test_budget_exhaustion_is_not_reported_as_an_ordinary_partial_result() -> No
 
 def test_the_specialist_port_has_no_owner_operation() -> None:
     port = owner().gateway.specialist_port()
-    for name in ("resource_status", "skip_task", "finish_attempt", "close", "evidence_payloads"):
+    for name in (
+        "resource_status",
+        "skip_task",
+        "finish_attempt",
+        "close",
+        "evidence_payloads",
+        # INV-7
+        "draft_findings",
+        "review_findings",
+        "open_follow_up_round",
+    ):
         assert not hasattr(port, name)

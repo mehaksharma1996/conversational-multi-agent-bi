@@ -115,6 +115,16 @@ BANNED_NAMES = frozenset(
         "derive_evidence",
         "DeriveEvidence",
         "derived_payload_for",
+        # INV-7: review calls, round opening, and follow-up approvals stay with the trusted owner
+        "draft_findings",
+        "review_findings",
+        "open_follow_up_round",
+        "DraftFindings",
+        "ReviewFindings",
+        "OpenFollowUpRound",
+        "FollowUpApproval",
+        "FollowUpAuthorizer",
+        "FollowUpApprovalRequest",
         # authority and consent come from the trusted adapter, never from investigation code
         "InvestigationAuthority",
         "ConsentSnapshot",

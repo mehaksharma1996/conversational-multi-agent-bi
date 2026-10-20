@@ -104,7 +104,7 @@ def critique(
 
 
 def approval_for(
-    tasks: list[FollowUpTask], round_index: int, *, hours: float = 1.0
+    tasks: list[FollowUpTask], round_index: int, *, hours: float = 6.0
 ) -> FollowUpApproval:
     approved_at = datetime.fromisoformat(APPROVED_AT) + timedelta(minutes=30)
     return FollowUpApproval(
