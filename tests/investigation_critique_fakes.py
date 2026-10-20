@@ -153,3 +153,22 @@ def admitted_state(
     )
     state = apply_update(state, "critic", {"critiques": [critique(0, findings=findings)]})
     return apply_update(state, "supervisor", admission(tasks))
+
+
+# --- scripted model output (written by the test author; production never reads it) -----------
+
+_ACTIVE = "LOWER(CAST(active_at_start AS TEXT)) IN ('true', '1')"
+_CHURNED = "SUM(CASE WHEN LOWER(CAST(churned AS TEXT)) IN ('true', '1') THEN 1 ELSE 0 END)"
+
+
+def tenure_sql(cut: int = 6) -> str:
+    """Scripted stratified SQL for the SMB Basic tenure follow-up (bands below / at or above)."""
+    band = f"CASE WHEN CAST(tenure_months_start AS INTEGER) < {cut} THEN 'band_0' ELSE 'band_1' END"
+    return (
+        f"SELECT quarter_start, customer_segment, plan_tier, {band} AS stratum, "
+        f"{_CHURNED} AS numerator, COUNT(*) AS denominator FROM uploaded_data "
+        f"WHERE {_ACTIVE} AND quarter_start IN ('2026-01-01', '2026-04-01') "
+        "AND customer_segment = 'SMB' AND plan_tier = 'Basic' "
+        "GROUP BY quarter_start, customer_segment, plan_tier, stratum "
+        "ORDER BY quarter_start, stratum"
+    )

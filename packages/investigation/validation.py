@@ -32,9 +32,11 @@ from packages.investigation.contracts import (
 )
 from packages.investigation.hypotheses import (
     MIN_DENOMINATOR_FLOOR,
+    FollowUpTask,
     HypothesisTestSpec,
     InvestigationPlanV2,
     SpecIncomplete,
+    resolve_follow_up,
     resolve_test,
 )
 
@@ -64,6 +66,9 @@ ViolationCode = Literal[
     "unknown_context_task",
     "spec_incomplete",
     "denominator_below_floor",
+    # INV-7 (stratified follow-up rounds)
+    "follow_up_kind_not_allowed",
+    "follow_up_target_mismatch",
 ]
 
 
@@ -347,3 +352,74 @@ def _graph_violations(
 def _ordered(violations: Iterable[PlanViolation]) -> tuple[PlanViolation, ...]:
     unique = dict.fromkeys(violations)
     return tuple(sorted(unique, key=lambda item: (item.task_id or "", item.code)))
+
+
+def validate_follow_up_round(
+    requests: Sequence[PlanTask],
+    *,
+    plan: InvestigationPlan,
+    admitted: Sequence[PlanTask],
+    completed_rounds: int,
+    evidence_ids: frozenset[str],
+    resources: ResourceContext,
+    schema: SchemaContext,
+    numeric_fields: frozenset[str],
+    limits: BudgetLimits,
+) -> tuple[PlanViolation, ...]:
+    """Every problem with one INV-7 follow-up round (decision C4); empty means it may be admitted.
+
+    The generic follow-up checks (``validate_follow_ups``, proposer Critic) apply first. Then each
+    request must be a stratified ``FollowUpTask`` that re-tests one approved SQL test of a v2
+    plan exactly (metric, filters, period, and claim unchanged, same hypothesis) and stratifies by
+    a confirmed numeric schema field. Nothing a follow-up names can widen the approved scope.
+    """
+    hypothesis_ids = (
+        frozenset(item.id for item in plan.hypotheses)
+        if isinstance(plan, InvestigationPlanV2)
+        else frozenset()
+    )
+    violations = list(
+        validate_follow_ups(
+            requests,
+            proposer=AgentRole.CRITIC,
+            plan=plan,
+            admitted=admitted,
+            completed_rounds=completed_rounds,
+            evidence_ids=evidence_ids,
+            hypothesis_ids=hypothesis_ids,
+            resources=resources,
+            schema=schema,
+            limits=limits,
+        )
+    )
+    tasks = {task.id: task for task in plan.tasks}
+    for request in requests:
+        if not isinstance(request, FollowUpTask) or not isinstance(plan, InvestigationPlanV2):
+            violations.append(PlanViolation("follow_up_kind_not_allowed", request.id))
+            continue
+        follow_up = resolve_follow_up(request)
+        target = tasks.get(request.depends_on[0])
+        try:
+            approved = resolve_test(plan, target) if target is not None else None
+        except SpecIncomplete:
+            approved = None
+        if approved is None or (
+            approved.hypothesis_id,
+            approved.metric,
+            approved.filters,
+            approved.period,
+            approved.comparison_group,
+            approved.claim,
+        ) != (
+            follow_up.hypothesis_id,
+            follow_up.metric,
+            follow_up.filters,
+            follow_up.period,
+            follow_up.comparison_group,
+            follow_up.claim,
+        ):
+            violations.append(PlanViolation("follow_up_target_mismatch", request.id))
+        field = request.input.stratification.field
+        if not schema.has(field) or field.casefold() not in numeric_fields:
+            violations.append(PlanViolation("unknown_field", request.id))
+    return _ordered(violations)
