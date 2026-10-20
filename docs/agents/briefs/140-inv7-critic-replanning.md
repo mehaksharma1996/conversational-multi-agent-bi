@@ -93,7 +93,7 @@ evidence.
 | ID | Decision |
 |---|---|
 | C1 | **Composite Critic.** Deterministic checks are authoritative and decide every finding about numbers, references, causation, document contradiction, conflicting or insufficient evidence, and coverage of completed work. A bounded model review may only *propose* coverage gaps (missing stratification). Each proposal is schema-validated and then deterministically confirmed: the target is an approved, completed SQL rate test; the field is a confirmed numeric schema field that is not already a key; the gap was not addressed before. An unconfirmed proposal is counted and dropped. Model text never becomes control flow, and the model cannot withdraw or override a deterministic finding. |
-| C2 | **Findings draft as the Critic's subject.** After the verdicts of a round, the Business Investigator's bounded model call drafts typed, untrusted claims (`FindingsDraft`): per claim, a hypothesis, the approved test, which number (`measure`, `reference`, `effect`), a value, a direction, `association` or `causation`, a basis (`data` or `document`), and cited evidence IDs. Claims never enter state, never become findings by themselves, and never reach a report. INV-8 owns the verified report and may reuse the claim checks. |
+| C2 | **Transient claim draft, only because structured state cannot carry the defects (modified at review).** See "C2 necessity" below. After the verdicts of a round, the Business Investigator's call drafts typed, untrusted claims (`FindingsDraft`). The call is strictly bounded, gateway-metered, and owner-only. Each claim gives a hypothesis, the approved test, which number (`measure`, `reference`, `effect`), a value, a direction, `association` or `causation`, a basis (`data` or `document`), and cited evidence IDs. Claims stay in process for one critique: they never enter state, checkpoints, or reports, and a finding keeps only a claim's index. A draft that fails (refused before running, malformed, or `unavailable`) removes only the claim checks. Every check over verdicts and evidence (conflicting evidence, incomplete coverage, confirmation of model gaps) still runs. INV-8 owns the verified report. |
 | C3 | **Separate authorization per follow-up round.** Follow-ups are new executable work outside the plan digest, so decision 3 needs an explicit authorization for each round. INV-7 defines a content-free binding and a trusted `FollowUpAuthorizer` port: scope, plan digest, round, a digest of the exact follow-up tasks, and a deadline no later than the plan approval's. Production code never constructs a `FollowUpApproval`, and production has no authorizer, so production fails closed: no round is admitted, the run ends normally, and the limitation `follow_up_not_authorized` is recorded. The asynchronous human approval flow (pausing, the UI, approver identity, and audit) belongs to INV-10 (#143). |
 | C4 | **One follow-up kind: a stratified re-test.** A follow-up is a `hypothesis_test` with method `stratified_comparison` that copies an approved SQL rate test's resolved metric, filters, period, and claim, and adds a `Stratification`: a confirmed integer or number field and 1 to 3 ascending integer cut points, giving bands `band_0` to `band_n`. Evaluation is direct standardization with baseline weights: standardized comparison rate = Σ wᵦ·rateᵦ(comparison), with wᵦ = baseline populationᵦ / baseline population. For `increase` the effect is standardized minus crude baseline; `decrease` is the reverse; `higher_than` and mean metrics are refused in INV-7. Every band must meet `min_denominator`. The Supervisor constructs the task deterministically from a confirmed finding; a model never authors a task. Other follow-up kinds (document re-queries, new SQL objectives) are refused, and so is a request that would re-run a task that failed for a permanent reason. A critique never creates a retry. |
 | C5 | **Rounds.** Critique 0 follows the first verdicts. Follow-up round 1 (if confirmed, valid, and authorized) leads to critique 1, and that can lead to follow-up round 2. Critic rounds and replan rounds are reserved and settled on the execution ledger and never reset. No third follow-up round can exist: the ledger, `validate_follow_ups`, a state invariant, and the owner each refuse it. Results of round 2 are re-evaluated deterministically but not critiqued again (`critique_rounds_exhausted`). A gap that an earlier round addressed is never requested again, so a model that keeps asking cannot extend the loop. |
@@ -101,6 +101,60 @@ evidence.
 | C7 | **State (additive; `STATE_VERSION` stays 1).** The additions are: <br>• a `critiques` channel, an append-only list of `CritiqueRecord` with a new writer `critic`; <br>• a `follow_up_rounds` channel, an append-only list of `FollowUpRoundRecord` owned by `supervisor`; <br>• admitted follow-ups typed as `FollowUpTask`; <br>• `GatewayTool` values `draft_findings`, `review_findings`, and `open_follow_up_round`; <br>• `DerivedOperationName` `standardized_rate_difference`; <br>• the refusal code `follow_up_not_authorized` (task severity). <br>Every pre-INV-7 checkpoint restores unchanged; an older reader refuses the new vocabulary (`unknown_channel` or `invalid_value`). |
 | C8 | **R4 stays deferred.** Follow-up tasks carry no `evidence_refs`; their justification is the critique record's finding. Their SQL therefore runs `not_applicable`, as INV-6 tests do. Document-derived policy criteria move to the first milestone that admits evidence-citing SQL. ADR Amendment 5 records this. |
 | C9 | **Model context.** The draft prompt contains verified observations (counts, rates, effects from derived evidence), verdict codes, approved hypothesis statements, and verified document citations with their untrusted answer text, labelled as untrusted. The Critic prompt contains only the plan's hypotheses and test specifications, schema field names and types, verdict and finding codes, and already-addressed gaps: no rows, passages, document text, or draft text. Document text (including the memo's injected sentence) can therefore influence only claims, which are verified, and never a follow-up request. |
+
+## Review outcome (2026-10-20)
+
+- **C1 approved.** Deterministic verification is the authority. Model suggestions may only
+  identify potential coverage gaps. The memo contradiction is assessed only against document
+  evidence from an approved plan task whose citations verify (`document_citations_valid`). It
+  must agree with an approved test's data observation.
+- **C2 modified,** as recorded in the table above and justified below.
+- **C3 approved.** A follow-up approval is bound to the exact task set (`follow_up_digest`).
+  Scripted authorizers exist only under `tests/`; a structural test refuses any production
+  construction of `FollowUpApproval`. An unauthorized round is reported as the limitation
+  `follow_up_not_authorized`, never as complete verification. The run's status is still decided
+  by its tasks, and the report states the limitation.
+- **C4 conditionally approved.** Follow-ups are stratified rate re-tests only. The baseline-weighted
+  direct standardization is recomputed with exact `Fraction` arithmetic from the integer counts of
+  the verified stratified query payload:
+  - weights from the baseline band populations;
+  - every band's denominators checked against `min_denominator`;
+  - any stated rate column checked within the 0.0001 tolerance.
+
+  No expected value appears in production code. The follow-up result is new derived evidence: the
+  original test's query and derived evidence are never changed or replaced, and the hypothesis
+  verdict cites both.
+
+**C2 necessity (why structured state alone cannot supply the claims).**
+- **Wrong numbers.**
+  - Verdicts and derived evidence are recomputed deterministically, so they cannot be wrong.
+  - State holds no number at all.
+  - The only model-authored numbers are SQL rate columns, already checked by the evaluator
+    (`evidence_inconsistent`), and document answer prose.
+  - Parsing numbers out of untrusted prose would make document text a control input.
+- **Causal overreach.** It is unrepresentable in the structured state:
+  - `Hypothesis.relationship` has the single value `association`;
+  - verdict codes cannot express causation;
+  - statements are display-only.
+- **Memo contradiction.** The memo's claim exists only as document text. To compare it with data,
+  something must state it as a typed direction for a typed test, and only a model can do that
+  without parsing prose deterministically.
+
+So the mandatory defects need model-authored claims. The draft is that transient, bounded input.
+The checks never trust it: every value, direction, relationship, and reference in it is verified
+against state and payloads.
+
+**Achievability through genuine execution paths (checked against the code).** Every case runs
+through the real execution owner, gateway, specialists, real SQLite churn data, and the real
+four-PDF index, under scripted bounded adapters.
+
+| Case | Path |
+|---|---|
+| Wrong number | The scripted draft states SMB Basic 2026-Q2 churn 0.18, citing `h1_rate`'s derived evidence. The Critic recomputes 70/500 = 0.14 from the verified payload, giving `numeric_mismatch` with that derived ID. |
+| Causal overreach | A scripted draft claim with `relationship: causation` for H1 gives `causal_overreach`, `downgrade_to_association`, citing H1's derived evidence. |
+| Memo contradiction | The INV-7 churn plan adds one approved `document_research` task, `memo` (purpose `contradiction_check`), as context for H4. It runs through Document Research on the real index, and its citation must verify. The scripted draft states, on a `document` basis citing that evidence, that Enterprise churn increased. H4's derived effect is 0, giving `document_contradiction` with the memo evidence and `h4_rate`'s derived evidence. If the citation does not resolve to a verified memo source, the test fails rather than passing on an unverified document. |
+| Missing tenure stratification | The scripted Critic review proposes `{h1, h1_rate, tenure_months_start, [6]}`. The deterministic confirmation checks that `h1_rate` is a completed, approved rate test, that the field is a confirmed integer schema field and not already a key, and that the gap was not addressed before. The result is `missing_stratification` with origin `model_confirmed`. |
+| Exactly one follow-up | Critique 0 confirms the tenure gap. The Supervisor builds one `StratifiedTestSpec` task; validation and the scripted authorizer bind it; the dispatcher runs it through the SQL Analyst (scripted stratified SQL, real execution). Critique 1's scripted review repeats the same gap (refused as already addressed) and proposes nothing new, so the run ends with `replan: none_needed`, one round record, and `replan_rounds == 1`. |
 
 ## Component boundaries
 
