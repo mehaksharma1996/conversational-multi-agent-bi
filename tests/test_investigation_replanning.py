@@ -279,3 +279,66 @@ def test_every_checkpoint_restores_and_holds_no_claim_or_number(index: Any) -> N
         assert secret not in review_channels
     codes = [finding["code"] for finding in values["critiques"][0]["findings"]]
     assert codes[:2] == ["causal_overreach", "unsupported_reference"]
+
+
+# --- the interim report states what did not happen -----------------------------------------------
+
+
+def _limitations(result: Any) -> set[str]:
+    from packages.investigation.interim_report import compose_interim_report
+
+    return {item.code for item in compose_interim_report(result.state, result.payloads).limitations}
+
+
+def test_the_report_states_an_unauthorized_follow_up(index: Any) -> None:
+    _, result = _run(index, reviews=[review(TENURE)])
+    assert "follow_up_not_authorized" in _limitations(result)
+
+
+def test_the_report_states_that_round_two_results_were_not_critiqued(index: Any) -> None:
+    _, result = _run(
+        index, reviews=[review(TENURE), review(TICKETS)], authorizer=ScriptedAuthorizer()
+    )
+    assert "critique_rounds_exhausted" in _limitations(result)
+
+
+def test_the_report_states_an_incomplete_critique(index: Any) -> None:
+    _, result = _run(index, reviews=["not json"], authorizer=ScriptedAuthorizer())
+    assert "critique_unavailable" in _limitations(result)
+    reset_replay_registry()
+    _, limited = _run(
+        index,
+        reviews=[review(TENURE)],
+        authorizer=ScriptedAuthorizer(),
+        limits=EXECUTION_LIMITS.model_copy(update={"task_attempts": 9}),
+    )
+    assert "replan_limit_reached" in _limitations(limited)
+
+
+def test_missing_source_documents_stay_missing(index: Any) -> None:
+    import json
+
+    claim = {
+        "hypothesis_id": "h4",
+        "test_task_id": "h4_rate",
+        "basis": "document",
+        "direction": "increase",
+        "evidence_ids": ["ev_" + "0" * 32],  # the memo evidence that was never produced
+    }
+    _, result = _run(
+        index,
+        drafts=[json.dumps({"claims": [claim]})],
+        reviews=[review(TENURE)],
+        authorizer=ScriptedAuthorizer(),
+        retriever=None,
+    )
+    view = result.state
+    for task_id in ("pricing", "support", "playbook", "memo"):
+        record = view.tasks[task_id]
+        assert (record.status, record.outcome.error_category) == ("skipped", "resource_unavailable")
+    finding = view.critiques[0].findings[0]
+    assert (finding.code, finding.evidence_ids) == ("unsupported_reference", ())
+    # H1 needs its pricing context: without the document it can never be supported.
+    assert view.verdicts["h1"].verdict == "untestable"
+    assert "context_unverified" in view.verdicts["h1"].reasons
+    assert result.status is S.COMPLETED_PARTIAL

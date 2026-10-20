@@ -28,6 +28,16 @@ cited evidence IDs. A row never carries the hypothesis statement, a number, or p
 verdict value expresses causation. A v2 run that stopped before its verdicts were evaluated states
 ``verdicts_not_evaluated``. Derived payloads are accepted as inputs; they add no table rows.
 
+INV-7: one critique row per critic round, from the validated ``CritiqueRecord``s: the round, the
+draft and review statuses, the replanning outcome, the count of unconfirmed model proposals, and
+each finding as fixed codes and IDs (with a confirmed gap's stratification field and cut points).
+Never a claim, a statement, a number, or model text. Rounds that did not fully happen are stated as
+limitations: ``critique_unavailable`` (no valid draft or review, or no critique at all),
+``follow_up_not_authorized`` (an approval was absent, or a round recorded as admitted never
+opened), ``follow_up_invalid``, ``replan_limit_reached`` (round or budget limits), and
+``critique_rounds_exhausted`` (the last follow-up round's results were not critiqued). An
+interim report is never presented as fully verified.
+
 The report lives in process only; persistence belongs to #144.
 """
 
@@ -67,10 +77,15 @@ from packages.investigation.evidence import (
 from packages.investigation.hypotheses import MAX_HYPOTHESES, InvestigationPlanV2
 from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.state import (
+    MAX_CRITIC_ROUNDS,
+    MAX_FINDINGS,
     MAX_SOURCES,
     MAX_VERDICT_EVIDENCE,
+    CritiqueFinding,
     GatewayEvidenceId,
     InvestigationStateView,
+    ReplanOutcome,
+    ReviewStatus,
     VerdictCode,
     VerdictReason,
 )
@@ -83,7 +98,7 @@ MAX_REPORT_QUERY_ROWS = 50
 # The plan's tasks plus as many admitted follow-ups (bounded later by INV-7).
 MAX_REPORT_TASKS = 2 * MAX_PLAN_TASKS
 MAX_REPORT_CITATIONS = MAX_REPORT_TASKS * MAX_SOURCES
-MAX_REPORT_LIMITATIONS = 4 * MAX_REPORT_TASKS + 1
+MAX_REPORT_LIMITATIONS = 4 * MAX_REPORT_TASKS + 8
 
 ReportStatus = Literal["completed", "completed_partial", "failed", "cancelled", "budget_exhausted"]
 REPORT_STATUSES: frozenset[InvestigationStatus] = frozenset(
@@ -179,6 +194,17 @@ class ReportVerdictRow(_Report):
     evidence_ids: tuple[GatewayEvidenceId, ...] = Field(default=(), max_length=MAX_VERDICT_EVIDENCE)
 
 
+class ReportCritiqueRow(_Report):
+    """One critic round as statuses, an outcome, and fixed-code findings. Never a claim."""
+
+    round: Count
+    draft_status: ReviewStatus
+    review_status: ReviewStatus
+    replan: ReplanOutcome
+    rejected_proposals: Count
+    findings: tuple[CritiqueFinding, ...] = Field(default=(), max_length=MAX_FINDINGS)
+
+
 class InterimReport(_Report):
     schema_version: Literal[1] = REPORT_SCHEMA_VERSION
     status: ReportStatus
@@ -189,6 +215,7 @@ class InterimReport(_Report):
     citations: tuple[ReportCitation, ...] = Field(default=(), max_length=MAX_REPORT_CITATIONS)
     limitations: tuple[Limitation, ...] = Field(default=(), max_length=MAX_REPORT_LIMITATIONS)
     verdicts: tuple[ReportVerdictRow, ...] = Field(default=(), max_length=MAX_HYPOTHESES)
+    critiques: tuple[ReportCritiqueRow, ...] = Field(default=(), max_length=MAX_CRITIC_ROUNDS)
 
     @model_validator(mode="after")
     def _consistent(self) -> InterimReport:
@@ -277,7 +304,47 @@ LIMITATION_TEMPLATES: dict[LimitationCode, str] = {
     LimitationCode.VERDICTS_NOT_EVALUATED: (
         "The investigation stopped before its hypotheses could be evaluated."
     ),
+    LimitationCode.CRITIQUE_UNAVAILABLE: (
+        "The critique of these results was incomplete; only the evidence checks ran."
+    ),
+    LimitationCode.FOLLOW_UP_NOT_AUTHORIZED: (
+        "A follow-up the critique justified was not authorized and did not run."
+    ),
+    LimitationCode.FOLLOW_UP_INVALID: (
+        "A follow-up the critique proposed failed validation and did not run."
+    ),
+    LimitationCode.REPLAN_LIMIT_REACHED: (
+        "A justified follow-up exceeded the round or budget limits and did not run."
+    ),
+    LimitationCode.CRITIQUE_ROUNDS_EXHAUSTED: (
+        "The last follow-up results were evaluated but not critiqued again."
+    ),
 }
+
+_REPLAN_LIMITATIONS: dict[str, LimitationCode] = {
+    "not_authorized": LimitationCode.FOLLOW_UP_NOT_AUTHORIZED,
+    "invalid": LimitationCode.FOLLOW_UP_INVALID,
+    "round_limit": LimitationCode.REPLAN_LIMIT_REACHED,
+    "budget": LimitationCode.REPLAN_LIMIT_REACHED,
+}
+
+
+def _critique_limitations(view: InvestigationStateView) -> list[Limitation]:
+    """What the critique and replanning did not do, as run-level codes (INV-7)."""
+    found: list[LimitationCode] = []
+    if view.verdicts and not view.critiques:
+        found.append(LimitationCode.CRITIQUE_UNAVAILABLE)
+    for index, record in enumerate(view.critiques):
+        if record.draft_status != "valid" or record.review_status != "valid":
+            found.append(LimitationCode.CRITIQUE_UNAVAILABLE)
+        if record.replan in _REPLAN_LIMITATIONS:
+            found.append(_REPLAN_LIMITATIONS[record.replan])
+        if record.replan == "admitted" and len(view.follow_up_rounds) <= index:
+            found.append(LimitationCode.FOLLOW_UP_NOT_AUTHORIZED)  # recorded, never opened
+    if view.follow_up_rounds and len(view.critiques) == len(view.follow_up_rounds):
+        found.append(LimitationCode.CRITIQUE_ROUNDS_EXHAUSTED)
+    return [Limitation(code=code) for code in dict.fromkeys(found)]
+
 
 _Payload = QueryEvidencePayload | DocumentEvidencePayload | DerivedEvidencePayload
 
@@ -375,6 +442,18 @@ def compose_interim_report(
                 )
         if not view.verdicts:
             evidence_limits.append(Limitation(code=LimitationCode.VERDICTS_NOT_EVALUATED))
+        evidence_limits.extend(_critique_limitations(view))
+    critique_rows = tuple(
+        ReportCritiqueRow(
+            round=record.round,
+            draft_status=record.draft_status,
+            review_status=record.review_status,
+            replan=record.replan,
+            rejected_proposals=record.rejected_proposals,
+            findings=record.findings,
+        )
+        for record in view.critiques
+    )
     limitations = [
         *(item for item in base if item.task_id is not None),
         *evidence_limits,
@@ -387,6 +466,7 @@ def compose_interim_report(
         citations=tuple(citations),
         limitations=tuple(dict.fromkeys(limitations)),
         verdicts=tuple(verdict_rows),
+        critiques=critique_rows,
     )
 
 
