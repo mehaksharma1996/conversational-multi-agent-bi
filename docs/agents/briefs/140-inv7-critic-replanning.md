@@ -93,14 +93,14 @@ evidence.
 | ID | Decision |
 |---|---|
 | C1 | **Composite Critic.** Deterministic checks are authoritative and decide every finding about numbers, references, causation, document contradiction, conflicting or insufficient evidence, and coverage of completed work. A bounded model review may only *propose* coverage gaps (missing stratification). Each proposal is schema-validated and then deterministically confirmed: the target is an approved, completed SQL rate test; the field is a confirmed numeric schema field that is not already a key; the gap was not addressed before. An unconfirmed proposal is counted and dropped. Model text never becomes control flow, and the model cannot withdraw or override a deterministic finding. |
-| C2 | **Transient claim draft, only because structured state cannot carry the defects (modified at review).** See "C2 necessity" below. After the verdicts of a round, the Business Investigator's call drafts typed, untrusted claims (`FindingsDraft`). The call is strictly bounded, gateway-metered, and owner-only. Each claim gives a hypothesis, the approved test, which number (`measure`, `reference`, `effect`), a value, a direction, `association` or `causation`, a basis (`data` or `document`), and cited evidence IDs. Claims stay in process for one critique: they never enter state, checkpoints, or reports, and a finding keeps only a claim's index. A draft that fails (refused before running, malformed, or `unavailable`) removes only the claim checks. Every check over verdicts and evidence (conflicting evidence, incomplete coverage, confirmation of model gaps) still runs. INV-8 owns the verified report. |
+| C2 | **Transient claim draft, only because structured state cannot carry the defects (modified at review).** See "C2 necessity" below. After the verdicts of a round, the Business Investigator's call drafts typed, untrusted claims (`FindingsDraft`). The call is strictly bounded, gateway-metered, and owner-only. Each claim gives a hypothesis, the approved test, which number (`comparison`, `baseline`, `change`), a value, a direction, `association` or `causation`, a basis (`data` or `document`), and cited evidence IDs. Claims stay in process for one critique: they never enter state, checkpoints, or reports, and a finding keeps only a claim's index. A draft that fails (refused before running, malformed, or `unavailable`) removes only the claim checks. Every check over verdicts and evidence (conflicting evidence, incomplete coverage, confirmation of model gaps) still runs. INV-8 owns the verified report. |
 | C3 | **Separate authorization per follow-up round.** Follow-ups are new executable work outside the plan digest, so decision 3 needs an explicit authorization for each round. INV-7 defines a content-free binding and a trusted `FollowUpAuthorizer` port: scope, plan digest, round, a digest of the exact follow-up tasks, and a deadline no later than the plan approval's. Production code never constructs a `FollowUpApproval`, and production has no authorizer, so production fails closed: no round is admitted, the run ends normally, and the limitation `follow_up_not_authorized` is recorded. The asynchronous human approval flow (pausing, the UI, approver identity, and audit) belongs to INV-10 (#143). |
 | C4 | **One follow-up kind: a stratified re-test.** A follow-up is a `hypothesis_test` with method `stratified_comparison` that copies an approved SQL rate test's resolved metric, filters, period, and claim, and adds a `Stratification`: a confirmed integer or number field and 1 to 3 ascending integer cut points, giving bands `band_0` to `band_n`. Evaluation is direct standardization with baseline weights: standardized comparison rate = Σ wᵦ·rateᵦ(comparison), with wᵦ = baseline populationᵦ / baseline population. For `increase` the effect is standardized minus crude baseline; `decrease` is the reverse; `higher_than` and mean metrics are refused in INV-7. Every band must meet `min_denominator`. The Supervisor constructs the task deterministically from a confirmed finding; a model never authors a task. Other follow-up kinds (document re-queries, new SQL objectives) are refused, and so is a request that would re-run a task that failed for a permanent reason. A critique never creates a retry. |
 | C5 | **Rounds.** Critique 0 follows the first verdicts. Follow-up round 1 (if confirmed, valid, and authorized) leads to critique 1, and that can lead to follow-up round 2. Critic rounds and replan rounds are reserved and settled on the execution ledger and never reset. No third follow-up round can exist: the ledger, `validate_follow_ups`, a state invariant, and the owner each refuse it. Results of round 2 are re-evaluated deterministically but not critiqued again (`critique_rounds_exhausted`). A gap that an earlier round addressed is never requested again, so a model that keeps asking cannot extend the loop. |
 | C6 | **Verdicts.** The `verdicts` channel stays write-once and is written once, after the last round, before the normal close (INV-6 rule). Each critique record keeps a content-free snapshot of that round's verdicts, so the reassessment is visible. An admitted follow-up test is an additional required test of its hypothesis: all tests must support, any refutation refutes, and a follow-up that did not complete makes the hypothesis `untestable/test_not_completed`. Re-evaluation can only use more verified evidence, never upgrade on model text, and never express causation. |
 | C7 | **State (additive; `STATE_VERSION` stays 1).** The additions are: <br>• a `critiques` channel, an append-only list of `CritiqueRecord` with a new writer `critic`; <br>• a `follow_up_rounds` channel, an append-only list of `FollowUpRoundRecord` owned by `supervisor`; <br>• admitted follow-ups typed as `FollowUpTask`; <br>• `GatewayTool` values `draft_findings`, `review_findings`, and `open_follow_up_round`; <br>• `DerivedOperationName` `standardized_rate_difference`; <br>• the refusal code `follow_up_not_authorized` (task severity). <br>Every pre-INV-7 checkpoint restores unchanged; an older reader refuses the new vocabulary (`unknown_channel` or `invalid_value`). |
 | C8 | **R4 stays deferred.** Follow-up tasks carry no `evidence_refs`; their justification is the critique record's finding. Their SQL therefore runs `not_applicable`, as INV-6 tests do. Document-derived policy criteria move to the first milestone that admits evidence-citing SQL. ADR Amendment 5 records this. |
-| C9 | **Model context.** The draft prompt contains verified observations (counts, rates, effects from derived evidence), verdict codes, approved hypothesis statements, and verified document citations with their untrusted answer text, labelled as untrusted. The Critic prompt contains only the plan's hypotheses and test specifications, schema field names and types, verdict and finding codes, and already-addressed gaps: no rows, passages, document text, or draft text. Document text (including the memo's injected sentence) can therefore influence only claims, which are verified, and never a follow-up request. |
+| C9 | **Model context.** The draft prompt contains verified observations (counts, rates, effects from derived evidence), verdict codes, approved hypothesis statements, and verified document citations with their untrusted answer text, labelled as untrusted. The Critic prompt contains only the plan's hypotheses and test specifications, confirmed numeric field names, verdict codes, and already-addressed gaps: no rows, passages, document text, or draft text. Document text (including the memo's injected sentence) can therefore influence only claims, which are verified, and never a follow-up request. |
 
 ## Review outcome (2026-10-20)
 
@@ -189,7 +189,7 @@ four-PDF index, under scripted bounded adapters.
   - optional `stratification`, and `origin` `deterministic | model_confirmed`.
 - **`CritiqueRecord`:**
   - `round` (0 or 1), `draft_status` and `review_status` (`valid | invalid | unavailable`);
-  - `findings` (at most 24) and `rejected_proposals` (a count);
+  - `findings` (at most 48) and `rejected_proposals` (a count);
   - `verdicts` (a snapshot of `VerdictRecord`s) and a `replan` outcome: `none_needed`,
     `admitted`, `not_authorized`, `invalid`, `round_limit`, or `budget`.
 - **`FollowUpRoundRecord`:** `round` (1 or 2), `critique_round`, `task_ids`, `follow_up_digest`,
@@ -285,7 +285,7 @@ start → dispatch* ──FINISH_RUN──► derive* (dispatch) ──► draft
 | T1 | The four seeded defects (wrong number, causal overreach, memo contradiction, missing tenure stratification) are flagged with the right code, severity, disposition, and evidence IDs | `tests/test_investigation_critic.py` (pure) and `tests/test_investigation_churn_critique.py` (end to end) |
 | T2 | Churn: the original tasks complete; `missing_stratification` on `h1_rate` by `tenure_months_start` at 6; exactly one follow-up round; tenure-stratified SQL runs through the SQL Analyst; strata, standardized rate (0.1410), and change (0.0810) match the oracle; H1 is reassessed and stays `supported_association`, citing the standardized evidence; critique 1 requests nothing; status `completed` | `tests/test_investigation_churn_critique.py` |
 | T3 | Round limits: round 1 admitted; round 2 only when confirmed and authorized; a third is impossible (owner, validator, invariant, ledger); exhausted budget, attempts, or authorization ends earlier; repeated model requests do not extend the loop | `tests/test_investigation_replanning.py` |
-| T4 | Security: unauthorized follow-ups; cross-tenant and fabricated IDs; unconfirmed schema fields; document follow-ups; invalid dependencies and duplicate IDs; malformed critique and draft; Critic writing foreign channels; cancellation during review and replan; late results; budget exhaustion during follow-ups; repeated or conflicting proposals; missing source documents | `tests/test_investigation_replanning.py`, `tests/test_investigation_critique_state.py`, `tests/test_investigation_boundaries.py`, `tests/test_investigation_bypass.py` |
+| T4 | Security: unauthorized follow-ups; cross-tenant and fabricated IDs; unconfirmed schema fields; document follow-ups; invalid dependencies and duplicate IDs; malformed critique and draft; Critic writing foreign channels; cancellation during review and replan; late results; budget exhaustion during follow-ups; repeated or conflicting proposals; missing source documents | `tests/test_investigation_replanning.py`, `tests/test_investigation_critique_contracts.py`, `tests/test_investigation_review_gateway.py`, `tests/test_investigation_boundaries.py` |
 | T5 | Contracts: round-trip; strictness; v1/v2 plan digests unchanged; pre-INV-7 checkpoints restore; standardized derived evidence recomputes; tampering fails | `tests/test_investigation_critique_contracts.py`, `tests/test_investigation_stratified.py` |
 | T6 | Regressions: every INV-3 to INV-6 suite, the legacy LangGraph suites, and evaluations stay green; INV-6 tests change only where they pin the step bound or the scripted adapter must answer the two new prompts | the existing suites |
 
@@ -341,3 +341,44 @@ execution limits, telemetry and audit allowlists, dependency and lock files, and
   `untestable`, the safe direction.
 - **Process-local limits remain.** Checkpoints and replay protection are process-local, as in
   INV-5 and INV-6.
+
+## Readiness (S6, 2026-10-20)
+
+Delivered locally on `feat/iteration2-inv7-critic-replanning`, one commit per stage after
+`fe00f90`:
+
+| Stage | Delivered |
+|---|---|
+| S0 | This brief and the review outcome |
+| S1 | Stratified follow-up and standardized-evidence contracts; critique, approval, and round records; the `critiques` and `follow_up_rounds` channels and their invariants |
+| S2 | `packages/investigation/critique.py` (`critique_round`, `validate_critique`); stratified evaluation; `build_follow_ups`, `validate_follow_up_round` |
+| S3 | Gateway `draft_findings`, `review_findings`, `open_follow_up_round`; the two versioned prompts; follow-up approval checks |
+| S4 | `src/investigation/critic.py`, the Supervisor's `FollowUpPlanner`, the `critique` and `replan` graph steps |
+| S5 | Churn acceptance and security end to end; interim report critique rows and limitations |
+| S6 | ADR 0024 Amendment 5, the workflow document, this section |
+
+Results:
+- **Seeded defects.** All four are flagged through the genuine path, each with its code and
+  supporting evidence IDs.
+- **Exactly one follow-up round.** The churn run performs one round, and tenure-stratified SQL
+  runs through the SQL Analyst.
+- **Matches the oracle.** The standardized Q2 rate (0.1410) and change (0.0810) match the oracle
+  within 0.0001, read only by the tests.
+- **H1 reassessed.** H1 is re-evaluated on both tests and stays `supported_association`; H2 to H4
+  are unchanged.
+- **Repeated requests.** Critique 1 rejects the repeated request.
+- **Round limits.** Round 2 runs only when justified and authorized. A third round is impossible in
+  state, validation, and the ledger.
+- **Bounded by budget and approval.** Budget, attempt, and authorization limits end replanning
+  earlier.
+- **Checks.** `python -m scripts.check_all` passes; the evaluations are unchanged.
+
+Deviations and choices:
+- **Claim sides.** They are named `comparison`, `baseline`, and `change` (period terms), not
+  measure, reference, and effect.
+- **Critic prompt contents.** It carries no finding codes, so it is independent of the draft.
+- **Finding cap.** At most 48 findings per round.
+- **No authorizer.** A round never opened shows its critique's `admitted` outcome together with a
+  `follow_up_not_authorized` limitation.
+- **Oversized review prompts.** A review prompt over the input cap is `unavailable`, not
+  investigation-terminal, because it provably never ran.

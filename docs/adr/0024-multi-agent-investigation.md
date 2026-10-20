@@ -426,6 +426,66 @@ which makes a hypothesis `untestable` (evaluation #145, #147); multi-test hypoth
 test to support; the Critic, follow-ups, and document-derived policy criteria are INV-7 (#140); the
 verified report is #141.
 
+## Amendment 5: critique and bounded replanning (INV-7, #140, 2026-10-20)
+
+INV-7 makes decisions 6, 7, and 10 concrete for the Critic and the replanning loop. Routing stays
+off (#142), and production stays fail-closed: without a reviewed bounded adapter no model call runs,
+and without a follow-up authorizer no follow-up runs. Details are in
+`docs/architecture/investigation-workflow.md` and `docs/agents/briefs/140-inv7-critic-replanning.md`
+(decisions C1 to C9).
+
+1. **Composite Critic (C1).** Deterministic checks over verified evidence decide every finding.
+   A bounded model review may only propose coverage gaps (stratification of an approved test), and a
+   proposal counts only when deterministic checks confirm it. Severity and disposition are fixed per
+   code. The Critic (`src/investigation/critic.py`) holds nothing and writes nothing; the run owner
+   re-validates its result (`validate_critique`) before the `critic` writer records it.
+2. **Transient claim draft (C2).** Structured state cannot carry a wrong number, a causal claim, or
+   a document's assertion (verdicts are recomputed, causation is unrepresentable, and document
+   claims exist only as prose), so the Business Investigator's bounded, metered, owner-only gateway
+   call drafts typed claims for the Critic to verify. Claims never enter state, checkpoints, or
+   reports; a failed draft removes only the claim checks.
+3. **Separate approval per follow-up round (C3, refines decision 10).** Follow-ups are outside the
+   plan digest, so each round needs a trusted approval bound to its exact task set
+   (`follow_up_digest`), its round, and the plan approval's window. It comes only from the
+   `FollowUpAuthorizer` port; no production module constructs a `FollowUpApproval` (a structural
+   test). Production has no authorizer until INV-10 (#143), so an unauthorized round is the
+   limitation `follow_up_not_authorized`, never a silent completion. The gateway re-verifies the
+   approval when the round opens and on every operation on a follow-up task.
+4. **Stratified re-tests only (C4).** A follow-up copies an approved SQL rate test's metric,
+   filters, period, and claim and adds integer bands over a confirmed numeric field. It is evaluated
+   by exact direct standardization with baseline weights from the verified band counts, recorded as
+   `standardized_rate_difference` derived evidence, and becomes an additional required test of its
+   hypothesis. The original evidence is never changed. A critique never retries a task.
+5. **Bounded rounds (C5, decision 7).** At most two critic rounds and two follow-up rounds, reserved
+   and settled on the execution ledger and never reset; at most three follow-ups per round, within
+   the cumulative 12 task attempts. A third round cannot be represented in state, validated, or
+   reserved. A gap addressed once is never requested again, so repeated model requests cannot
+   extend the loop.
+6. **Verdicts (C6).** The write-once `verdicts` channel is written once, after the last round;
+   each critique record keeps a content-free verdict snapshot, so reassessment is visible.
+   Observational evidence still supports association only.
+7. **State (C7).** Additive channels `critiques` (writer `critic`) and `follow_up_rounds`
+   (Supervisor); admitted follow-ups are `FollowUpTask`s and must belong to an approved round;
+   `GatewayTool` gains `draft_findings`, `review_findings`, and `open_follow_up_round`;
+   `DerivedOperationName` gains `standardized_rate_difference`; `RefusalCode` gains
+   `follow_up_not_authorized` (task severity). `STATE_VERSION` stays 1: earlier checkpoints restore
+   unchanged, and older readers refuse the new vocabulary.
+8. **Model context (C9).** The draft prompt (`inv7-findings-prompt-v1`) carries verified
+   measurements, verdict codes, approved statements, and verified citations with fenced, untrusted
+   answer text. The Critic prompt (`inv7-critic-prompt-v1`) carries test structure, verdict codes,
+   numeric field names, and addressed gaps only, so document text can never steer a follow-up.
+9. **R4 stays deferred (C8).** Follow-ups carry no `evidence_refs`, so their SQL runs
+   `not_applicable`; document-derived policy criteria move to the first milestone that admits
+   evidence-citing SQL.
+
+**Known limitations and deferred work.** The authorizer is a synchronous port: the human approval
+flow, pausing, approver identity, and audit belong to INV-10 (#143) and the API (#144). The two
+review prompts are versioned and pinned by tests but not registered in
+`evals/v1/prompt-registry.json`. Coverage gaps are found only when the model proposes them (live
+recall is an evaluation question, #145 and #147). Standardization is descriptive and for rate
+metrics only. A follow-up that does not complete downgrades its hypothesis to `untestable`.
+Checkpoints and replay protection remain process-local. The verified report is INV-8 (#141).
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,
