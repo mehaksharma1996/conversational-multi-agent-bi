@@ -646,7 +646,8 @@ def test_an_unconfirmed_repair_timeout_is_a_violation() -> None:
         _answer_with(valid_response_text(), reports=({"prompt_tokens": 1_234},)),
         _answer_with(valid_response_text(), reports=({"prompt_tokens": 99, "output_tokens": 1},)),
         _answer_with(
-            valid_response_text(), reports=({"prompt_tokens": 1_234, "output_tokens": 1_001},)
+            valid_response_text(),
+            reports=({"prompt_tokens": 1_234, "output_tokens": PLANNING_STAGE_OUTPUT_TOKENS + 1},),
         ),
         _answer_with(
             valid_response_text(),

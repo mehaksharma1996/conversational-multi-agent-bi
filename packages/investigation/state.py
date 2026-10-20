@@ -63,12 +63,14 @@ from packages.investigation.budget import (
 from packages.investigation.contracts import (
     OUTCOME_CATEGORIES,
     AgentRole,
+    HypothesisId,
     InvestigationPlan,
     PlanTask,
     StrictCount,
     TaskId,
     TaskOutcome,
 )
+from packages.investigation.hypotheses import AnyPlan, InvestigationPlanV2, parse_plan
 from packages.investigation.lifecycle import (
     TERMINAL_STATUSES,
     IllegalTransitionError,
@@ -126,6 +128,9 @@ StateErrorCode = Literal[
     "ledger_open",
     # INV-4 S4: the proposal record disagrees with the plan or the lifecycle status.
     "proposal_mismatch",
+    # INV-6 S1: derived evidence or a verdict does not match the evidence or the plan.
+    "derived_mismatch",
+    "verdict_mismatch",
     # Raised when reading a checkpoint (``src/orchestration/investigation_checkpoint.py``).
     "checkpoint_unreadable",
     "checkpointer_not_strict",
@@ -267,14 +272,42 @@ class DocumentProvenance(_State):
     )
 
 
-Provenance = Annotated[QueryProvenance | DocumentProvenance, Field(discriminator="kind")]
+# INV-6 D4: the fixed operations the gateway may derive from verified query evidence.
+DerivedOperationName = Literal["rate_difference", "mean_difference"]
+MAX_DERIVED_SOURCES = 2
+
+
+class DerivedProvenance(_State):
+    """How derived evidence was produced: a fixed operation over this task's own query evidence.
+
+    The derived value and the counts it was computed from stay in process (the payload); state
+    keeps the operation and the source identities only.
+    """
+
+    kind: Literal["derived"] = "derived"
+    dataset_id: Identifier
+    operation: DerivedOperationName
+    source_evidence_ids: tuple[GatewayEvidenceId, ...] = Field(
+        min_length=1, max_length=MAX_DERIVED_SOURCES
+    )
+
+    @model_validator(mode="after")
+    def _unique_sources(self) -> DerivedProvenance:
+        if len(set(self.source_evidence_ids)) != len(self.source_evidence_ids):
+            raise ValueError("derived sources must be unique")
+        return self
+
+
+Provenance = Annotated[
+    QueryProvenance | DocumentProvenance | DerivedProvenance, Field(discriminator="kind")
+]
 
 
 class EvidenceRecord(_State):
     """Metadata for gateway-issued evidence. The payload never enters state (INV-5 decides)."""
 
     id: GatewayEvidenceId
-    kind: Literal["query", "document"]
+    kind: Literal["query", "document", "derived"]
     task_id: TaskId
     attempt: StrictCount = Field(ge=1, le=2)
     provenance: Provenance
@@ -295,6 +328,8 @@ GatewayTool = Literal[
     "finish_attempt",
     # INV-5 S2: the owner-only, gateway-verified skip of a pending task.
     "skip_task",
+    # INV-6 S4: the owner-only, deterministic derivation from verified query evidence.
+    "derive_evidence",
 ]
 DecisionResult = Literal["succeeded", "refused", "failed", "cancelled"]
 
@@ -343,6 +378,58 @@ class TerminalRecord(_State):
             raise ValueError("terminal record needs a terminal status")
         if self.category is not None and self.category not in OUTCOME_CATEGORIES:
             raise ValueError("unknown terminal category")
+        return self
+
+
+VerdictCode = Literal["supported_association", "untestable", "refuted"]
+# Fixed, content-free reasons for a verdict (INV-6). ``untestable`` covers absent, insufficient,
+# inconsistent, conflicting, and truncated evidence: absence of evidence is never evidence of no
+# effect, so none of these can produce ``refuted``.
+VerdictReason = Literal[
+    "effect_in_claimed_direction",
+    "no_effect_in_claimed_direction",
+    "required_data_absent",
+    "test_not_completed",
+    "evidence_missing",
+    "evidence_inconsistent",
+    "evidence_truncated",
+    "null_value",
+    "insufficient_denominator",
+    "effect_below_threshold",
+    "conflicting_evidence",
+    "context_unverified",
+]
+MAX_VERDICT_REASONS = 8
+MAX_VERDICT_EVIDENCE = 16
+
+
+class VerdictRecord(_State):
+    """A validated verdict, as state keeps it: identifiers and fixed codes, never numbers or text.
+
+    ``supported_association`` and ``refuted`` must cite derived evidence (checked against the
+    evidence channel by the state invariants); ``untestable`` may cite none.
+    """
+
+    hypothesis_id: HypothesisId
+    verdict: VerdictCode
+    reasons: tuple[VerdictReason, ...] = Field(min_length=1, max_length=MAX_VERDICT_REASONS)
+    evidence_ids: tuple[GatewayEvidenceId, ...] = Field(default=(), max_length=MAX_VERDICT_EVIDENCE)
+    test_task_ids: tuple[TaskId, ...] = Field(default=(), max_length=8)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> VerdictRecord:
+        for values in (self.reasons, self.evidence_ids, self.test_task_ids):
+            if len(set(values)) != len(values):
+                raise ValueError("verdict references must be unique")
+        decisive = {
+            "supported_association": "effect_in_claimed_direction",
+            "refuted": "no_effect_in_claimed_direction",
+        }
+        if self.verdict in decisive:
+            if self.reasons[0] != decisive[self.verdict] or not self.evidence_ids:
+                raise ValueError("a decisive verdict states its reason first and cites evidence")
+        elif {"effect_in_claimed_direction", "no_effect_in_claimed_direction"} & set(self.reasons):
+            raise ValueError("an untestable verdict has no decisive reason")
         return self
 
 
@@ -413,7 +500,11 @@ class ProposalRecord(_State):
 
 
 def plan_digest(plan: InvestigationPlan) -> str:
-    """SHA-256 of the plan's canonical JSON; what an approval binds to."""
+    """SHA-256 of the plan's canonical JSON; what an approval binds to.
+
+    A version-1 plan's bytes are unchanged by INV-6. A version-2 plan uses the same encoding of its
+    own dump, and its ``schema_version`` keeps the two digest domains apart (D3).
+    """
     canonical = json.dumps(
         plan.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
@@ -613,14 +704,49 @@ def reduce_budget_usage(current: Any, update: Any) -> Any:
     return _dump(new)
 
 
+def _plan_dump(value: Any) -> Any:
+    _require_json(value, StateUpdateRejected)
+    try:
+        return _dump(parse_plan(value))
+    except ValidationError:
+        raise StateUpdateRejected("invalid_value") from None
+
+
+def reduce_plan(current: Any, update: Any) -> Any:
+    """Write-once, with strict version dispatch: v1 and v2 plans keep their own model (D3)."""
+    value = _plan_dump(update)
+    if current in ({}, None):
+        return value
+    if _plan_dump(current) != value:
+        raise StateUpdateRejected("write_once")
+    return value
+
+
+def reduce_verdicts(current: Any, update: Any) -> Any:
+    """One verdict per hypothesis, written once; never changed or removed."""
+    _require_json(update, StateUpdateRejected)
+    if type(update) is not dict or not update:
+        raise StateUpdateRejected("invalid_value")
+    merged = dict(current or {})
+    for hypothesis_id, raw in update.items():
+        record = _validated(VerdictRecord, raw, StateUpdateRejected)
+        if record.hypothesis_id != hypothesis_id:
+            raise StateUpdateRejected("id_mismatch")
+        if hypothesis_id in merged:
+            raise StateUpdateRejected("write_once")
+        merged[hypothesis_id] = _dump(record)
+    return merged
+
+
 reduce_scope = _write_once(InvestigationScope)
-reduce_plan = _write_once(InvestigationPlan)
 reduce_plan_approval = _write_once(PlanApprovalRecord)
 reduce_terminal = _write_once(TerminalRecord)
 reduce_proposal_record = _write_once(ProposalRecord)
 
 
-Writer = Literal["intake", "lifecycle", "supervisor", "approval", "dispatcher", "terminal"]
+Writer = Literal[
+    "intake", "lifecycle", "supervisor", "approval", "dispatcher", "terminal", "investigator"
+]
 
 # Written by ``guarded_node`` alongside every validated update, never by a step. It has no reducer,
 # so LangGraph refuses two writes to it in one step: guarded writers cannot run in parallel.
@@ -643,6 +769,7 @@ class InvestigationState(TypedDict, total=False):
     budget_usage: Annotated[dict[str, Any], reduce_budget_usage]
     terminal: Annotated[dict[str, Any], reduce_terminal]
     proposal_record: Annotated[dict[str, Any], reduce_proposal_record]
+    verdicts: Annotated[dict[str, dict[str, Any]], reduce_verdicts]
     step_writer: Writer
 
 
@@ -659,6 +786,7 @@ REDUCERS: dict[str, Reducer] = {
     "budget_usage": reduce_budget_usage,
     "terminal": reduce_terminal,
     "proposal_record": reduce_proposal_record,
+    "verdicts": reduce_verdicts,
 }
 
 _UNSET: dict[str, Any] = {
@@ -683,6 +811,8 @@ CHANNEL_OWNERS: dict[str, Writer] = {
     "budget_usage": "dispatcher",
     "terminal": "terminal",
     "proposal_record": "supervisor",
+    # INV-6: the Business Investigator's validated verdicts, written by the trusted owner's step.
+    "verdicts": "investigator",
 }
 
 
@@ -715,7 +845,7 @@ class InvestigationStateView(_State):
         return value
 
     status: InvestigationStatus | None = None
-    plan: InvestigationPlan | None = None
+    plan: AnyPlan | None = None
     admitted_follow_ups: tuple[PlanTask, ...] = ()
     plan_approval: PlanApprovalRecord | None = None
     tasks: dict[str, TaskRecord] = Field(default_factory=dict)
@@ -724,6 +854,7 @@ class InvestigationStateView(_State):
     budget_usage: BudgetUsage | None = None
     terminal: TerminalRecord | None = None
     proposal_record: ProposalRecord | None = None
+    verdicts: dict[str, VerdictRecord] = Field(default_factory=dict)
     step_writer: Writer | None = None
 
     def admitted_task(self, task_id: str) -> PlanTask | None:
@@ -763,6 +894,8 @@ def _view(raw: Mapping[str, Any], error: type[InvestigationStateError]) -> Inves
     if any(task_id != record.task_id for task_id, record in view.tasks.items()):
         raise error("id_mismatch")
     if any(evidence_id != record.id for evidence_id, record in view.evidence.items()):
+        raise error("id_mismatch")
+    if any(key != record.hypothesis_id for key, record in view.verdicts.items()):
         raise error("id_mismatch")
     if any(decision.seq != index for index, decision in enumerate(view.decisions, start=1)):
         raise error("decision_sequence")
@@ -806,7 +939,59 @@ def _invariant_violation(view: InvestigationStateView) -> StateErrorCode | None:
     # becomes terminal first; once the record exists it must name that same terminal status.
     if view.terminal is not None and view.terminal.status != view.status:
         return "terminal_mismatch"
-    return _proposal_violation(view)
+    return _proposal_violation(view) or _derived_violation(view) or _verdict_violation(view)
+
+
+def _derived_violation(view: InvestigationStateView) -> StateErrorCode | None:
+    """Derived evidence derives only from query evidence of its own task and attempt (D4)."""
+    for record in view.evidence.values():
+        provenance = record.provenance
+        if not isinstance(provenance, DerivedProvenance):
+            continue
+        for source_id in provenance.source_evidence_ids:
+            source = view.evidence.get(source_id)
+            if (
+                source is None
+                or source.kind != "query"
+                or source.task_id != record.task_id
+                or source.attempt != record.attempt
+            ):
+                return "derived_mismatch"
+        task = view.tasks.get(record.task_id)
+        if task is None or task.status != "succeeded":
+            return "derived_mismatch"
+    return None
+
+
+def _verdict_violation(view: InvestigationStateView) -> StateErrorCode | None:
+    """Verdicts name plan hypotheses, their own tests, and existing evidence; decisive verdicts
+    cite derived evidence of their own tests; a verdict follows only finished tests."""
+    if not view.verdicts:
+        return None
+    plan = view.plan
+    if not isinstance(plan, InvestigationPlanV2):
+        return "verdict_mismatch"
+    hypotheses = {item.id: item for item in plan.hypotheses}
+    for hypothesis_id, verdict in view.verdicts.items():
+        hypothesis = hypotheses.get(hypothesis_id)
+        if hypothesis is None or verdict.test_task_ids != hypothesis.tests:
+            return "verdict_mismatch"
+        allowed_tasks = {*hypothesis.tests, *hypothesis.context_tasks}
+        for task_id in hypothesis.tests:
+            task = view.tasks.get(task_id)
+            if task is None or task.status in {"pending", "running"}:
+                return "verdict_mismatch"
+        cited = [view.evidence.get(evidence_id) for evidence_id in verdict.evidence_ids]
+        if any(item is None or item.task_id not in allowed_tasks for item in cited):
+            return "verdict_mismatch"
+        if verdict.verdict != "untestable" and not any(
+            item is not None and item.kind == "derived" and item.task_id in hypothesis.tests
+            for item in cited
+        ):
+            return "verdict_mismatch"
+        if hypothesis.testability == "untestable" and verdict.verdict != "untestable":
+            return "verdict_mismatch"
+    return None
 
 
 def _proposal_violation(view: InvestigationStateView) -> StateErrorCode | None:
@@ -834,14 +1019,20 @@ def _proposal_violation(view: InvestigationStateView) -> StateErrorCode | None:
 
 def _in_scope(evidence: EvidenceRecord, scope: InvestigationScope) -> bool:
     provenance = evidence.provenance
-    if isinstance(provenance, QueryProvenance):
+    if isinstance(provenance, QueryProvenance | DerivedProvenance):
         return provenance.dataset_id == scope.dataset_id
     return provenance.document_collection_id == scope.document_collection_id
 
 
 # Budget counters that record spending. ``elapsed_seconds`` keeps advancing in every status.
 _SPENDING = tuple(name for name in _MONOTONIC_USAGE if name != "elapsed_seconds")
-_FROZEN_AFTER_TERMINAL = ("plan", "admitted_follow_ups", "plan_approval", "proposal_record")
+_FROZEN_AFTER_TERMINAL = (
+    "plan",
+    "admitted_follow_ups",
+    "plan_approval",
+    "proposal_record",
+    "verdicts",
+)
 
 
 def _activity_violation(
@@ -883,8 +1074,8 @@ def _activity_violation(
             continue
         if new.status == "running" or (terminal and new.status not in TERMINAL_TASK_STATUSES):
             return code
-    if update.get("evidence"):
-        return code
+    if update.get("evidence") or update.get("verdicts"):
+        return code  # evidence and verdicts are written only while running
     if any(
         decision["result"] in {"succeeded", "failed"} for decision in update.get("decisions", [])
     ):

@@ -62,7 +62,8 @@ ANALYSIS_RUN_CAPABILITY = "analysis:run"
 MAX_PROVIDER_MEMBERS = 8
 MAX_ATTEMPTS_PER_MEMBER = 10
 PLANNING_STAGE_INPUT_TOKENS = 6_000
-PLANNING_STAGE_OUTPUT_TOKENS = 1_000
+# INV-6 D2: raised from 1,000 so a compact hypothesis-bearing (v2) plan fits one response.
+PLANNING_STAGE_OUTPUT_TOKENS = 2_000
 
 Token = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 StrictPositive = Annotated[int, Strict(), Field(ge=1)]

@@ -36,6 +36,21 @@ approval copied from the trusted authority, ``queued``, every task registered ``
 
 ``finish`` then moves the lifecycle to ``final_status`` and ``terminal`` writes the terminal record.
 
+**Hypotheses (INV-6).** A v2 plan's approved ``hypothesis_test`` tasks run like any task: SQL
+methods through the SQL Analyst and ``document_check`` through Document Research (routing by
+method and assignee). On a normal end, before closing the gateway, the owner:
+
+1. asks the deterministic Business Investigator which tests have a usable observation, and calls
+   the owner-only ``derive_evidence`` for each, one per ``dispatch`` step (no charge);
+2. runs the guarded ``investigate`` step: the Business Investigator proposes one verdict per
+   hypothesis from the verified payloads, the owner re-validates each (``validate_verdict``, and
+   derived evidence must restate the observation exactly), and the ``investigator`` writer records
+   content-free ``VerdictRecord``s;
+3. closes the gateway as ``completed``.
+
+After a stop (cancellation, budget exhaustion, a closing refusal) or a defect, no verdict is
+written. Verdicts never change the final status.
+
 **Failure.** A node error, a bare gateway refusal, or the step bound is a defect: the owner closes
 the gateway (``shutdown``) and reports ``failed`` in process; the thread may be unreadable and is
 never resumed. Checkpoints are process-local (ADR 0024 D9).
@@ -65,13 +80,18 @@ from packages.investigation.dispatch import (
     next_action,
     terminal_category,
 )
-from packages.investigation.evidence import DocumentEvidencePayload, QueryEvidencePayload
+from packages.investigation.evidence import (
+    DerivedEvidencePayload,
+    DocumentEvidencePayload,
+    QueryEvidencePayload,
+)
 from packages.investigation.gateway import (
     AuthorityCheck,
     CancellationToken,
     InvestigationAuthority,
     WallClock,
 )
+from packages.investigation.hypotheses import HypothesisTestSpec, InvestigationPlanV2
 from packages.investigation.lifecycle import InvestigationStatus, approval_expired
 from packages.investigation.refusals import RefusalCode
 from packages.investigation.state import (
@@ -81,10 +101,18 @@ from packages.investigation.state import (
     TaskOutcome,
     TaskRecord,
     TerminalRecord,
+    VerdictRecord,
     plan_digest,
     restore_state,
 )
+from packages.investigation.verdicts import (
+    Verdict,
+    VerdictInvalid,
+    derived_matches,
+    validate_verdict,
+)
 from src.agents.sql_agent import execute_sql
+from src.investigation.business_investigator import BusinessInvestigator
 from src.investigation.document_researcher import DocumentResearcher
 from src.investigation.sql_analyst import SQLAnalyst
 from src.orchestration.guarded_sql import SQLExecutor
@@ -92,6 +120,7 @@ from src.orchestration.investigation_checkpoint import load_investigation_state
 from src.orchestration.investigation_graph import InvestigationGraphBuilder
 from src.orchestration.investigation_proposal import InvestigationProposalRun
 from src.orchestration.tool_gateway import (
+    DeriveEvidence,
     DocumentResolver,
     FinishAttempt,
     GatewayResult,
@@ -179,12 +208,26 @@ def _verify_handoff(proposal: object, authority: object, clock: WallClock) -> Ap
     if expired:
         raise ExecutionRunError("approval_expired")
     for task in view.plan.tasks:
-        route = _SPECIALISTS.get(task.kind)
+        route = _route_task(task)
         if route is None or task.assignee is not route[0]:
             raise ExecutionRunError("plan_not_executable")
     return ApprovedPlanHandoff(
         scope=view.scope, plan=view.plan, authority=authority, key=_HANDOFF_KEY
     )
+
+
+def _route_task(
+    task: Any,
+) -> tuple[AgentRole, type[SQLAnalyst] | type[DocumentResearcher]] | None:
+    """The specialist for an approved task: by kind, and for a v2 hypothesis test by its method."""
+    if task.kind is TaskKind.HYPOTHESIS_TEST:
+        spec = task.input
+        if not isinstance(spec, HypothesisTestSpec):
+            return None  # only a v2 plan's typed test is executable
+        if spec.method == "document_check":
+            return AgentRole.DOCUMENT_RESEARCH, DocumentResearcher
+        return AgentRole.SQL_ANALYST, SQLAnalyst
+    return _SPECIALISTS.get(task.kind)
 
 
 def _claim(handoff: ApprovedPlanHandoff) -> None:
@@ -206,7 +249,10 @@ def _claim(handoff: ApprovedPlanHandoff) -> None:
 def step_bound(plan: InvestigationPlan) -> int:
     """The LangGraph recursion limit for executing ``plan``; reaching it is a defect."""
     per_task = sum(task.max_attempts * OPERATIONS_PER_ATTEMPT + 1 for task in plan.tasks)
-    return SEEDING_STEPS + 1 + per_task + CLOSING_STEPS
+    # INV-6: one derivation per hypothesis test, the readiness no-op, and the ``investigate`` step.
+    tests = sum(task.kind is TaskKind.HYPOTHESIS_TEST for task in plan.tasks)
+    hypotheses = tests + 2 if isinstance(plan, InvestigationPlanV2) else 0
+    return SEEDING_STEPS + 1 + per_task + hypotheses + CLOSING_STEPS
 
 
 # --- the result -----------------------------------------------------------------------------------
@@ -281,9 +327,15 @@ class InvestigationExecutionRun:
             "configurable": {"thread_id": thread},
             "recursion_limit": step_bound(handoff.plan),
         }
-        self._specialists: dict[str, SQLAnalyst | DocumentResearcher] = {
-            task.id: _SPECIALISTS[task.kind][1](task.id) for task in handoff.plan.tasks
-        }
+        self._specialists: dict[str, SQLAnalyst | DocumentResearcher] = {}
+        for task in handoff.plan.tasks:
+            route = _route_task(task)
+            assert route is not None  # checked by the handoff
+            self._specialists[task.id] = route[1](task.id)
+        self._investigator = BusinessInvestigator()
+        self._derive_attempted: set[str] = set()
+        self._investigate_ready = False
+        self._verdicts_done = False
         self._documents_available: bool | None = None
         self._final_ready = False
         self._cancelled = False
@@ -301,6 +353,7 @@ class InvestigationExecutionRun:
         builder.add_step("register", "dispatcher", self._register)
         builder.add_step("start", "lifecycle", _status(InvestigationStatus.RUNNING))
         builder.add_step("dispatch", "dispatcher", self._dispatch)
+        builder.add_step("investigate", "investigator", self._investigate)
         builder.add_step("finish", "lifecycle", self._finish)
         builder.add_step("terminal", "terminal", self._terminal)
         builder.add_edge(START, "intake")
@@ -318,8 +371,9 @@ class InvestigationExecutionRun:
         builder.add_conditional_edges(
             "dispatch",
             self._route,
-            {"dispatch": "dispatch", "finish": "finish"},
+            {"dispatch": "dispatch", "investigate": "investigate", "finish": "finish"},
         )
+        builder.add_edge("investigate", "dispatch")
         builder.add_edge("finish", "terminal")
         builder.add_edge("terminal", END)
         self._graph = builder.compile()
@@ -396,7 +450,9 @@ class InvestigationExecutionRun:
     # --- dispatch -----------------------------------------------------------------------------
 
     def _route(self, _state: Mapping[str, Any]) -> str:
-        return "finish" if self._final_ready else "dispatch"
+        if self._final_ready:
+            return "finish"
+        return "investigate" if self._investigate_ready else "dispatch"
 
     def _cancel_requested(self) -> bool:
         try:
@@ -425,9 +481,105 @@ class InvestigationExecutionRun:
             assert action.status is not None
             return self._stop(view, action.status, owner_cancel=action.refusal is None)
         if action.kind is ActionKind.FINISH_RUN:
+            plan = self._handoff.plan
+            if isinstance(plan, InvestigationPlanV2) and not self._verdicts_done:
+                return self._prepare_verdicts(plan, view, state)
             self._gateway.close("completed")
             return self._close_out(view, "internal")
         return self._apply(view, self._operate(action, state))
+
+    # --- hypotheses (INV-6) --------------------------------------------------------------------
+
+    def _prepare_verdicts(
+        self, plan: InvestigationPlanV2, view: InvestigationStateView, state: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Derive the next usable observation, one gateway operation; then hand over to verdicts."""
+        payloads = self._gateway.evidence_payloads(view)
+        pending = [
+            task_id
+            for task_id in self._investigator.derivations(plan, view, payloads)
+            if task_id not in self._derive_attempted
+        ]
+        if pending:
+            task_id = pending[0]
+            self._derive_attempted.add(task_id)
+            task = next(item for item in plan.tasks if item.id == task_id)
+            request = DeriveEvidence(task_id=task_id, role=task.assignee)
+            return self._apply(view, self._gateway.derive_evidence(state, request))
+        self._investigate_ready = True
+        return self._snapshot()
+
+    def _investigate(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """The guarded verdict writer: validated, content-free records for every hypothesis."""
+        view = restore_state(state)
+        plan = self._handoff.plan
+        assert isinstance(plan, InvestigationPlanV2)
+        payloads = self._gateway.evidence_payloads(view)
+        proposals = self._investigator.propose_verdicts(plan, view, payloads)
+        records: dict[str, Any] = {}
+        for proposal in proposals:
+            usable = {
+                key: value
+                for key, value in payloads.items()
+                if not isinstance(value, DerivedEvidencePayload)
+            }
+            try:
+                verdict = validate_verdict(proposal, plan, view, usable)
+            except VerdictInvalid:
+                raise ExecutionRunError("verdict_invalid") from None  # a defect: fails closed
+            record = self._record(verdict, view, payloads)
+            records[record.hypothesis_id] = record.model_dump(mode="json")
+        self._investigate_ready = False
+        self._verdicts_done = True
+        return {"verdicts": records}
+
+    def _record(
+        self, verdict: Verdict, view: InvestigationStateView, payloads: Mapping[str, Any]
+    ) -> VerdictRecord:
+        """Cite derived evidence that restates each observation exactly, then queries, context.
+
+        A decisive verdict whose observation has no matching derived evidence is recorded as
+        ``untestable/evidence_missing``: it can never cite numbers that were not derived.
+        """
+        plan = self._handoff.plan
+        assert isinstance(plan, InvestigationPlanV2)
+        hypothesis = next(item for item in plan.hypotheses if item.id == verdict.hypothesis_id)
+        derived: list[str] = []
+        missing = False
+        for observation in verdict.observations:
+            if observation.outcome == "unusable":
+                continue
+            match = next(
+                (
+                    evidence_id
+                    for evidence_id, record in view.evidence.items()
+                    if record.kind == "derived"
+                    and record.task_id == observation.task_id
+                    and isinstance(payloads.get(evidence_id), DerivedEvidencePayload)
+                    and derived_matches(observation, payloads[evidence_id])
+                ),
+                None,
+            )
+            if match is None:
+                missing = True
+            else:
+                derived.append(match)
+        cited = (*verdict.query_evidence_ids, *verdict.context_evidence_ids)
+        if missing and verdict.verdict != "untestable":
+            return VerdictRecord(
+                hypothesis_id=verdict.hypothesis_id,
+                verdict="untestable",
+                reasons=("evidence_missing",),
+                evidence_ids=tuple(dict.fromkeys(cited)),
+                test_task_ids=hypothesis.tests,
+            )
+        return VerdictRecord(
+            hypothesis_id=verdict.hypothesis_id,
+            verdict=verdict.verdict,
+            reasons=verdict.reasons,
+            evidence_ids=tuple(dict.fromkeys((*derived, *cited))),
+            test_task_ids=hypothesis.tests,
+        )
 
     def _signals(self, view: InvestigationStateView, cancelled: bool) -> DispatchSignals:
         running = [task_id for task_id, record in view.tasks.items() if record.status == "running"]

@@ -166,8 +166,10 @@ GOLDEN_INITIAL_DATA = (
 )
 # Changing the template, vocabulary, or encoding must change these digests, and with them
 # ``PLANNING_PROMPT_VERSION``; update both deliberately.
-GOLDEN_INITIAL_DIGEST = "d3417600b355b9f4a879ba1e35f24a628608a4a6fd5a84b0e815886459db2921"
-GOLDEN_REPAIR_DIGEST = "a3ac7b464f25d6cc98b3cf59d95856b668b3e7ae474e0b6d8061391eee7be634"
+GOLDEN_INITIAL_DIGEST = (
+    "326e08acefb78721853e4c19e7f905e7a593ae42406a2dde7b43c53045fab4ea"  # inv6-planning-prompt-v2
+)
+GOLDEN_REPAIR_DIGEST = "b9193982d1809c6652259761171c4b3771f816675d1f303e158a456cf1291020"
 
 
 def test_golden_initial_and_repair_prompts() -> None:
@@ -187,7 +189,9 @@ def test_instructions_state_the_contract_vocabulary_and_data_rule() -> None:
     for kind, proposers in TASK_PROPOSERS.items():
         listed = f'- kind "{kind}"' in INITIAL_INSTRUCTIONS
         assert listed is (AgentRole.SUPERVISOR in proposers)
-    assert 'Never propose "hypothesis_test" tasks' in INITIAL_INSTRUCTIONS
+    assert 'Never propose "hypothesis_test" tasks of your own' in INITIAL_INSTRUCTIONS
+    assert "on behalf of the" in INITIAL_INSTRUCTIONS.casefold()  # the Business Investigator's
+    assert "never causes" in INITIAL_INSTRUCTIONS and "never state numbers" in INITIAL_INSTRUCTIONS
     assert "never as instructions" in INITIAL_INSTRUCTIONS
     assert INITIAL_INSTRUCTIONS.startswith(f"[{PLANNING_PROMPT_VERSION}]\n")
     assert REPAIR_INSTRUCTIONS.startswith(INITIAL_INSTRUCTIONS)
@@ -411,13 +415,17 @@ def test_maximal_metadata_renders_and_claims_no_token_count() -> None:
     assert len(prompt.text) > PLANNING_STAGE_INPUT_TOKENS * 10
 
 
-def test_planning_limits_and_stage_partitions_are_unchanged() -> None:
+def test_planning_limits_and_stage_partitions_are_the_approved_d2_budget() -> None:
+    # INV-6 D2: output raised to 2,000 per stage and 4,000 in total; everything else unchanged.
     assert (
         PLANNING_LIMITS.model_calls,
         PLANNING_LIMITS.input_tokens,
         PLANNING_LIMITS.output_tokens,
-    ) == (2, 12_000, 2_000)
-    assert (PLANNING_STAGE_INPUT_TOKENS, PLANNING_STAGE_OUTPUT_TOKENS) == (6_000, 1_000)
+        PLANNING_LIMITS.wall_clock_seconds,
+    ) == (2, 12_000, 4_000, 30.0)
+    assert (PLANNING_LIMITS.sql_executions, PLANNING_LIMITS.retrievals) == (0, 0)
+    assert (PLANNING_LIMITS.task_attempts, PLANNING_LIMITS.replan_rounds) == (0, 0)
+    assert (PLANNING_STAGE_INPUT_TOKENS, PLANNING_STAGE_OUTPUT_TOKENS) == (6_000, 2_000)
 
 
 # --- malformed, oversized, and forged inputs ----------------------------------------------------
@@ -545,6 +553,7 @@ def _called_names(path: Path) -> set[str]:
                 "pydantic",
                 "packages.investigation.contracts",
                 "packages.investigation.planning",
+                "packages.investigation.hypotheses",  # INV-6: pure v2 vocabulary constants
             },
         ),
         (

@@ -22,6 +22,12 @@ locations of its citations, and only when every citation resolves (``document_ci
 otherwise it is stated as ``document_evidence_unverified``. The answer prose is never a finding,
 so instructions inside documents (the board memo's injection text) cannot reach the report.
 
+INV-6: a hypothesis-bearing (v2) run adds one verdict row per hypothesis, from the validated,
+content-free ``VerdictRecord``s in state: the hypothesis ID, the verdict, its fixed reasons, and the
+cited evidence IDs. A row never carries the hypothesis statement, a number, or prose, and no
+verdict value expresses causation. A v2 run that stopped before its verdicts were evaluated states
+``verdicts_not_evaluated``. Derived payloads are accepted as inputs; they add no table rows.
+
 The report lives in process only; persistence belongs to #144.
 """
 
@@ -32,7 +38,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, Strict, field_validator, model_validator
 
-from packages.investigation.contracts import MAX_PLAN_TASKS, OUTCOME_CATEGORIES, TaskId, TaskKind
+from packages.investigation.contracts import (
+    MAX_PLAN_TASKS,
+    OUTCOME_CATEGORIES,
+    HypothesisId,
+    TaskId,
+    TaskKind,
+)
 from packages.investigation.dispatch import (
     RUN_LIMITATIONS,
     Limitation,
@@ -52,11 +64,15 @@ from packages.investigation.evidence import (
     exact_rows,
     verify_payload,
 )
+from packages.investigation.hypotheses import MAX_HYPOTHESES, InvestigationPlanV2
 from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.state import (
     MAX_SOURCES,
+    MAX_VERDICT_EVIDENCE,
     GatewayEvidenceId,
     InvestigationStateView,
+    VerdictCode,
+    VerdictReason,
 )
 
 REPORT_SCHEMA_VERSION: Literal[1] = 1
@@ -154,6 +170,15 @@ class ReportCitation(_Report):
     page_number: Count | None = None
 
 
+class ReportVerdictRow(_Report):
+    """A validated verdict as codes and IDs: never the statement, a number, or prose."""
+
+    hypothesis_id: HypothesisId
+    verdict: VerdictCode
+    reasons: tuple[VerdictReason, ...] = Field(min_length=1, max_length=8)
+    evidence_ids: tuple[GatewayEvidenceId, ...] = Field(default=(), max_length=MAX_VERDICT_EVIDENCE)
+
+
 class InterimReport(_Report):
     schema_version: Literal[1] = REPORT_SCHEMA_VERSION
     status: ReportStatus
@@ -163,9 +188,13 @@ class InterimReport(_Report):
     query_tables: tuple[ReportQueryTable, ...] = Field(default=(), max_length=MAX_REPORT_TASKS)
     citations: tuple[ReportCitation, ...] = Field(default=(), max_length=MAX_REPORT_CITATIONS)
     limitations: tuple[Limitation, ...] = Field(default=(), max_length=MAX_REPORT_LIMITATIONS)
+    verdicts: tuple[ReportVerdictRow, ...] = Field(default=(), max_length=MAX_HYPOTHESES)
 
     @model_validator(mode="after")
     def _consistent(self) -> InterimReport:
+        verdict_ids = [row.hypothesis_id for row in self.verdicts]
+        if len(set(verdict_ids)) != len(verdict_ids):
+            raise ValueError("one verdict row per hypothesis")
         task_ids = [row.task_id for row in self.tasks]
         if len(set(task_ids)) != len(task_ids):
             raise ValueError("one row per task")
@@ -207,18 +236,9 @@ class InterimReportRequest(_Report):
     """
 
     view: InvestigationStateView
-    payloads: tuple[QueryEvidencePayload | DocumentEvidencePayload, ...] = Field(
-        default=(), max_length=MAX_REPORT_TASKS * 2
-    )
-
-    @field_validator("payloads", mode="before")
-    @classmethod
-    def _no_derived(cls, value: object) -> object:
-        if isinstance(value, list | tuple) and any(
-            isinstance(item, DerivedEvidencePayload) for item in value
-        ):
-            raise ValueError("derived evidence is contract-only in INV-5")
-        return value
+    payloads: tuple[
+        QueryEvidencePayload | DocumentEvidencePayload | DerivedEvidencePayload, ...
+    ] = Field(default=(), max_length=MAX_REPORT_TASKS * 3)
 
     @model_validator(mode="after")
     def _bound(self) -> InterimReportRequest:
@@ -254,9 +274,12 @@ LIMITATION_TEMPLATES: dict[LimitationCode, str] = {
         "The query result reached its row limit; rows may be missing."
     ),
     LimitationCode.REPORT_ROWS_LIMITED: "Only the first rows of this result are shown.",
+    LimitationCode.VERDICTS_NOT_EVALUATED: (
+        "The investigation stopped before its hypotheses could be evaluated."
+    ),
 }
 
-_Payload = QueryEvidencePayload | DocumentEvidencePayload
+_Payload = QueryEvidencePayload | DocumentEvidencePayload | DerivedEvidencePayload
 
 
 def compose_interim_report(
@@ -337,6 +360,21 @@ def compose_interim_report(
                     Limitation(code=LimitationCode.DOCUMENT_EVIDENCE_UNVERIFIED, task_id=task.id)
                 )
     base = limitations_for(view, view.status)
+    verdict_rows: list[ReportVerdictRow] = []
+    if isinstance(view.plan, InvestigationPlanV2):
+        for hypothesis in view.plan.hypotheses:
+            found = view.verdicts.get(hypothesis.id)
+            if found is not None:
+                verdict_rows.append(
+                    ReportVerdictRow(
+                        hypothesis_id=found.hypothesis_id,
+                        verdict=found.verdict,
+                        reasons=found.reasons,
+                        evidence_ids=found.evidence_ids,
+                    )
+                )
+        if not view.verdicts:
+            evidence_limits.append(Limitation(code=LimitationCode.VERDICTS_NOT_EVALUATED))
     limitations = [
         *(item for item in base if item.task_id is not None),
         *evidence_limits,
@@ -348,6 +386,7 @@ def compose_interim_report(
         query_tables=tuple(tables),
         citations=tuple(citations),
         limitations=tuple(dict.fromkeys(limitations)),
+        verdicts=tuple(verdict_rows),
     )
 
 

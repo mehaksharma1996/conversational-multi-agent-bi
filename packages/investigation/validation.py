@@ -5,11 +5,16 @@ follow-up, these checks confirm that task IDs and dependencies form a small acyc
 task is proposed and executed by an allowed role, that it needs only resources the workspace has,
 that it names only confirmed schema fields, and that it fits the budget. Violations carry codes and
 task IDs only, never field names or text, so they are safe to log or count.
+
+INV-6 (D1): a version-2 plan also carries hypotheses and their ``hypothesis_test`` tasks. Those
+tasks are checked with the Business Investigator's own proposer permission (``TASK_PROPOSERS``),
+never the Supervisor's, and only when a plan hypothesis binds them; every other task is still
+checked as the Supervisor's, so the Supervisor gains no authority to create specialist tasks.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -24,6 +29,13 @@ from packages.investigation.contracts import (
     PlanTask,
     SQLAnalysisInput,
     TaskKind,
+)
+from packages.investigation.hypotheses import (
+    MIN_DENOMINATOR_FLOOR,
+    HypothesisTestSpec,
+    InvestigationPlanV2,
+    SpecIncomplete,
+    resolve_test,
 )
 
 MAX_DEPENDENCY_DEPTH = 4
@@ -46,6 +58,12 @@ ViolationCode = Literal[
     "task_budget_exceeded",
     "round_limit_exceeded",
     "too_many_follow_ups",
+    # INV-6 (v2 plans)
+    "hypothesis_unbound",
+    "hypothesis_task_mismatch",
+    "unknown_context_task",
+    "spec_incomplete",
+    "denominator_below_floor",
 ]
 
 
@@ -83,8 +101,23 @@ def validate_plan(
     resources: ResourceContext,
     schema: SchemaContext,
     limits: BudgetLimits,
+    min_denominator: int = MIN_DENOMINATOR_FLOOR,
 ) -> tuple[PlanViolation, ...]:
-    """Every problem with a Supervisor plan; an empty tuple means it may be proposed."""
+    """Every problem with a Supervisor plan; an empty tuple means it may be proposed.
+
+    For a version-2 plan, hypothesis tests are checked as Business Investigator proposals bound to
+    the plan's hypotheses, with ``min_denominator`` as the data-sufficiency floor.
+    """
+    proposers: dict[str, AgentRole] = {}
+    hypothesis_ids: frozenset[str] = frozenset()
+    if isinstance(plan, InvestigationPlanV2):
+        hypothesis_ids = frozenset(item.id for item in plan.hypotheses)
+        bound = {task_id for item in plan.hypotheses for task_id in item.tests}
+        proposers = {
+            task.id: AgentRole.BUSINESS_INVESTIGATOR
+            for task in plan.tasks
+            if task.kind is TaskKind.HYPOTHESIS_TEST and task.id in bound
+        }
     violations = _check_tasks(
         plan.tasks,
         proposer=AgentRole.SUPERVISOR,
@@ -93,11 +126,60 @@ def validate_plan(
         resources=resources,
         schema=schema,
         evidence_ids=frozenset(),
-        hypothesis_ids=frozenset(),
+        hypothesis_ids=hypothesis_ids,
+        proposers=proposers,
     )
+    if isinstance(plan, InvestigationPlanV2):
+        violations.extend(_hypothesis_violations(plan, schema, min_denominator))
     if len(plan.tasks) > limits.task_attempts:
         violations.append(PlanViolation("task_budget_exceeded"))
     return _ordered(violations)
+
+
+def _hypothesis_violations(
+    plan: InvestigationPlanV2, schema: SchemaContext, min_denominator: int
+) -> list[PlanViolation]:
+    """Hypotheses bind exactly their own tests; tests resolve to approved, known fields."""
+    violations: list[PlanViolation] = []
+    tasks = {task.id: task for task in plan.tasks}
+    owners: dict[str, list[str]] = {}
+    for hypothesis in plan.hypotheses:
+        for task_id in hypothesis.tests:
+            owners.setdefault(task_id, []).append(hypothesis.id)
+            task = tasks.get(task_id)
+            spec = task.input if task is not None else None
+            if (
+                task is None
+                or task.kind is not TaskKind.HYPOTHESIS_TEST
+                or not isinstance(spec, HypothesisTestSpec)
+                or spec.hypothesis_id != hypothesis.id
+            ):
+                violations.append(PlanViolation("hypothesis_task_mismatch", task_id))
+        for task_id in hypothesis.context_tasks:
+            context = tasks.get(task_id)
+            if context is None or context.kind is not TaskKind.DOCUMENT_RESEARCH:
+                violations.append(PlanViolation("unknown_context_task", task_id))
+    for task in plan.tasks:
+        if task.kind is not TaskKind.HYPOTHESIS_TEST:
+            continue
+        if len(owners.get(task.id, [])) != 1:
+            violations.append(PlanViolation("hypothesis_unbound", task.id))
+        spec = task.input
+        if not isinstance(spec, HypothesisTestSpec):
+            violations.append(PlanViolation("hypothesis_task_mismatch", task.id))
+            continue
+        if spec.method == "document_check":
+            continue
+        try:
+            resolved = resolve_test(plan, task)
+        except SpecIncomplete:
+            violations.append(PlanViolation("spec_incomplete", task.id))
+            continue
+        if any(not schema.has(field) for field in resolved.fields):
+            violations.append(PlanViolation("unknown_field", task.id))
+        if resolved.claim.min_denominator < min_denominator:
+            violations.append(PlanViolation("denominator_below_floor", task.id))
+    return violations
 
 
 def validate_follow_ups(
@@ -152,6 +234,7 @@ def _check_tasks(
     schema: SchemaContext,
     evidence_ids: frozenset[str],
     hypothesis_ids: frozenset[str],
+    proposers: Mapping[str, AgentRole] | None = None,
 ) -> list[PlanViolation]:
     violations: list[PlanViolation] = []
     seen: set[str] = set(prior_ids)
@@ -165,7 +248,7 @@ def _check_tasks(
             PlanViolation(code, task.id)
             for code in _task_codes(
                 task,
-                proposer=proposer,
+                proposer=(proposers or {}).get(task.id, proposer),
                 known_ids=seen,
                 resources=resources,
                 schema=schema,

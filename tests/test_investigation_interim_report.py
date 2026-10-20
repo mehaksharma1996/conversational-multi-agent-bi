@@ -276,7 +276,7 @@ def test_every_limitation_code_has_reviewed_wording() -> None:
 # --- S1 leaves checkpointed state unchanged ------------------------------------------------------
 
 
-def test_the_checkpoint_schema_changes_only_by_the_skip_task_literal() -> None:
+def test_the_checkpoint_schema_changes_only_by_approved_additions() -> None:
     assert state.STATE_VERSION == 1
     assert set(state.REDUCERS) == {
         "state_version",
@@ -291,6 +291,7 @@ def test_the_checkpoint_schema_changes_only_by_the_skip_task_literal() -> None:
         "budget_usage",
         "terminal",
         "proposal_record",
+        "verdicts",  # INV-6 S1: the investigator's write-once verdict channel
     }
     assert set(typing.get_args(state.GatewayTool)) == {
         "begin_attempt",
@@ -299,11 +300,13 @@ def test_the_checkpoint_schema_changes_only_by_the_skip_task_literal() -> None:
         "prepare_correction",
         "research_documents",
         "finish_attempt",
-        "skip_task",  # INV-5 S2: added with the gateway operation, the only state vocabulary change
+        "skip_task",  # INV-5 S2: added with the gateway operation
+        "derive_evidence",  # INV-6 D4: the owner-only derivation
     }
     assert set(typing.get_args(state.EvidenceRecord.model_fields["kind"].annotation)) == {
         "query",
         "document",
+        "derived",  # INV-6 D4
     }
 
 

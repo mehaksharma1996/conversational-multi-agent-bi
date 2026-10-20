@@ -50,13 +50,23 @@ from packages.investigation.contracts import (
     TASK_PROPOSERS,
     AgentRole,
 )
+from packages.investigation.hypotheses import (
+    MAX_CONTEXT_TASKS,
+    MAX_FILTERS,
+    MAX_HYPOTHESES,
+    MAX_MISSING_DATA,
+    MAX_TESTS_PER_HYPOTHESIS,
+    MIN_DENOMINATOR_FLOOR,
+    PLAN_V2,
+)
 from packages.investigation.planning import (
     MAX_MISSING_INFORMATION,
     PlanningMetadata,
     PlanningValidationError,
 )
 
-PLANNING_PROMPT_VERSION = "inv4-planning-prompt-v1"
+# INV-6 S3: v2 adds plan-embedded hypotheses and typed hypothesis tests (decision D1).
+PLANNING_PROMPT_VERSION = "inv6-planning-prompt-v2"
 MAX_REPAIR_FEEDBACK = 32
 DATA_BEGIN = "<<<PLANNING_DATA bytes={length}>>>"
 DATA_END = "<<<END_PLANNING_DATA>>>"
@@ -242,16 +252,17 @@ PLANNING_DATA.metadata contains:
 - document_titles: titles of documents that research tasks may search.
 You do not see rows, values, passages, or results, and you must not invent them.
 
-Propose only these task kinds:
+Propose only these task kinds as the Supervisor:
 {_task_vocabulary()}
-Never propose {_forbidden_kinds()} tasks and never assign any other role.
+Never propose {_forbidden_kinds()} tasks of your own and never assign any other role; the only
+exception is the Business Investigator's hypothesis tests described below.
 Use "sql_analysis" only when schema_fields is not empty and name only fields listed there.
 Use "document_research" only when document_titles is not empty.
 
 Respond with exactly one JSON object and nothing else: no Markdown, code fences, or commentary.
-{{"plan": {{"schema_version": {SCHEMA_VERSION}, "objective": <text, at most {MAX_OBJECTIVE_CHARS} \
-characters>, "sub_questions": [<1 to {MAX_SUB_QUESTIONS} texts>], "tasks": [<1 to {MAX_PLAN_TASKS} \
-tasks>]}}, "missing_information": [<0 to {MAX_MISSING_INFORMATION} texts>]}}
+{{"plan": {{"schema_version": {SCHEMA_VERSION} | {PLAN_V2}, "objective": <text, at most \
+{MAX_OBJECTIVE_CHARS} characters>, "sub_questions": [<1 to {MAX_SUB_QUESTIONS} texts>], "tasks": \
+[<1 to {MAX_PLAN_TASKS} tasks>]}}, "missing_information": [<0 to {MAX_MISSING_INFORMATION} texts>]}}
 Each task is {{"id": <lowercase id matching ^[a-z][a-z0-9_-]{{0,31}}$>, "kind": <kind>, \
 "assignee": <assignee>, "depends_on": [<at most {MAX_DEPENDENCIES} ids of tasks it needs>], \
 "input": <input>, "success_criterion": <text>, "max_attempts": <1 or 2>}}.
@@ -261,6 +272,25 @@ A "document_research" input is {{"kind": "document_research", "query": <text>, "
 "policy" | "context" | "contradiction_check", "max_passages": <1 to {MAX_DOCUMENT_PASSAGES}>}}.
 Every text is at most {MAX_TEXT_CHARS} characters unless stated otherwise. No other fields are \
 allowed. You cannot grant approvals, change scope, set budgets or limits, or request tools.
+
+HYPOTHESES (schema_version {PLAN_V2} only; use {SCHEMA_VERSION} when you state none). On behalf of \
+the Business Investigator, a {PLAN_V2} plan adds "hypotheses": [<1 to {MAX_HYPOTHESES}>] and may \
+add "test_defaults": {{"metric": <metric>, "period": <period>}}. A hypothesis is {{"id": <"h" and \
+1 to 3 digits>, "statement": <text>, "tests": [<1 to {MAX_TESTS_PER_HYPOTHESIS} ids of its \
+hypothesis_test tasks>], "context_tasks": [<0 to {MAX_CONTEXT_TASKS} document_research ids>], \
+"context_required": <true | false>}}; one that the fields cannot test is {{"id", "statement", \
+"testability": "untestable", "missing_data": [<1 to {MAX_MISSING_DATA} texts>]}} with no tests. \
+Hypotheses state associations only, never causes. A "hypothesis_test" task has assignee \
+"sql_analyst" and input {{"kind": "hypothesis_test", "hypothesis_id": <id>, "method": \
+"trend_comparison" | "segment_comparison" | "stratified_comparison", "filters": [<0 to \
+{MAX_FILTERS} {{"field": <field>, "value": <literal text>}}>], "claim": {{"direction": \
+"increase" | "decrease" | "higher_than", "min_effect": <number at least 0>, "min_denominator": \
+<integer at least {MIN_DENOMINATOR_FLOOR}, optional>}}, "metric" and "period" optional when \
+test_defaults has them, \
+"comparison_group": <filter, only for higher_than>}}. A metric is {{"type": "rate", "event": \
+<boolean field>, "population": <boolean field>}} or {{"type": "mean", "value": <number field>}}; a \
+period is {{"field": <field>, "baseline": <literal>, "comparison": <literal>}}. Use only listed \
+fields; literals use letters, digits, spaces, and _.:/+- only. You never state numbers or results.
 """
 
 _REPAIR_ADDENDUM = """\
