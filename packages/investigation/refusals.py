@@ -38,6 +38,8 @@ class RefusalCode(StrEnum):
     RESOURCE_ABSENT = "resource_absent"
     SQL_APPROVAL_REQUIRED = "sql_approval_required"
     CORRECTION_LIMIT = "correction_limit"
+    # INV-7: a follow-up task whose round approval is absent, unbound, or expired.
+    FOLLOW_UP_NOT_AUTHORIZED = "follow_up_not_authorized"
     # investigation: fail closed for every role
     SCOPE_MISMATCH = "scope_mismatch"
     STATE_INVALID = "state_invalid"
@@ -69,7 +71,9 @@ class RefusalCode(StrEnum):
 
 C = RefusalCode
 _REQUEST = frozenset({C.INVALID_REQUEST, C.DEPENDENCY_INCOMPLETE})
-_TASK = frozenset({C.RESOURCE_ABSENT, C.SQL_APPROVAL_REQUIRED, C.CORRECTION_LIMIT})
+_TASK = frozenset(
+    {C.RESOURCE_ABSENT, C.SQL_APPROVAL_REQUIRED, C.CORRECTION_LIMIT, C.FOLLOW_UP_NOT_AUTHORIZED}
+)
 
 SEVERITY: dict[RefusalCode, RefusalSeverity] = {
     code: (

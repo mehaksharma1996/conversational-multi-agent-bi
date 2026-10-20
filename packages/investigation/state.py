@@ -70,7 +70,14 @@ from packages.investigation.contracts import (
     TaskId,
     TaskOutcome,
 )
-from packages.investigation.hypotheses import AnyPlan, InvestigationPlanV2, parse_plan
+from packages.investigation.hypotheses import (
+    AnyPlan,
+    FollowUpTask,
+    InvestigationPlanV2,
+    Stratification,
+    parse_follow_up,
+    parse_plan,
+)
 from packages.investigation.lifecycle import (
     TERMINAL_STATUSES,
     IllegalTransitionError,
@@ -131,6 +138,9 @@ StateErrorCode = Literal[
     # INV-6 S1: derived evidence or a verdict does not match the evidence or the plan.
     "derived_mismatch",
     "verdict_mismatch",
+    # INV-7: a critique or follow-up round disagrees with the plan, evidence, or its approval.
+    "critique_mismatch",
+    "follow_up_unbound",
     # Raised when reading a checkpoint (``src/orchestration/investigation_checkpoint.py``).
     "checkpoint_unreadable",
     "checkpointer_not_strict",
@@ -273,7 +283,7 @@ class DocumentProvenance(_State):
 
 
 # INV-6 D4: the fixed operations the gateway may derive from verified query evidence.
-DerivedOperationName = Literal["rate_difference", "mean_difference"]
+DerivedOperationName = Literal["rate_difference", "mean_difference", "standardized_rate_difference"]
 MAX_DERIVED_SOURCES = 2
 
 
@@ -330,6 +340,10 @@ GatewayTool = Literal[
     "skip_task",
     # INV-6 S4: the owner-only, deterministic derivation from verified query evidence.
     "derive_evidence",
+    # INV-7: the owner-only review calls and the opening of an authorized follow-up round.
+    "draft_findings",
+    "review_findings",
+    "open_follow_up_round",
 ]
 DecisionResult = Literal["succeeded", "refused", "failed", "cancelled"]
 
@@ -431,6 +445,194 @@ class VerdictRecord(_State):
         elif {"effect_in_claimed_direction", "no_effect_in_claimed_direction"} & set(self.reasons):
             raise ValueError("an untestable verdict has no decisive reason")
         return self
+
+
+# --- INV-7: critiques and follow-up rounds ------------------------------------------------------
+
+# At most two critic rounds (0 and 1) and two follow-up rounds (1 and 2), whatever a budget says
+# (ADR 0024 D7 defaults; the ledger also enforces the configured limits).
+MAX_CRITIC_ROUNDS = 2
+MAX_FOLLOW_UP_ROUNDS = 2
+MAX_FOLLOW_UPS_IN_ROUND = 3
+MAX_FINDINGS = 24
+MAX_FINDING_EVIDENCE = 8
+MAX_DRAFT_CLAIMS = 16
+
+FindingCode = Literal[
+    "numeric_mismatch",
+    "direction_mismatch",
+    "causal_overreach",
+    "document_contradiction",
+    "unsupported_reference",
+    "evidence_not_bound",
+    "document_evidence_unverified",
+    "insufficient_evidence",
+    "conflicting_evidence",
+    "incomplete_coverage",
+    "missing_stratification",
+]
+FindingSeverity = Literal["high", "medium", "low"]
+FindingDisposition = Literal[
+    "correct_from_evidence",
+    "downgrade_to_association",
+    "retain_data_verdict",
+    "reject_claim",
+    "retain_limitation",
+    "accept_limitation",
+    "follow_up",
+]
+# Each code has one fixed severity and disposition: neither is ever chosen by a model.
+FINDING_RULES: dict[str, tuple[FindingSeverity, FindingDisposition]] = {
+    "numeric_mismatch": ("high", "correct_from_evidence"),
+    "direction_mismatch": ("high", "correct_from_evidence"),
+    "causal_overreach": ("high", "downgrade_to_association"),
+    "document_contradiction": ("high", "retain_data_verdict"),
+    "unsupported_reference": ("high", "reject_claim"),
+    "evidence_not_bound": ("medium", "reject_claim"),
+    "document_evidence_unverified": ("medium", "reject_claim"),
+    "insufficient_evidence": ("medium", "retain_limitation"),
+    "conflicting_evidence": ("medium", "retain_limitation"),
+    "incomplete_coverage": ("low", "accept_limitation"),
+    "missing_stratification": ("medium", "follow_up"),
+}
+# Findings about one claim of the transient draft; the claim itself is never stored, only its index.
+CLAIM_CODES = frozenset(
+    {
+        "numeric_mismatch",
+        "direction_mismatch",
+        "causal_overreach",
+        "document_contradiction",
+        "unsupported_reference",
+        "evidence_not_bound",
+        "document_evidence_unverified",
+        "insufficient_evidence",
+    }
+)
+ReviewStatus = Literal["valid", "invalid", "unavailable"]
+ReplanOutcome = Literal[
+    "none_needed", "admitted", "not_authorized", "invalid", "round_limit", "budget"
+]
+
+
+class CritiqueFinding(_State):
+    """One validated Critic finding: fixed codes and identifiers only (INV-7 decision C1).
+
+    ``evidence_ids`` are existing evidence of this investigation that support the finding (a
+    fabricated or foreign reference is never stored; it is the finding). ``claim_index`` points
+    into the transient draft, which is never stored. Only a confirmed model gap
+    (``missing_stratification``, origin ``model_confirmed``) carries a stratification.
+    """
+
+    code: FindingCode
+    severity: FindingSeverity
+    disposition: FindingDisposition
+    origin: Literal["deterministic", "model_confirmed"] = "deterministic"
+    hypothesis_id: HypothesisId | None = None
+    task_id: TaskId | None = None
+    claim_index: StrictCount | None = Field(default=None, ge=0, lt=MAX_DRAFT_CLAIMS)
+    evidence_ids: tuple[GatewayEvidenceId, ...] = Field(default=(), max_length=MAX_FINDING_EVIDENCE)
+    stratification: Stratification | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> CritiqueFinding:
+        if (self.severity, self.disposition) != FINDING_RULES[self.code]:
+            raise ValueError("severity and disposition are fixed by the code")
+        gap = self.code == "missing_stratification"
+        if gap != (self.origin == "model_confirmed") or gap != (self.stratification is not None):
+            raise ValueError("only a confirmed model gap carries a stratification")
+        if gap and (self.hypothesis_id is None or self.task_id is None):
+            raise ValueError("a gap names its hypothesis and approved test")
+        if (self.code in CLAIM_CODES) != (self.claim_index is not None):
+            raise ValueError("claim findings, and only they, name a claim")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("finding evidence must be unique")
+        return self
+
+
+class CritiqueRecord(_State):
+    """What one critic round leaves in state: statuses, findings, the verdict snapshot, and the
+    Supervisor's replanning outcome. No claim, statement, value, prompt, or model text."""
+
+    round: StrictCount = Field(ge=0, lt=MAX_CRITIC_ROUNDS)
+    draft_status: ReviewStatus
+    review_status: ReviewStatus
+    findings: tuple[CritiqueFinding, ...] = Field(default=(), max_length=MAX_FINDINGS)
+    rejected_proposals: StrictCount = Field(default=0, ge=0, le=MAX_FINDINGS)
+    verdicts: tuple[VerdictRecord, ...] = Field(default=(), max_length=8)
+    replan: ReplanOutcome
+
+    @model_validator(mode="after")
+    def _consistent(self) -> CritiqueRecord:
+        ids = [item.hypothesis_id for item in self.verdicts]
+        if len(set(ids)) != len(ids):
+            raise ValueError("one verdict per hypothesis")
+        wanted = any(item.disposition == "follow_up" for item in self.findings)
+        if self.replan != "none_needed" and not wanted:
+            raise ValueError("replanning follows a follow-up finding")
+        if self.replan == "none_needed" and wanted:
+            raise ValueError("a follow-up finding needs a replanning outcome")
+        return self
+
+
+class FollowUpApproval(_State):
+    """The trusted authorization of one follow-up round (INV-7 decision C3).
+
+    Bound to the exact task set (``follow_up_digest``) and round. Production code never
+    constructs one: it is copied from the trusted ``FollowUpAuthorizer`` port, and production has
+    none until INV-10 (#143).
+    """
+
+    follow_up_digest: Digest
+    round: StrictCount = Field(ge=1, le=MAX_FOLLOW_UP_ROUNDS)
+    approved_at: AwareDatetime
+    deadline: AwareDatetime
+
+    @model_validator(mode="after")
+    def _window(self) -> FollowUpApproval:
+        if self.deadline <= self.approved_at:
+            raise ValueError("deadline must follow approval")
+        return self
+
+
+class FollowUpRoundRecord(_State):
+    """One admitted follow-up round: its tasks, the findings that justify them, and its approval."""
+
+    round: StrictCount = Field(ge=1, le=MAX_FOLLOW_UP_ROUNDS)
+    critique_round: StrictCount = Field(ge=0, lt=MAX_CRITIC_ROUNDS)
+    task_ids: tuple[TaskId, ...] = Field(min_length=1, max_length=MAX_FOLLOW_UPS_IN_ROUND)
+    finding_indexes: tuple[StrictCount, ...] = Field(
+        min_length=1, max_length=MAX_FOLLOW_UPS_IN_ROUND
+    )
+    follow_up_digest: Digest
+    approval: FollowUpApproval
+
+    @model_validator(mode="after")
+    def _consistent(self) -> FollowUpRoundRecord:
+        if self.critique_round != self.round - 1:
+            raise ValueError("round n follows critique n - 1")
+        if len(self.finding_indexes) != len(self.task_ids):
+            raise ValueError("one justifying finding per follow-up")
+        if len(set(self.task_ids)) != len(self.task_ids) or len(set(self.finding_indexes)) != len(
+            self.finding_indexes
+        ):
+            raise ValueError("follow-ups and findings are unique")
+        if (
+            self.approval.round != self.round
+            or self.approval.follow_up_digest != self.follow_up_digest
+        ):
+            raise ValueError("the approval binds this round's exact task set")
+        return self
+
+
+def follow_up_digest(tasks: tuple[PlanTask, ...] | list[PlanTask]) -> str:
+    """SHA-256 of the canonical JSON of one round's follow-up tasks, in admission order."""
+    canonical = json.dumps(
+        [task.model_dump(mode="json") for task in tasks],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 ProposalOutcome = Literal["proposed", "plan_invalid", "refused", "supervisor_failed"]
@@ -595,11 +797,19 @@ def reduce_status(current: Any, update: Any) -> Any:
         raise StateUpdateRejected("illegal_transition") from None
 
 
+def _follow_up(value: object, error: type[InvestigationStateError]) -> PlanTask:
+    _require_json(value, error)
+    try:
+        return parse_follow_up(value)
+    except ValidationError:
+        raise error("invalid_value") from None
+
+
 def reduce_follow_ups(current: Any, update: Any) -> Any:
     _require_json(update, StateUpdateRejected)
     if type(update) is not list:
         raise StateUpdateRejected("invalid_value")
-    tasks = [_validated(PlanTask, item, StateUpdateRejected) for item in update]
+    tasks = [_follow_up(item, StateUpdateRejected) for item in update]
     seen = {item["id"] for item in current or []}
     for task in tasks:
         if task.id in seen:
@@ -738,6 +948,28 @@ def reduce_verdicts(current: Any, update: Any) -> Any:
     return merged
 
 
+def _append_rounds(model: type[BaseModel], first: int) -> Reducer:
+    """An append-only list of round records, numbered ``first``, ``first + 1``, ... in order."""
+
+    def reduce(current: Any, update: Any) -> Any:
+        _require_json(update, StateUpdateRejected)
+        if type(update) is not list or not update:
+            raise StateUpdateRejected("invalid_value")
+        existing = list(current or [])
+        for raw in update:
+            record = _validated(model, raw, StateUpdateRejected)
+            if record.round != first + len(existing):
+                raise StateUpdateRejected("critique_mismatch")
+            existing.append(_dump(record))
+        return existing
+
+    return reduce
+
+
+# INV-7: one critique per critic round (0, 1) and one record per follow-up round (1, 2).
+reduce_critiques = _append_rounds(CritiqueRecord, 0)
+reduce_follow_up_rounds = _append_rounds(FollowUpRoundRecord, 1)
+
 reduce_scope = _write_once(InvestigationScope)
 reduce_plan_approval = _write_once(PlanApprovalRecord)
 reduce_terminal = _write_once(TerminalRecord)
@@ -745,7 +977,14 @@ reduce_proposal_record = _write_once(ProposalRecord)
 
 
 Writer = Literal[
-    "intake", "lifecycle", "supervisor", "approval", "dispatcher", "terminal", "investigator"
+    "intake",
+    "lifecycle",
+    "supervisor",
+    "approval",
+    "dispatcher",
+    "terminal",
+    "investigator",
+    "critic",
 ]
 
 # Written by ``guarded_node`` alongside every validated update, never by a step. It has no reducer,
@@ -770,6 +1009,8 @@ class InvestigationState(TypedDict, total=False):
     terminal: Annotated[dict[str, Any], reduce_terminal]
     proposal_record: Annotated[dict[str, Any], reduce_proposal_record]
     verdicts: Annotated[dict[str, dict[str, Any]], reduce_verdicts]
+    critiques: Annotated[list[dict[str, Any]], reduce_critiques]
+    follow_up_rounds: Annotated[list[dict[str, Any]], reduce_follow_up_rounds]
     step_writer: Writer
 
 
@@ -787,6 +1028,8 @@ REDUCERS: dict[str, Reducer] = {
     "terminal": reduce_terminal,
     "proposal_record": reduce_proposal_record,
     "verdicts": reduce_verdicts,
+    "critiques": reduce_critiques,
+    "follow_up_rounds": reduce_follow_up_rounds,
 }
 
 _UNSET: dict[str, Any] = {
@@ -794,6 +1037,8 @@ _UNSET: dict[str, Any] = {
     "status": "",
     "admitted_follow_ups": [],
     "decisions": [],
+    "critiques": [],
+    "follow_up_rounds": [],
 }
 
 # The single writer of each channel (see docs/architecture/investigation-workflow.md). The gateway
@@ -813,6 +1058,9 @@ CHANNEL_OWNERS: dict[str, Writer] = {
     "proposal_record": "supervisor",
     # INV-6: the Business Investigator's validated verdicts, written by the trusted owner's step.
     "verdicts": "investigator",
+    # INV-7: the Critic's validated round records; follow-up rounds belong to the Supervisor.
+    "critiques": "critic",
+    "follow_up_rounds": "supervisor",
 }
 
 
@@ -855,7 +1103,22 @@ class InvestigationStateView(_State):
     terminal: TerminalRecord | None = None
     proposal_record: ProposalRecord | None = None
     verdicts: dict[str, VerdictRecord] = Field(default_factory=dict)
+    critiques: tuple[CritiqueRecord, ...] = ()
+    follow_up_rounds: tuple[FollowUpRoundRecord, ...] = ()
     step_writer: Writer | None = None
+
+    @field_validator("admitted_follow_ups", mode="before")
+    @classmethod
+    def _typed_follow_ups(cls, value: object) -> object:
+        # A stratified follow-up is a ``FollowUpTask``; dispatch is on its raw shape (INV-7).
+        if isinstance(value, list | tuple):
+            return tuple(
+                parse_follow_up(item)
+                if isinstance(item, PlanTask)
+                else _follow_up(item, StateInvalid)
+                for item in value
+            )
+        return value
 
     def admitted_task(self, task_id: str) -> PlanTask | None:
         for task in (*(self.plan.tasks if self.plan else ()), *self.admitted_follow_ups):
@@ -939,7 +1202,13 @@ def _invariant_violation(view: InvestigationStateView) -> StateErrorCode | None:
     # becomes terminal first; once the record exists it must name that same terminal status.
     if view.terminal is not None and view.terminal.status != view.status:
         return "terminal_mismatch"
-    return _proposal_violation(view) or _derived_violation(view) or _verdict_violation(view)
+    return (
+        _proposal_violation(view)
+        or _derived_violation(view)
+        or _follow_up_round_violation(view)
+        or _critique_violation(view)
+        or _verdict_violation(view)
+    )
 
 
 def _derived_violation(view: InvestigationStateView) -> StateErrorCode | None:
@@ -963,34 +1232,130 @@ def _derived_violation(view: InvestigationStateView) -> StateErrorCode | None:
     return None
 
 
+def _bound_follow_ups(
+    view: InvestigationStateView, hypothesis_id: str, rounds: int
+) -> tuple[str, ...]:
+    """IDs of the follow-ups admitted in the first ``rounds`` rounds that re-test a hypothesis."""
+    admitted = {task.id: task for task in view.admitted_follow_ups}
+    found: list[str] = []
+    for record in view.follow_up_rounds[:rounds]:
+        for task_id in record.task_ids:
+            task = admitted.get(task_id)
+            if isinstance(task, FollowUpTask) and task.input.hypothesis_id == hypothesis_id:
+                found.append(task_id)
+    return tuple(found)
+
+
+def _verdict_ok(view: InvestigationStateView, verdict: VerdictRecord, rounds: int) -> bool:
+    """One verdict names a plan hypothesis, exactly its tests (approved tests, then the follow-ups
+    of the first ``rounds`` rounds), finished tests, and existing evidence of those tasks; a
+    decisive verdict cites derived evidence of its own tests."""
+    plan = view.plan
+    if not isinstance(plan, InvestigationPlanV2):
+        return False
+    hypothesis = next((item for item in plan.hypotheses if item.id == verdict.hypothesis_id), None)
+    if hypothesis is None:
+        return False
+    tests = (*hypothesis.tests, *_bound_follow_ups(view, hypothesis.id, rounds))
+    if verdict.test_task_ids != tests:
+        return False
+    allowed_tasks = {*tests, *hypothesis.context_tasks}
+    for task_id in tests:
+        task = view.tasks.get(task_id)
+        if task is None or task.status in {"pending", "running"}:
+            return False
+    cited = [view.evidence.get(evidence_id) for evidence_id in verdict.evidence_ids]
+    if any(item is None or item.task_id not in allowed_tasks for item in cited):
+        return False
+    if verdict.verdict != "untestable" and not any(
+        item is not None and item.kind == "derived" and item.task_id in tests for item in cited
+    ):
+        return False
+    return not (hypothesis.testability == "untestable" and verdict.verdict != "untestable")
+
+
 def _verdict_violation(view: InvestigationStateView) -> StateErrorCode | None:
-    """Verdicts name plan hypotheses, their own tests, and existing evidence; decisive verdicts
-    cite derived evidence of their own tests; a verdict follows only finished tests."""
-    if not view.verdicts:
+    """Final verdicts cover every admitted follow-up round (INV-6 rules, INV-7 decision C6)."""
+    rounds = len(view.follow_up_rounds)
+    if any(not _verdict_ok(view, verdict, rounds) for verdict in view.verdicts.values()):
+        return "verdict_mismatch"
+    return None
+
+
+def _critique_violation(view: InvestigationStateView) -> StateErrorCode | None:
+    """Critique ``n`` follows follow-up round ``n`` (none before critique 0); its findings name
+    existing evidence, plan hypotheses, and admitted tasks; its verdict snapshot is valid for the
+    follow-ups admitted before it; only an admitted replan opens the next round."""
+    if not view.critiques:
         return None
     plan = view.plan
     if not isinstance(plan, InvestigationPlanV2):
-        return "verdict_mismatch"
-    hypotheses = {item.id: item for item in plan.hypotheses}
-    for hypothesis_id, verdict in view.verdicts.items():
-        hypothesis = hypotheses.get(hypothesis_id)
-        if hypothesis is None or verdict.test_task_ids != hypothesis.tests:
-            return "verdict_mismatch"
-        allowed_tasks = {*hypothesis.tests, *hypothesis.context_tasks}
-        for task_id in hypothesis.tests:
-            task = view.tasks.get(task_id)
-            if task is None or task.status in {"pending", "running"}:
-                return "verdict_mismatch"
-        cited = [view.evidence.get(evidence_id) for evidence_id in verdict.evidence_ids]
-        if any(item is None or item.task_id not in allowed_tasks for item in cited):
-            return "verdict_mismatch"
-        if verdict.verdict != "untestable" and not any(
-            item is not None and item.kind == "derived" and item.task_id in hypothesis.tests
-            for item in cited
-        ):
-            return "verdict_mismatch"
-        if hypothesis.testability == "untestable" and verdict.verdict != "untestable":
-            return "verdict_mismatch"
+        return "critique_mismatch"
+    hypotheses = {item.id for item in plan.hypotheses}
+    for index, record in enumerate(view.critiques):
+        if len(view.follow_up_rounds) < index:
+            return "critique_mismatch"  # critique n reviews the results of round n
+        for finding in record.findings:
+            if finding.hypothesis_id is not None and finding.hypothesis_id not in hypotheses:
+                return "critique_mismatch"
+            if finding.task_id is not None and view.admitted_task(finding.task_id) is None:
+                return "critique_mismatch"
+            if any(evidence_id not in view.evidence for evidence_id in finding.evidence_ids):
+                return "critique_mismatch"
+        if any(not _verdict_ok(view, verdict, index) for verdict in record.verdicts):
+            return "critique_mismatch"
+        if record.replan != "admitted" and len(view.follow_up_rounds) > index:
+            return "critique_mismatch"  # only an admitted replan opens round n + 1
+    return None
+
+
+def _follow_up_round_violation(view: InvestigationStateView) -> StateErrorCode | None:
+    """Every admitted follow-up belongs, in order, to exactly one round bound to its approval.
+
+    A round re-tests approved tests of a v2 plan's hypotheses, follows a critique that admitted
+    it, is justified by follow-up findings for exactly those tests and strata, and is approved for
+    exactly its own task set within the plan approval's window.
+    """
+    rounds = view.follow_up_rounds
+    admitted = view.admitted_follow_ups
+    if [task_id for record in rounds for task_id in record.task_ids] != [
+        task.id for task in admitted
+    ]:
+        return "follow_up_unbound"
+    if not rounds:
+        return None
+    plan, approval = view.plan, view.plan_approval
+    if not isinstance(plan, InvestigationPlanV2) or approval is None:
+        return "follow_up_unbound"
+    plan_tasks = {task.id: task for task in plan.tasks}
+    tasks = {task.id: task for task in admitted}
+    for record in rounds:
+        if record.critique_round >= len(view.critiques):
+            return "follow_up_unbound"
+        critique = view.critiques[record.critique_round]
+        if critique.replan != "admitted":
+            return "follow_up_unbound"
+        round_tasks = [tasks[task_id] for task_id in record.task_ids]
+        if follow_up_digest(round_tasks) != record.follow_up_digest:
+            return "follow_up_unbound"
+        window = record.approval
+        if window.approved_at < approval.approved_at or window.deadline > approval.deadline:
+            return "follow_up_unbound"
+        for task, index in zip(round_tasks, record.finding_indexes, strict=True):
+            if not isinstance(task, FollowUpTask) or index >= len(critique.findings):
+                return "follow_up_unbound"
+            finding = critique.findings[index]
+            spec = task.input
+            target = plan_tasks.get(task.depends_on[0])
+            if (
+                finding.disposition != "follow_up"
+                or finding.task_id != task.depends_on[0]
+                or finding.hypothesis_id != spec.hypothesis_id
+                or finding.stratification != spec.stratification
+                or target is None
+                or getattr(target.input, "hypothesis_id", None) != spec.hypothesis_id
+            ):
+                return "follow_up_unbound"
     return None
 
 
@@ -1032,6 +1397,8 @@ _FROZEN_AFTER_TERMINAL = (
     "plan_approval",
     "proposal_record",
     "verdicts",
+    "critiques",
+    "follow_up_rounds",
 )
 
 
@@ -1074,8 +1441,8 @@ def _activity_violation(
             continue
         if new.status == "running" or (terminal and new.status not in TERMINAL_TASK_STATUSES):
             return code
-    if update.get("evidence") or update.get("verdicts"):
-        return code  # evidence and verdicts are written only while running
+    if any(update.get(name) for name in ("evidence", "verdicts", "critiques", "follow_up_rounds")):
+        return code  # evidence, verdicts, critiques, and rounds are written only while running
     if any(
         decision["result"] in {"succeeded", "failed"} for decision in update.get("decisions", [])
     ):

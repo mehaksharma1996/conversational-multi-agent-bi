@@ -14,7 +14,10 @@ a provider object:
 - ``DerivedEvidencePayload`` (INV-6 decision D4): one fixed operation, the difference of two exact
   ratios (``rate_difference`` or ``mean_difference``), over the counts of one query evidence of the
   same task. Only the gateway's owner-only ``derive_evidence`` produces it, after recomputing it
-  from the payload it holds; no model-written number can become one.
+  from the payload it holds; no model-written number can become one. INV-7 adds
+  ``standardized_rate_difference``: a stratified follow-up's comparison-period band rates,
+  weighted by the baseline's band populations (direct standardization), against the crude baseline
+  rate; every band's counts travel with the payload, so the value always recomputes.
 
 The gateway issues payloads alongside their records (INV-5 S2). ``verify_payload`` checks a payload
 against its record before anything uses it; a mismatch excludes the payload. Errors and mismatch
@@ -231,12 +234,62 @@ class DerivedRatio(_Payload):
         return Fraction(self.numerator) / self.denominator
 
 
+MAX_STRATA = 4
+# Floats hold every integer up to 2**53 exactly; a reduced standardized fraction must fit.
+_EXACT_FLOAT_INT = 2**53
+
+
+class DerivedStratum(_Payload):
+    """One band's baseline and comparison counts (events over population), as recorded."""
+
+    label: Annotated[str, StringConstraints(pattern=r"^band_[0-3]$")]
+    baseline: DerivedRatio
+    comparison: DerivedRatio
+
+
+def standardized_rate(strata: tuple[DerivedStratum, ...] | list[DerivedStratum]) -> Fraction:
+    """Direct standardization with baseline weights (INV-7 decision C4), exactly.
+
+    ``sum_b (baseline population_b / baseline population) * (comparison events_b / comparison
+    population_b)``: the comparison period's within-band rates, weighted by the baseline's band
+    composition. Descriptive only; it is not a causal adjustment.
+    """
+    total = sum(item.baseline.denominator for item in strata)
+    if not strata or total < 1:
+        raise ValueError("standardization needs a baseline population")
+    return sum(
+        (Fraction(item.baseline.denominator, total) * item.comparison.exact for item in strata),
+        Fraction(0),
+    )
+
+
+def crude_baseline(strata: tuple[DerivedStratum, ...] | list[DerivedStratum]) -> DerivedRatio:
+    """The baseline rate over every band together: summed events over summed population."""
+    return DerivedRatio(
+        numerator=float(sum(int(item.baseline.numerator) for item in strata)),
+        denominator=sum(item.baseline.denominator for item in strata),
+    )
+
+
+def exact_ratio(value: Fraction) -> DerivedRatio:
+    """``value`` as a reduced ratio whose numerator a float holds exactly; else ``ValueError``."""
+    if value < 0 or value.numerator >= _EXACT_FLOAT_INT:
+        raise ValueError("the standardized rate is not exactly representable")
+    return DerivedRatio(numerator=float(value.numerator), denominator=value.denominator)
+
+
 class DerivedEvidencePayload(_Payload):
     """``measure - reference`` for one approved test, recomputed by the gateway (D4).
 
     ``value`` must equal the exact difference of the two ratios; ``verify_payload`` also requires
     the record's operation and sources. The counts come from the source query payload, which the
     gateway checks before issuing; nothing here is taken from a model or the plan.
+
+    ``standardized_rate_difference`` (INV-7 decision C4) also carries every band's counts in
+    ``strata``. ``standardized`` names the side holding the standardized comparison rate (the
+    reduced exact fraction recomputed from the strata); the other side is the crude baseline, the
+    strata's summed baseline counts. Both are rechecked here, so a payload with altered counts,
+    weights, or rates cannot be built.
     """
 
     schema_version: Literal[1] = PAYLOAD_SCHEMA_VERSION
@@ -251,6 +304,8 @@ class DerivedEvidencePayload(_Payload):
     measure: DerivedRatio
     reference: DerivedRatio
     value: Finite
+    strata: tuple[DerivedStratum, ...] = Field(default=(), max_length=MAX_STRATA)
+    standardized: Literal["measure", "reference"] | None = None
 
     @model_validator(mode="after")
     def _sources(self) -> DerivedEvidencePayload:
@@ -263,9 +318,30 @@ class DerivedEvidencePayload(_Payload):
             for ratio in (self.measure, self.reference)
         ):
             raise ValueError("a rate is a whole event count within its population")
+        standardized = self.operation == "standardized_rate_difference"
+        if standardized != bool(self.strata) or standardized != (self.standardized is not None):
+            raise ValueError("only a standardized difference carries strata")
+        if standardized:
+            self._check_standardized()
         if self.value != float(self.measure.exact - self.reference.exact):
             raise ValueError("the value is the exact difference of the two ratios")
         return self
+
+    def _check_standardized(self) -> None:
+        strata = self.strata
+        if len(strata) < 2 or tuple(item.label for item in strata) != tuple(
+            f"band_{index}" for index in range(len(strata))
+        ):
+            raise ValueError("strata are the bands band_0..band_n, in order")
+        for item in strata:
+            for ratio in (item.baseline, item.comparison):
+                if ratio.numerator != int(ratio.numerator) or ratio.numerator > ratio.denominator:
+                    raise ValueError("a band rate is a whole event count within its population")
+        crude = crude_baseline(strata)
+        standard = exact_ratio(standardized_rate(strata))
+        expected = (standard, crude) if self.standardized == "measure" else (crude, standard)
+        if (self.measure, self.reference) != expected:
+            raise ValueError("the sides are the standardized rate and the crude baseline")
 
 
 EvidencePayload = Annotated[
