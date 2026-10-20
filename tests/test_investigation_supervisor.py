@@ -473,6 +473,12 @@ def test_the_supervisor_imports_only_the_port_results_and_contracts() -> None:
         ("src.orchestration.investigation_planning", "PlannerGateway"),
         ("src.orchestration.investigation_planning", "PlanningCallResult"),
         ("src.orchestration.investigation_planning", "PlanningCallStatus"),
+        # INV-7: deterministic follow-up construction from validated critique findings only
+        ("packages.investigation", "AgentRole"),
+        ("packages.investigation.hypotheses", "FollowUpTask"),
+        ("packages.investigation.hypotheses", "InvestigationPlanV2"),
+        ("packages.investigation.replanning", "build_follow_ups"),
+        ("packages.investigation.state", "CritiqueFinding"),
     }
     names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     attributes = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}

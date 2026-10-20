@@ -16,6 +16,7 @@ from src.llm.base import LLMResponse
 from src.orchestration import investigation_execution
 from src.orchestration.investigation_execution import InvestigationExecutionRun
 from src.orchestration.investigation_proposal import InvestigationProposalRun
+from src.orchestration.review_prompts import CRITIC_MARKER, FINDINGS_MARKER
 from src.storage.query_executor import QueryTimeoutError
 from src.storage.sqlite_store import StoredTable
 from tests.investigation_fixtures import LiveAuthority, churn_plan
@@ -40,6 +41,8 @@ from tests.test_investigation_tool_gateway import (
 
 DOCUMENT_ANSWER = "Prices rose by 5% last quarter. Source 1"
 SQL_PROMPT_MARKER = "careful SQLite analyst"
+NO_CLAIMS = '{"claims":[]}'
+NO_GAPS = '{"gaps":[]}'
 
 
 @dataclass(eq=False)
@@ -47,13 +50,29 @@ class RoutedAdapter(ScriptedSQL):
     """The exact bounded adapter: scripted SQL for SQL prompts, a cited answer for documents.
 
     ``sql`` maps a task's objective text to the SQL returned for it; otherwise ``script`` applies.
+    INV-7: the review prompts get the next scripted draft and review (round by round; the last one
+    repeats), by default an empty draft and no gaps.
     """
 
     document_answer: str = DOCUMENT_ANSWER
     sql: dict[str, str] = field(default_factory=dict)
     sql_prompts: list[str] = field(default_factory=list)
+    drafts: list[str] = field(default_factory=lambda: [NO_CLAIMS])
+    reviews: list[str] = field(default_factory=lambda: [NO_GAPS])
+    draft_prompts: list[str] = field(default_factory=list)
+    review_prompts: list[str] = field(default_factory=list)
 
     def generate_once(self, prompt: str, *, max_output_tokens: int) -> LLMResponse:
+        for marker, answers, seen in (
+            (FINDINGS_MARKER, self.drafts, self.draft_prompts),
+            (CRITIC_MARKER, self.reviews, self.review_prompts),
+        ):
+            if prompt.startswith(marker):
+                seen.append(prompt)
+                self.text = answers[min(len(seen), len(answers)) - 1]
+                return super(ScriptedSQL, self).generate_once(
+                    prompt, max_output_tokens=max_output_tokens
+                )
         if SQL_PROMPT_MARKER not in prompt:
             self.text = self.document_answer
             return super(ScriptedSQL, self).generate_once(
@@ -166,6 +185,7 @@ def execution(
     cancellation: Any = None,
     limits: BudgetLimits = EXECUTION_LIMITS,
     ledger_clock: Callable[[], float] | None = None,
+    authorizer: Any = None,
 ) -> Execution:
     plan = plan or churn_plan()
     spy = SpyRetriever() if retriever is _DEFAULT else retriever
@@ -188,6 +208,7 @@ def execution(
         sql_executor=executor,
         limits=limits,
         ledger_clock=ledger_clock or (lambda: 0.0),
+        follow_up_authorizer=authorizer,
     )
     return Execution(
         run=run,

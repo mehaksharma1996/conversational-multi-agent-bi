@@ -112,7 +112,9 @@ def test_the_step_bound_counts_derivations_and_the_verdict_step() -> None:
     plan = churn_v2_plan()
     tests = 4
     base = 8 + 1 + sum(t.max_attempts * 5 + 1 for t in plan.tasks) + 4
-    assert step_bound(plan) == base + tests + 2
+    # INV-7: two critic rounds (8 steps each) and two rounds of at most three follow-ups (7 each)
+    review = 2 * 8 + 2 * 3 * 7
+    assert step_bound(plan) == base + tests + 2 + review
 
 
 # --- no verdict after a stop or a defect ----------------------------------------------------------

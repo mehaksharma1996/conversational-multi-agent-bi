@@ -20,6 +20,13 @@ it and records the investigation as failed when a failure code is returned.
 
 A ``proposed`` result is an unapproved plan: the Supervisor never approves, schedules, or runs it,
 and never changes the plan, its digest, its approval requirements, or its cost estimate.
+
+**Replanning (INV-7, #140).** ``FollowUpPlanner`` is the Supervisor's bounded replanning: it turns a
+validated critique's confirmed ``follow_up`` findings into stratified re-tests of approved tests,
+deterministically (``build_follow_ups``). It never calls a model, never authors free text, and never
+widens a test: the trusted run owner validates the round (``validate_follow_up_round``), obtains
+the trusted follow-up approval, and admits it through the guarded ``replan`` step. At most two
+rounds exist; the ledger, validation, and state invariants each enforce that.
 """
 
 from __future__ import annotations
@@ -27,8 +34,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-from packages.investigation import InvestigationProposal, PlanningValidationError
+from packages.investigation import AgentRole, InvestigationProposal, PlanningValidationError
 from packages.investigation.gateway import PlanningOutcomeCode, PlanningStage
+from packages.investigation.hypotheses import FollowUpTask, InvestigationPlanV2
+from packages.investigation.replanning import build_follow_ups
+from packages.investigation.state import CritiqueFinding
 from src.orchestration.investigation_planning import (
     PlannerGateway,
     PlanningCallResult,
@@ -130,3 +140,22 @@ def _legal(result: object, stage: PlanningStage, statuses: frozenset[PlanningCal
         except ValueError:
             return False
     return True
+
+
+class FollowUpPlanner:
+    """The Supervisor's deterministic follow-up construction for one round (INV-7 C4)."""
+
+    role = AgentRole.SUPERVISOR
+
+    def plan_round(
+        self,
+        plan: InvestigationPlanV2,
+        findings: tuple[CritiqueFinding, ...],
+        *,
+        round_index: int,
+    ) -> tuple[tuple[FollowUpTask, ...], tuple[int, ...]]:
+        """The round's follow-up tasks and the indexes of the findings that justify them.
+
+        Raises ``FollowUpBuildError`` when a finding names no approved, resolvable test.
+        """
+        return build_follow_ups(plan, findings, round_index=round_index)

@@ -2,6 +2,8 @@
 
 ``supervisor`` (INV-4 S3) plans only through a ``PlannerPort``
 (``InvestigationPlanningGateway.planner_port()``): one initial call and at most one repair.
+``critic`` (INV-7) critiques a round from verified evidence, and the Supervisor's
+``FollowUpPlanner`` turns confirmed gaps into follow-up re-tests; neither holds a port.
 ``sql_analyst`` and ``document_researcher`` (INV-5 S3) run one admitted task each, one port call
 per step; the dispatcher and run owner that drive them are trusted and live in
 ``src/orchestration/investigation_execution.py`` (INV-5 decision R7). Every

@@ -71,6 +71,9 @@ SPECIALIST_IMPORTS: dict[str, frozenset[str] | None] = {
     "packages.investigation.hypotheses": ANY,
     "packages.investigation.evidence": ANY,
     "packages.investigation.verdicts": ANY,
+    # INV-7: the pure critique checks, and the Supervisor's deterministic follow-up builder only
+    "packages.investigation.critique": ANY,
+    "packages.investigation.replanning": frozenset({"build_follow_ups", "FollowUpBuildError"}),
     "src.orchestration.tool_gateway": _TOOL_REQUESTS,
     "src.orchestration.investigation_graph": frozenset({"InvestigationGraphBuilder"}),
     # INV-4 S2e: the Supervisor plans only through the two-operation port.

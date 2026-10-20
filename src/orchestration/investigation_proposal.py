@@ -146,6 +146,17 @@ class InvestigationProposalRun:
     def config(self) -> dict[str, Any]:
         return {"configurable": dict(self._config["configurable"])}
 
+    @property
+    def schema_fields(self) -> tuple[tuple[str, str], ...]:
+        """The confirmed schema the plan was proposed against: (name, logical type) pairs.
+
+        INV-7: the execution owner validates follow-up stratification fields against it. Names and
+        types only; never descriptions, titles, or the question.
+        """
+        return tuple(
+            (field.name, field.logical_type) for field in self._context.metadata.schema_fields
+        )
+
     def run(self) -> ProposalResult:
         """Run the proposal graph once and return the validated outcome, or raise a fixed code."""
         if self._used:

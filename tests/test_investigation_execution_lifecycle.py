@@ -487,7 +487,8 @@ def test_an_unexpected_production_client_fails_closed() -> None:
 # --- INV-5 grants nothing -------------------------------------------------------------------------
 
 _DEFINING = {"packages/investigation/state.py", "packages/investigation/gateway.py"}
-_GRANTS = {"PlanApprovalRecord", "InvestigationAuthority"}
+# INV-7: a follow-up approval comes only from the trusted authorizer port (decision C3).
+_GRANTS = {"PlanApprovalRecord", "InvestigationAuthority", "FollowUpApproval"}
 
 
 def _grant_constructions(source: str) -> list[str]:
@@ -526,6 +527,8 @@ def test_the_grant_checker_detects_each_construction() -> None:
         "PlanApprovalRecord.model_validate(raw)",
         "InvestigationAuthority.model_construct()",
         "authority.model_copy(update=x, sql_approval_required=False)",
+        "FollowUpApproval(follow_up_digest=d, round=1, approved_at=a, deadline=b)",
+        "FollowUpApproval.model_validate(raw)",
     ):
         assert _grant_constructions(source), source
 
