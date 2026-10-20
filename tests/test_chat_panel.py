@@ -5,8 +5,14 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from config.settings import Settings
-from src.ui.chat_panel import _gemini_consent_required
+import pytest
+
+# Streamlit is an optional, developer-only environment (requirements-streamlit.lock); these UI
+# tests run there and in the CI streamlit-dev job, and skip in the production environment.
+pytest.importorskip("streamlit")
+
+from config.settings import Settings  # noqa: E402
+from src.ui.chat_panel import _gemini_consent_required  # noqa: E402
 
 
 def _settings(**overrides) -> Settings:

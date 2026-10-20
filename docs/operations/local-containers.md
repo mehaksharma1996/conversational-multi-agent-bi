@@ -245,7 +245,10 @@ SQL and answers. See [ADR 0017](../adr/0017-model-providers-and-fallback.md).
 docker compose --profile streamlit up -d --wait streamlit   # http://127.0.0.1:8501
 ```
 
-It uses the same API image and keeps its own per-session data below `/data/sessions`. Streamlit does not
+It uses its own developer-only image (`Dockerfile.streamlit`, `requirements-streamlit.lock`), never
+the API image, and keeps its own per-session data below `/data/sessions`. That lock keeps Pillow
+12.3.0, which has known advisories, so use the profile only for trusted local development; see
+[the Streamlit developer environment](streamlit-developer-environment.md). Streamlit does not
 emit the API's audit events. Its disposition is governed by [ADR 0009](../adr/0009-streamlit-migration.md).
 
 ## Troubleshooting

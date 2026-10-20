@@ -121,7 +121,8 @@ analysis. Stop while retaining data with `docker compose down`. See
 the intentional `docker compose down -v` reset.
 
 For local development, create a Python 3.12-3.14 virtual environment, install
-`requirements.lock`, run
+`requirements.lock` (Streamlit, the developer-only compatibility UI, has its own environment:
+[docs/operations/streamlit-developer-environment.md](docs/operations/streamlit-developer-environment.md)), run
 `python -m uvicorn --factory apps.api.runtime:create_runtime_app --port 8000`, then use `npm ci` and
 `npm run dev` from `apps/web/`. The sample files and ground truth are versioned in
 [`sample_data/`](sample_data/README.md). A hosted provider is contacted only when configured,
