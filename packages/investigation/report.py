@@ -1188,16 +1188,28 @@ def render_claim(claim: object, body: ReportBody) -> Rendered | None:
     return None
 
 
-def render_sections(draft: NarrativeDraft, body: ReportBody) -> tuple[ReportSection, ...]:
-    """Every claim rendered by its reviewed template; ``ReportError`` if one names nothing."""
+# The text of a claim that names nothing real: kept only so verification can name the defect.
+UNRENDERABLE_TEXT = "[unrenderable claim]"
+
+
+def render_sections(
+    draft: NarrativeDraft, body: ReportBody, *, lenient: bool = False
+) -> tuple[ReportSection, ...]:
+    """Every claim rendered by its reviewed template.
+
+    A claim that names nothing real raises ``ReportError``, or with ``lenient`` keeps the fixed
+    ``UNRENDERABLE_TEXT`` so that ``verify_report`` reports why (a candidate is never accepted
+    with it).
+    """
     sections: list[ReportSection] = []
     for section in draft.sections:
         sentences = []
         for claim in section.claims:
             rendered = render_claim(claim, body)
-            if rendered is None:
+            if rendered is None and not lenient:
                 raise ReportError("claim_unrenderable")
-            sentences.append(Sentence(claim=claim, text=rendered.text))
+            text = rendered.text if rendered is not None else UNRENDERABLE_TEXT
+            sentences.append(Sentence(claim=claim, text=text))
         sections.append(ReportSection(name=section.name, sentences=tuple(sentences)))
     return tuple(sections)
 
@@ -1308,6 +1320,7 @@ def assemble_report(
     *,
     fallback_reason: FallbackReason | None,
     violations: tuple[ReportViolationCode, ...] = (),
+    lenient: bool = False,
 ) -> VerifiedReport:
     """The report object for ``body`` with ``draft`` rendered. Verification is separate."""
     fallback = fallback_reason is not None
@@ -1328,11 +1341,12 @@ def assemble_report(
         facts=body.facts,
         hypotheses=body.hypotheses,
         recommendations=body.recommendations,
-        sections=render_sections(draft, body),
+        sections=render_sections(draft, body, lenient=lenient),
     )
 
 
 __all__ = [
+    "UNRENDERABLE_TEXT",
     "MAX_NARRATIVE_CHARS",
     "parse_narrative",
     "APPROVED_PHRASES",
