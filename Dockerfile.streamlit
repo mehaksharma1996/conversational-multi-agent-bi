@@ -1,0 +1,82 @@
+# syntax=docker/dockerfile:1.7
+#
+# Optional, developer-only Streamlit compatibility UI image (ADR 0011), built only for the
+# `streamlit` compose profile from requirements-streamlit.lock. Streamlit requires pillow<13, so
+# this image keeps Pillow 12.3.0, which has known, unpatched advisories: use it for trusted local
+# development only. The production API image (Dockerfile.api) never contains Streamlit.
+# See docs/operations/streamlit-developer-environment.md.
+#
+# Multi-stage: dependencies are built in a throwaway stage and only the virtual
+# environment and application code reach the runtime stage. The runtime image runs
+# as a fixed non-root user, holds no secrets, and is designed for a read-only root
+# filesystem: all state lives in the /data, /audit, and /models volumes and /tmp.
+#
+# Base image is pinned by digest in a literal FROM line so Dependabot's docker ecosystem
+# proposes digest updates. Review each update, rebuild, and run the smoke test
+# (docs/operations/local-containers.md).
+
+FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS python-base
+
+# ---------------------------------------------------------------------------------
+FROM python-base AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+WORKDIR /build
+COPY requirements.txt requirements-streamlit.txt requirements-streamlit.lock ./
+
+# CPU-only PyTorch at the locked version, then the Streamlit developer requirements with their
+# own lock as the constraint, exactly as Dockerfile.api installs the production set.
+RUN TORCH_VERSION="$(sed -n 's/^torch==//p' requirements-streamlit.lock)" \
+    && test -n "${TORCH_VERSION}" \
+    && pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu \
+    && pip install -r requirements-streamlit.txt -c requirements-streamlit.lock
+
+# ---------------------------------------------------------------------------------
+FROM python-base AS runtime
+
+# HOME and caches point at /tmp because the root filesystem is read-only; /tmp is a
+# tmpfs at runtime. Telemetry from third-party libraries is disabled.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:${PATH}" \
+    HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache \
+    APP_DATA_DIR=/data \
+    AUDIT_LOG_DIR=/audit \
+    HF_HOME=/models \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    ANONYMIZED_TELEMETRY=False \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /data /audit /models \
+    && chown app:app /data /audit /models
+
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
+COPY app.py ./
+COPY .streamlit/config.toml ./.streamlit/config.toml
+COPY apps ./apps
+COPY config ./config
+COPY packages ./packages
+COPY scripts ./scripts
+COPY src ./src
+
+USER 10001:10001
+
+# Fail the build if the Streamlit UI cannot even be imported. Nothing is written to disk.
+RUN python -c "import streamlit, src.ui.chat_panel, src.ui.dashboard, src.ui.upload_panel"
+
+EXPOSE 8501
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
+    CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4).status == 200 else 1)"]
+
+CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]

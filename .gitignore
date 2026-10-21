@@ -17,6 +17,7 @@ apps/web/.playwright-browsers/
 
 .env
 .venv/
+.venv-streamlit/
 venv/
 
 data/raw/*

@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
 #
-# API (and Streamlit compatibility surface) image.
+# API image. It never installs or imports Streamlit: the optional, developer-only Streamlit
+# compatibility UI has its own image (Dockerfile.streamlit) and lock
+# (requirements-streamlit.lock).
 #
 # Multi-stage: dependencies are built in a throwaway stage and only the virtual
 # environment and application code reach the runtime stage. The runtime image runs
@@ -49,8 +51,7 @@ ENV PYTHONUNBUFFERED=1 \
     AUDIT_LOG_DIR=/audit \
     HF_HOME=/models \
     HF_HUB_DISABLE_TELEMETRY=1 \
-    ANONYMIZED_TELEMETRY=False \
-    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+    ANONYMIZED_TELEMETRY=False
 
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
@@ -60,8 +61,6 @@ RUN groupadd --system --gid 10001 app \
 COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
-COPY app.py ./
-COPY .streamlit/config.toml ./.streamlit/config.toml
 COPY apps ./apps
 COPY config ./config
 COPY packages ./packages
@@ -70,9 +69,10 @@ COPY src ./src
 
 USER 10001:10001
 
-# Fail the build if the API or Streamlit cannot even be imported (missing native
-# library, broken dependency set). Nothing is written to disk.
-RUN python -c "import apps.api.main, apps.api.runtime, streamlit"
+# Fail the build if the API cannot even be imported (missing native library, broken
+# dependency set), or if Streamlit reached the production environment. Nothing is written.
+RUN python -c "import apps.api.main, apps.api.runtime" \
+    && python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('streamlit') is not None)"
 
 EXPOSE 8000
 

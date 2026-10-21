@@ -24,6 +24,7 @@ evals/results/
 .agents/
 .vscode/
 .venv/
+.venv-streamlit/
 venv/
 **/__pycache__/
 **/*.py[cod]

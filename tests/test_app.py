@@ -2,7 +2,13 @@
 
 from pathlib import Path
 
-from streamlit.testing.v1 import AppTest
+import pytest
+
+# Streamlit is an optional, developer-only environment (requirements-streamlit.lock); these UI
+# tests run there and in the CI streamlit-dev job, and skip in the production environment.
+pytest.importorskip("streamlit")
+
+from streamlit.testing.v1 import AppTest  # noqa: E402
 
 
 def test_initial_application_render_has_no_exceptions() -> None:

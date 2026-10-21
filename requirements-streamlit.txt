@@ -1,0 +1,4 @@
+# Optional, developer-only Streamlit compatibility UI. Install into a separate virtual
+# environment with requirements-streamlit.lock as the constraint file; never into production.
+-r requirements.txt
+streamlit==1.65.0

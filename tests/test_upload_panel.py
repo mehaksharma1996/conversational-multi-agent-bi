@@ -7,9 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from config.settings import Settings
-from src.ui.upload_panel import _remove_session_storage, _remove_table_storage
-from tests.test_utils import isolated_directory_path
+# Streamlit is an optional, developer-only environment (requirements-streamlit.lock); these UI
+# tests run there and in the CI streamlit-dev job, and skip in the production environment.
+pytest.importorskip("streamlit")
+
+from config.settings import Settings  # noqa: E402
+from src.ui.upload_panel import _remove_session_storage, _remove_table_storage  # noqa: E402
+from tests.test_utils import isolated_directory_path  # noqa: E402
 
 
 def _settings_for(app_data_dir: Path, tenant_id: str, session_id: str) -> Settings:
