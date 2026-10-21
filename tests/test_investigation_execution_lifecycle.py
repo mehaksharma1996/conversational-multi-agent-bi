@@ -461,7 +461,8 @@ def test_a_plan_with_a_task_no_specialist_runs_is_refused(
 
 def test_the_step_bound_covers_the_worst_case_and_hitting_it_fails_closed() -> None:
     plan = churn_plan()
-    assert step_bound(plan) == 8 + 1 + sum(t.max_attempts * 5 + 1 for t in plan.tasks) + 4
+    # INV-8 adds 3 report steps: the narrative step, compose_report, and verify_report.
+    assert step_bound(plan) == 8 + 1 + sum(t.max_attempts * 5 + 1 for t in plan.tasks) + 3 + 4
     e = execution()
     e.run._config["recursion_limit"] = 12  # far below what the plan needs
     result = e.run.run()

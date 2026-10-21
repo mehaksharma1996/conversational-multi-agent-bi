@@ -144,7 +144,7 @@ def test_no_draft_gives_the_fallback_with_its_reason(churn: Any, reason: Any) ->
 
 def _ended(status: str) -> Any:
     plan = churn_plan()
-    tasks = {task.id: task_record(task.id, "cancelled") for task in plan.tasks}
+    tasks: dict[str, Any] = {task.id: task_record(task.id, "cancelled") for task in plan.tasks}
     return report_inputs(restore_state(running_state(plan=plan, status=status, **tasks)), {})
 
 

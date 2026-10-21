@@ -118,10 +118,15 @@ def _failed(violations: tuple[ReportViolationCode, ...]) -> ReportOutcome:
     )
 
 
+def unavailable_outcome() -> ReportOutcome:
+    """No report: composition or verification itself failed (a defect, recorded, never returned)."""
+    return _failed(())
+
+
 def accept_report(inputs: ReportInputs, candidate: VerifiedReport | None) -> ReportOutcome:
     """Verify ``candidate``; replace a rejected narrative by the verified fallback, once."""
     if candidate is None:
-        return _failed(())
+        return unavailable_outcome()
     found = violation_codes(verify_report(candidate, inputs))
     if not found:
         return _passed(candidate)
@@ -139,4 +144,5 @@ __all__ = [
     "candidate_report",
     "draft_record",
     "fallback_report",
+    "unavailable_outcome",
 ]

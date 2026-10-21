@@ -38,7 +38,7 @@ def finished(status: str = "completed") -> dict[str, Any]:
     """A churn run after ``finish``: every task ended, terminal status, no terminal record yet."""
     plan = churn_plan()
     ended = "succeeded" if status in {"completed", "completed_partial"} else "cancelled"
-    tasks = {
+    tasks: dict[str, Any] = {
         task.id: task_record(task.id, ended, 1 if ended == "succeeded" else 0)
         for task in plan.tasks
     }

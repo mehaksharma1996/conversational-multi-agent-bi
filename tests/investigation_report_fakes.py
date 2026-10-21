@@ -32,10 +32,12 @@ from tests.investigation_critique_fakes import (
 )
 from tests.investigation_execution_fakes import RoutedAdapter, reset_replay_registry
 from tests.investigation_hypothesis_fakes import CITED_ANSWER, HYPOTHESIS_SQL, churn_index
+from tests.test_investigation_sql_gateway import ScriptedSQL
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = json.loads((ROOT / "evals" / "investigation" / "v1" / "oracle.json").read_text("utf-8"))
 NARRATIVE_MARKER = "INVESTIGATION REPORT NARRATIVE"
+NARRATIVE_MAX_INPUT = 12_000
 _MEASUREMENT = re.compile(r"^- (\w+) \((h\d+)\): .*evidence (ev_[0-9a-f]{32})$", re.M)
 _DOCUMENT = re.compile(r"^- (ev_[0-9a-f]{32}) \((\w+);", re.M)
 
@@ -55,7 +57,8 @@ class ChurnReportAdapter(RoutedAdapter):
             self.narrative_prompts.append(prompt)
             answer = self.narratives[min(len(self.narrative_prompts), len(self.narratives)) - 1]
             self.text = answer(prompt) if callable(answer) else answer
-            return super(RoutedAdapter, self).generate_once(
+            # Past ``ScriptedSQL`` (as ``RoutedAdapter`` does), so the scripted text is returned.
+            return super(ScriptedSQL, self).generate_once(
                 prompt, max_output_tokens=max_output_tokens
             )
         if prompt.startswith(FINDINGS_MARKER) and not self.seeded:
@@ -93,6 +96,8 @@ def churn_execution(
     reset_replay_registry()
     index = churn_index(directory)
     llm = kwargs.pop("llm", None) or churn_adapter(narratives)
+    # The fixtures bill one token per byte; the narrative prompt lists every fact and code.
+    kwargs.setdefault("max_input", NARRATIVE_MAX_INPUT)
     return v7_execution(
         index,
         llm=llm,
@@ -106,4 +111,92 @@ def evidence_of(result: Any, kind: str, task_id: str) -> str:
         eid
         for eid, record in result.state.evidence.items()
         if record.kind == kind and record.task_id == task_id
+    )
+
+
+_HEADERS = {
+    "Facts:": "facts",
+    "Hypotheses:": "hypotheses",
+    "Tasks:": "tasks",
+    "Findings:": "findings",
+    "Limitations and notes:": "limitations",
+    "Recommendations:": "recommendations",
+}
+
+
+def prompt_items(prompt: str) -> dict[str, Any]:
+    """The listed items of a narrative prompt, by heading, as a model would read them."""
+    items: dict[str, Any] = {name: [] for name in _HEADERS.values()}
+    current = None
+    for line in prompt.splitlines():
+        if line.startswith("Scope: "):
+            items["scope"] = json.loads(line[len("Scope: ") :])
+        elif line in _HEADERS:
+            current = _HEADERS[line]
+        elif current is not None and line.startswith("- "):
+            items[current].append(json.loads(line[2:]))
+    return items
+
+
+def honest_narrative(prompt: str, **overrides: Any) -> str:
+    """What a well-behaved narrative model returns: every listed item, as typed claims only.
+
+    ``overrides`` replace whole sections' claim lists (to seed a violation).
+    """
+    items = prompt_items(prompt)
+    scope = items["scope"]
+    tested = [row for row in items["hypotheses"] if row["status"] == "tested"]
+    sections = {
+        "executive_summary": [
+            {"type": "scope", **scope},
+            *(
+                {
+                    "type": "verdict",
+                    "hypothesis_id": row["hypothesis_id"],
+                    "verdict": row["verdict"],
+                }
+                for row in tested
+            ),
+            {"type": "limitation", "code": "causation_not_established"},
+        ],
+        "findings": [
+            {"type": "fact", "fact_id": fact["fact_id"], "direction": fact["direction"]}
+            for fact in items["facts"]
+        ],
+        "hypotheses": [
+            {"type": "verdict", "hypothesis_id": row["hypothesis_id"], "verdict": row["verdict"]}
+            for row in items["hypotheses"]
+            if row["verdict"] is not None
+        ],
+        "critique": [
+            {
+                "type": "finding",
+                "round": item["round"],
+                "index": item["index"],
+                "code": item["code"],
+            }
+            for item in items["findings"]
+        ],
+        "limitations": [
+            {
+                "type": "limitation",
+                "code": item["code"],
+                "task_id": item.get("task_id"),
+                "hypothesis_id": item.get("hypothesis_id"),
+            }
+            for item in items["limitations"]
+        ],
+        "recommendations": [
+            {
+                "type": "recommendation",
+                "recommendation_id": item["recommendation_id"],
+                "rule_id": item["rule_id"],
+            }
+            for item in items["recommendations"]
+        ]
+        or [{"type": "no_recommendation"}],
+    }
+    sections.update(overrides)
+    return json.dumps(
+        {"sections": [{"name": name, "claims": claims} for name, claims in sections.items()]}
     )

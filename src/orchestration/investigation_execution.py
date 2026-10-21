@@ -73,6 +73,24 @@ Review stops when a critique admits nothing, after critique 1's round, or when t
 budget is spent; a critique never retries a task. With no authorizer (production until INV-10),
 no follow-up is ever admitted. The final verdicts then cover every admitted follow-up.
 
+**Verified report (INV-8, #141).** Every run that reaches ``finish`` ends with a verified report:
+
+1. before the gateway closes, a v2 run that would end ``completed`` or ``completed_partial``
+   gets at most one owner-only ``compose_narrative`` call (one ``dispatch`` step), and only when
+   the narrative is enabled and ``narrative_readiness`` says a bounded model and budget are
+   available. Its typed draft stays in this process;
+2. after ``finish``, ``compose_report`` (writer ``reporter``) composes the candidate from the
+   final validated state and the gateway's verified payloads: model-assisted for a usable draft,
+   else the deterministic fallback with its reason. It records only the candidate's mode,
+   reason, and digest;
+3. ``verify_report`` (writer ``report_verifier``) runs ``verify_report`` on it, replaces a
+   rejected narrative by the verified fallback, and records the outcome and digest. The accepted
+   report is returned in process (``ExecutionResult.report``), never checkpointed.
+
+Neither report step makes a model call. A cancelled, exhausted, or failed run never gets a
+narrative and is never reported as complete. A report that cannot be composed or verified is
+recorded ``unavailable`` and never changes the run's status.
+
 **Failure.** A node error, a bare gateway refusal, or the step bound is a defect: the owner closes
 the gateway (``shutdown``) and reports ``failed`` in process; the thread may be unreadable and is
 never resumed. Checkpoints are process-local (ADR 0024 D9).
@@ -104,6 +122,7 @@ from packages.investigation.dispatch import (
     RETRYABLE_CATEGORIES,
     ActionKind,
     DispatchAction,
+    DispatchError,
     DispatchSignals,
     check_execution_limits,
     final_status,
@@ -133,6 +152,19 @@ from packages.investigation.replanning import (
     FollowUpAuthorizer,
     FollowUpBuildError,
 )
+from packages.investigation.report import (
+    NarrativeDraft,
+    ReportInputs,
+    VerifiedReport,
+    report_digest,
+    report_inputs,
+)
+from packages.investigation.report_composer import (
+    accept_report,
+    candidate_report,
+    draft_record,
+    unavailable_outcome,
+)
 from packages.investigation.state import (
     MAX_CRITIC_ROUNDS,
     MAX_FOLLOW_UP_ROUNDS,
@@ -140,6 +172,7 @@ from packages.investigation.state import (
     STATE_VERSION,
     CritiqueFinding,
     CritiqueRecord,
+    FallbackReason,
     FollowUpApproval,
     FollowUpRoundRecord,
     InvestigationScope,
@@ -176,6 +209,7 @@ from src.orchestration.investigation_checkpoint import load_investigation_state
 from src.orchestration.investigation_graph import InvestigationGraphBuilder
 from src.orchestration.investigation_proposal import InvestigationProposalRun
 from src.orchestration.tool_gateway import (
+    ComposeNarrative,
     DeriveEvidence,
     DocumentResolver,
     DraftFindings,
@@ -201,6 +235,8 @@ OPERATIONS_PER_ATTEMPT = 5
 REVIEW_STEPS_PER_ROUND = 8
 # INV-7, per follow-up: one attempt (no retry), its finish, and its derivation.
 FOLLOW_UP_STEPS = OPERATIONS_PER_ATTEMPT + 2
+# INV-8: the narrative step, ``compose_report``, and ``verify_report``.
+REPORT_STEPS = 3
 
 # Which specialist runs each executable task kind, and the role it must be assigned to (R7).
 _SPECIALISTS: dict[TaskKind, tuple[AgentRole, type[SQLAnalyst] | type[DocumentResearcher]]] = {
@@ -323,7 +359,7 @@ def step_bound(plan: InvestigationPlan) -> int:
         if isinstance(plan, InvestigationPlanV2)
         else 0
     )
-    return SEEDING_STEPS + 1 + per_task + hypotheses + review + CLOSING_STEPS
+    return SEEDING_STEPS + 1 + per_task + hypotheses + review + REPORT_STEPS + CLOSING_STEPS
 
 
 # --- the result -----------------------------------------------------------------------------------
@@ -331,12 +367,17 @@ def step_bound(plan: InvestigationPlan) -> int:
 
 @dataclass(frozen=True)
 class ExecutionResult:
-    """The in-process outcome. ``state`` is ``None`` when the thread could not be read back."""
+    """The in-process outcome. ``state`` is ``None`` when the thread could not be read back.
+
+    ``report`` (INV-8) is the verified report whose digest ``state.report_record`` holds, or
+    ``None`` when none passed verification.
+    """
 
     status: InvestigationStatus
     category: str | None
     state: InvestigationStateView | None
     payloads: Mapping[str, QueryEvidencePayload | DocumentEvidencePayload]
+    report: VerifiedReport | None = None
 
 
 # --- the owner ------------------------------------------------------------------------------------
@@ -364,6 +405,7 @@ class InvestigationExecutionRun:
         new_id: IdSource = _random_hex,
         fingerprint_key: bytes | None = None,
         follow_up_authorizer: FollowUpAuthorizer | None = None,
+        narrative: bool = True,
     ) -> None:
         try:
             check_execution_limits(limits)
@@ -434,6 +476,15 @@ class InvestigationExecutionRun:
         self._cancelled = False
         self._defect = False
         self._used = False
+        # INV-8: the narrative call's untrusted draft and, without one, the reason; the candidate
+        # and the accepted report stay in this process.
+        self._narrative_enabled = narrative is True
+        self._narrative_done = False
+        self._narrative: NarrativeDraft | None = None
+        self._narrative_reason: FallbackReason | None = None
+        self._report_inputs: ReportInputs | None = None
+        self._candidate: VerifiedReport | None = None
+        self._report: VerifiedReport | None = None
         builder = InvestigationGraphBuilder(self._gateway)
         builder.add_step("intake", "intake", self._intake)
         builder.add_step("open_planning", "lifecycle", _status(InvestigationStatus.PLANNING))
@@ -450,6 +501,8 @@ class InvestigationExecutionRun:
         builder.add_step("critique", "critic", self._critique)
         builder.add_step("replan", "supervisor", self._replan)
         builder.add_step("finish", "lifecycle", self._finish)
+        builder.add_step("compose_report", "reporter", self._compose_report)
+        builder.add_step("verify_report", "report_verifier", self._verify_report)
         builder.add_step("terminal", "terminal", self._terminal)
         builder.add_edge(START, "intake")
         for start, end in (
@@ -477,7 +530,9 @@ class InvestigationExecutionRun:
         builder.add_edge("investigate", "dispatch")
         builder.add_edge("critique", "dispatch")
         builder.add_edge("replan", "dispatch")
-        builder.add_edge("finish", "terminal")
+        builder.add_edge("finish", "compose_report")
+        builder.add_edge("compose_report", "verify_report")
+        builder.add_edge("verify_report", "terminal")
         builder.add_edge("terminal", END)
         self._graph = builder.compile()
 
@@ -516,11 +571,21 @@ class InvestigationExecutionRun:
         if terminal is None:
             self._gateway.close("shutdown")
             raise ExecutionRunError("execution_run_failed")
+        record = view.report_record
+        report = self._report
+        if (
+            report is None
+            or record is None
+            or record.verification != "passed"
+            or record.report_sha256 != report_digest(report)
+        ):
+            report = None  # only the report whose digest state records is ever returned
         return ExecutionResult(
             status=terminal.status,
             category=terminal.category,
             state=view,
             payloads=self._gateway.evidence_payloads(view),
+            report=report,
         )
 
     def state(self) -> InvestigationStateView:
@@ -596,6 +661,8 @@ class InvestigationExecutionRun:
             plan = self._handoff.plan
             if isinstance(plan, InvestigationPlanV2) and not self._verdicts_done:
                 return self._finish_round(plan, view, state)
+            if not self._narrative_done:
+                return self._narrative_step(plan, view, state)
             self._gateway.close("completed")
             return self._close_out(view, "internal")
         return self._apply(view, self._operate(action, state))
@@ -922,6 +989,72 @@ class InvestigationExecutionRun:
             evidence_ids=tuple(dict.fromkeys((*derived, *cited))),
             test_task_ids=tests,
         )
+
+    # --- verified report (INV-8) ---------------------------------------------------------------
+
+    def _narrative_step(
+        self, plan: InvestigationPlan, view: InvestigationStateView, state: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """At most one narrative call, before the gateway closes; otherwise record why not."""
+        self._narrative_done = True
+        if not isinstance(plan, InvestigationPlanV2):
+            self._narrative_reason = "narrative_not_applicable"
+            return self._snapshot()
+        if not self._narrative_enabled:
+            self._narrative_reason = "narrative_disabled"
+            return self._snapshot()
+        try:
+            status = final_status(view, cancelled=False, defect=False)
+        except DispatchError:
+            status = InvestigationStatus.FAILED
+        if status not in {InvestigationStatus.COMPLETED, InvestigationStatus.COMPLETED_PARTIAL}:
+            self._narrative_reason = "narrative_not_eligible"
+            return self._snapshot()
+        readiness = self._gateway.narrative_readiness()
+        if readiness != "ready":
+            self._narrative_reason = (
+                "narrative_model_unavailable"
+                if readiness == "model_unavailable"
+                else "narrative_budget_unavailable"
+                if readiness == "budget_unavailable"
+                else "narrative_not_eligible"
+            )
+            return self._snapshot()
+        request = ComposeNarrative(role=AgentRole.BUSINESS_INVESTIGATOR)
+        result = self._gateway.compose_narrative(state, request)
+        if result.refusal is None and result.review_status == "valid":
+            self._narrative = result.narrative
+        elif result.refusal is None and result.review_status == "invalid":
+            self._narrative_reason = "narrative_invalid"
+        else:  # a provider failure, an over-large prompt, or a refusal (the run may be stopping)
+            self._narrative_reason = "narrative_unavailable"
+        return self._apply(view, result)
+
+    def _compose_report(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """The guarded ``reporter``: compose one candidate in process, record its digest only."""
+        try:
+            view = restore_state(state)
+            inputs = report_inputs(view, self._gateway.evidence_payloads(view))
+            reason = self._narrative_reason
+            if reason is None and self._narrative is None:
+                reason = "narrative_not_eligible"  # the run stopped before the narrative step
+            candidate = candidate_report(inputs, self._narrative, reason)
+        except Exception:  # a composition defect never changes the run's status
+            inputs, candidate = None, None
+        self._narrative = None
+        self._report_inputs, self._candidate = inputs, candidate
+        return {"report_draft": draft_record(candidate).model_dump(mode="json")}
+
+    def _verify_report(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """The guarded ``report_verifier``: accept the verified report or its verified fallback."""
+        inputs, candidate = self._report_inputs, self._candidate
+        self._report_inputs = self._candidate = None
+        try:
+            outcome = unavailable_outcome() if inputs is None else accept_report(inputs, candidate)
+        except Exception:  # a verification defect never changes the run's status
+            outcome = unavailable_outcome()
+        self._report = outcome.report
+        return {"report_record": outcome.record.model_dump(mode="json")}
 
     def _signals(self, view: InvestigationStateView, cancelled: bool) -> DispatchSignals:
         running = [task_id for task_id, record in view.tasks.items() if record.status == "running"]

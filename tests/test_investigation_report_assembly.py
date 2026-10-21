@@ -209,7 +209,7 @@ def test_the_body_is_deterministic(churn: Any) -> None:
 
 def _ended(status: str) -> Any:
     plan = churn_plan()
-    tasks = {task.id: task_record(task.id, "cancelled") for task in plan.tasks}
+    tasks: dict[str, Any] = {task.id: task_record(task.id, "cancelled") for task in plan.tasks}
     return restore_state(running_state(plan=plan, status=status, **tasks))
 
 
@@ -228,7 +228,7 @@ def test_a_stopped_run_recommends_a_rerun_and_has_no_facts(status: str, code: st
 
 def test_a_run_without_eligible_rules_says_so() -> None:
     plan = churn_plan()
-    tasks = {task.id: task_record(task.id, "succeeded", 1) for task in plan.tasks}
+    tasks: dict[str, Any] = {task.id: task_record(task.id, "succeeded", 1) for task in plan.tasks}
     body = compose_body(
         report_inputs(restore_state(running_state(plan=plan, status="completed", **tasks)), {})
     )

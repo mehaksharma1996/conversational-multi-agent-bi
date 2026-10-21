@@ -237,7 +237,7 @@ def test_11_a_contradictory_claim_is_rejected(churn: Any) -> None:
 
 def _cancelled() -> tuple[Any, VerifiedReport]:
     plan = churn_plan()
-    tasks = {task.id: task_record(task.id, "cancelled") for task in plan.tasks}
+    tasks: dict[str, Any] = {task.id: task_record(task.id, "cancelled") for task in plan.tasks}
     inputs = report_inputs(restore_state(running_state(plan=plan, status="cancelled", **tasks)), {})
     body = compose_body(inputs)
     report = assemble_report(
