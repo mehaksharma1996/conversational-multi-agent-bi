@@ -672,13 +672,14 @@ The text scan masks data slots and the reviewed disclaimers, then looks for caus
 wording, digits or number words, and comparatives outside a comparison. It is defence in depth;
 the structural checks and template-only text are primary.
 
-**Recommendations** (`inv8-recommendation-rules-v1`) are investigation-method rules only:
+**Recommendations** (`inv8-recommendation-rules-v2`) are investigation-method rules only:
 - `controlled_evaluation` (labelled unproven);
 - `collect_missing_data`;
 - `complete_test`;
 - `reconcile_document`;
 - `review_follow_up`;
-- `rerun_investigation`.
+- `rerun_investigation` (conditional on resolving a documented blocker when one stopped the
+  run).
 
 Each cites its trigger. With none, the report says so (`no_eligible_recommendation`).
 

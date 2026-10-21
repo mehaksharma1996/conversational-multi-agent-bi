@@ -409,5 +409,27 @@ Deviations and choices:
 - Test fixtures bill one token per byte. The churn narrative prompt (about 5.4k bytes) needs a
   12k per-call cap in tests; over the cap the call is refused before it runs (`unavailable`), as
   designed.
-- Follow-up issue to file (needs approval): register the INV-6 planning prompt as a module target.
+- Follow-up: #185 registers the INV-6 planning prompt with a complete provenance fingerprint.
+
+## Maintainer review corrections (PR #184, 2026-10-21)
+
+- **`observational_data_only`.** The note now reads "Every measurement is an observational
+  comparison of recorded data and shows association only." It no longer asserts that no
+  controlled comparison was performed. `causation_not_established` remains a separate, mandatory
+  note in every report.
+- **`rerun_investigation` (rules v2).** The catalogue still has six rules.
+  - When a documented blocker stopped the run, the recommendation carries `blocker` and cites it
+    in `limitation_codes`. Its wording says to resolve the named restriction first and run again
+    only after that, never while it remains.
+  - A blocker is a security, authorization, policy, query-safety, resource, provider-configuration,
+    or approval category. It is taken from the first investigation-terminal refusal's category,
+    else, for a `failed` run, from the terminal record's (an earlier recoverable task failure is
+    never the blocker of an owner-cancelled or exhausted run).
+  - Cancellation, budget exhaustion, timeouts, and provider or internal failures keep the plain
+    rerun.
+  - The verifier rejects an unconditional rerun for a blocked run (`recommendation_unsupported`,
+    `rendered_text_mismatch`).
+- **Tests.** `tests/test_investigation_report_review_corrections.py`, including two real-graph
+  runs (a mid-run authority revocation and an unadmitted provider).
+- **Unchanged.** The narrative prompt module, the registry hashes, and the workflow baseline.
 

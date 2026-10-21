@@ -510,8 +510,13 @@ deterministic fallback. Details are in `docs/architecture/investigation-workflow
    - The structural controls are primary; the scan is supplementary.
    - Every report states that observational evidence cannot establish causation.
 4. **Method recommendations only (V5).**
-   - A reviewed, versioned catalogue (`inv8-recommendation-rules-v1`) of six investigation-method
+   - A reviewed, versioned catalogue (`inv8-recommendation-rules-v2`) of six investigation-method
      rules, each fired by a verified trigger and citing it.
+   - `rerun_investigation` is conditional (PR #184 review, v2): when a documented security,
+     authorization, policy, query-safety, resource, provider-configuration, or approval
+     restriction stopped the run, the recommendation names it and says to run again only after
+     it is resolved. The blocker comes from the first investigation-terminal refusal's category,
+     else, for a `failed` run, the terminal record's.
    - It is not a business playbook. A rule that touches an intervention is labelled unproven, and
      an unknown rule is `playbook_rule_unknown`.
 5. **Descriptions from approved specs (V6).** Hypotheses are described from their approved typed
@@ -560,7 +565,8 @@ deterministic fallback. Details are in `docs/architecture/investigation-workflow
   rejected.
 - The report lives in process only (#144, INV-11).
 - The recommendation catalogue is new reviewed content and needs maintainer review like a prompt.
-- Registering the INV-6 planning prompt is a follow-up.
+- Registering the INV-6 planning prompt with a complete provenance fingerprint (module source,
+  evaluated instruction text including imported vocabulary, and a rendered sample) is #185.
 
 ## Alternatives rejected
 

@@ -20,8 +20,7 @@ A module that renders a model prompt (`render_*prompt`) is registered as a whole
 (`package.module`, no `:`), because its instructions, markers, and layout live at module level and a
 function hash alone would be a partial fingerprint. The only exception is the INV-6 planning prompt
 (`src/orchestration/planning_prompt.py`), whose rendered prompts are pinned by
-`tests/test_investigation_planning_prompt.py`; registering it is a separate reviewed change (ADR 0024
-Amendment 6). Adding a registry entry changes the registry file, whose digest is critical provenance
+`tests/test_investigation_planning_prompt.py`; registering it with a complete provenance fingerprint is #185 (ADR 0024 Amendment 6). Adding a registry entry changes the registry file, whose digest is critical provenance
 of the scripted workflow baseline: update it with `python -m tests.e2e.workflow_baseline_runner
 --update --justification "..."` and confirm that only the digest and the review record changed.
 
