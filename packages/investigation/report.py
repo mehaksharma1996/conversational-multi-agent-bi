@@ -42,7 +42,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Annotated, Literal, get_args
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, Strict, StringConstraints, model_validator
 
@@ -64,6 +64,7 @@ from packages.investigation.evidence import (
 from packages.investigation.hypotheses import (
     Direction,
     EqualityFilter,
+    FollowUpTask,
     Hypothesis,
     HypothesisTestSpec,
     InvestigationPlanV2,
@@ -74,6 +75,7 @@ from packages.investigation.hypotheses import (
     resolve_any,
 )
 from packages.investigation.interim_report import (
+    LIMITATION_TEMPLATES,
     MAX_REPORT_CITATIONS,
     MAX_REPORT_LIMITATIONS,
     MAX_REPORT_TASKS,
@@ -368,7 +370,7 @@ Claim = Annotated[
 
 class NarrativeSection(_Model):
     name: SectionName
-    claims: tuple[Claim, ...] = Field(min_length=1, max_length=MAX_SECTION_CLAIMS)
+    claims: tuple[Claim, ...] = Field(default=(), max_length=MAX_SECTION_CLAIMS)
 
 
 class NarrativeDraft(_Model):
@@ -715,6 +717,13 @@ def describe_hypothesis(view: InvestigationStateView, hypothesis: Hypothesis) ->
         if isinstance(spec, HypothesisTestSpec) and spec.method == "document_check":
             parts.append(f"document check {task_id}")
             continue
+        if isinstance(task, FollowUpTask) and spec.stratification is not None:
+            cuts = ", ".join(str(cut) for cut in spec.stratification.cut_points)
+            parts.append(
+                f"follow-up {task_id}: the same test standardized over "
+                f"{spec.stratification.field} bands cut at {cuts}"
+            )
+            continue
         try:
             parts.append(_describe_test(resolve_any(plan, task)))
         except SpecIncomplete:
@@ -952,7 +961,359 @@ def compose_body(inputs: ReportInputs) -> ReportBody:
     )
 
 
+# --- S3: reviewed templates and rendering --------------------------------------------------------
+
+NARRATIVE_PROMPT_VERSION = "inv8-narrative-prompt-v1"
+
+_STATUS_PHRASES: dict[str, str] = {
+    "completed": "The investigation ended with every task completed.",
+    "completed_partial": "The investigation ended with some tasks incomplete.",
+    "cancelled": "The investigation ended early: it was cancelled.",
+    "budget_exhausted": "The investigation ended early: its budget ran out.",
+    "failed": "The investigation failed, so no evidence is reported.",
+}
+_VERDICT_PHRASES: dict[str, str] = {
+    "supported_association": (
+        "the data shows an association in the claimed direction, which does not establish causation"
+    ),
+    "refuted": "the data does not show the claimed effect",
+    "untestable": "it could not be tested with the available evidence",
+}
+_FINDING_PHRASES: dict[str, str] = {
+    "numeric_mismatch": "a stated number that differs from the verified evidence",
+    "direction_mismatch": "a stated direction that disagrees with the verified evidence",
+    "causal_overreach": "a causal claim that the observational evidence does not support",
+    "document_contradiction": "a document claim that contradicts the verified data",
+    "unsupported_reference": "a citation that does not belong to this investigation",
+    "evidence_not_bound": "a citation bound to another hypothesis",
+    "document_evidence_unverified": "a document citation that could not be verified",
+    "insufficient_evidence": "a claim about a hypothesis the evidence could not test",
+    "conflicting_evidence": "conflicting evidence for a hypothesis",
+    "incomplete_coverage": "incomplete review coverage",
+    "missing_stratification": "a coverage gap that needs a stratified follow-up test",
+}
+_TASK_PHRASES: dict[str, str] = {
+    "succeeded": "completed",
+    "failed": "failed",
+    "skipped": "was skipped",
+    "refused": "was refused by policy",
+    "cancelled": "was closed before it finished",
+}
+_DIRECTION_PHRASES: dict[str, str] = {
+    "increase": "an increase",
+    "decrease": "a decrease",
+    "no_change": "no change",
+}
+NOTE_TEMPLATES: dict[str, str] = {
+    "causation_not_established": (
+        "Observational evidence can show association only; it cannot establish causation."
+    ),
+    "observational_data_only": (
+        "Every measurement comes from observational data; no controlled comparison was run."
+    ),
+    "hypothesis_untested": "This hypothesis was not tested: the data it needs was not available.",
+    "hypothesis_not_evaluated": "The investigation stopped before this hypothesis was evaluated.",
+    "intervention_unproven": (
+        "Any intervention a recommendation mentions is unproven and requires validation."
+    ),
+    "no_eligible_recommendation": "No recommendation met its evidence condition.",
+    "narrative_fallback": "This narrative is the deterministic fallback, not model-assisted text.",
+}
+UNPROVEN_SUFFIX = "This is a proposed action, not a proven intervention."
+# Reviewed wording that names causation or a task mechanism on purpose. The text scan removes
+# exactly these phrases (and data slots) before looking for causal or numeric language.
+APPROVED_PHRASES: tuple[str, ...] = (
+    NOTE_TEMPLATES["causation_not_established"],
+    _VERDICT_PHRASES["supported_association"],
+    _FINDING_PHRASES["causal_overreach"],
+    LIMITATION_TEMPLATES[LimitationCode.DEPENDENCY_FAILED],
+    UNPROVEN_SUFFIX,
+)
+
+
+@dataclass(frozen=True)
+class Rendered:
+    """A sentence and the data values inserted into it (masked by the text scan)."""
+
+    text: str
+    slots: tuple[str, ...]
+
+
+def _fact_label(fact: ReportFact) -> tuple[str, list[str]]:
+    slots = [fact.metric_label]
+    text = fact.metric_label
+    if fact.filters:
+        parts = []
+        for item in fact.filters:
+            slots += [item.field, item.value]
+            parts.append(f"{item.field} = {item.value}")
+        text += " where " + ", ".join(parts)
+    return text, slots
+
+
+def _render_fact(fact: ReportFact) -> Rendered:
+    label, slots = _fact_label(fact)
+    prefix = ""
+    if fact.standardized_by is not None:
+        cuts = ", ".join(str(cut) for cut in fact.standardized_by.cut_points)
+        prefix = (
+            f"standardized to the {fact.baseline_label} composition over "
+            f"{fact.standardized_by.field} bands cut at {cuts}, "
+        )
+        slots += [fact.baseline_label, fact.standardized_by.field, cuts]
+    text = (
+        f"Measurement {fact.id}: {prefix}{label}: "
+        f"{fact.baseline_label} {fact.baseline.display} and {fact.comparison_label} "
+        f"{fact.comparison.display}, a difference of {fact.difference}"
+    )
+    slots += [
+        fact.baseline_label,
+        fact.baseline.display,
+        fact.comparison_label,
+        fact.comparison.display,
+        fact.difference,
+    ]
+    if fact.percentage_points is not None:
+        text += f" ({fact.percentage_points} percentage points"
+        slots.append(fact.percentage_points)
+        if fact.relative_change is not None:
+            text += f", {fact.relative_change} percent relative to {fact.baseline_label}"
+            slots += [fact.relative_change, fact.baseline_label]
+        text += ")"
+    text += f"; observed {_DIRECTION_PHRASES[fact.direction]}."
+    slots.append(fact.id)
+    return Rendered(text, tuple(slots))
+
+
+def _limitation_text(code: str) -> str | None:
+    if code in NOTE_TEMPLATES:
+        return NOTE_TEMPLATES[code]
+    if code in LIMITATION_CODES:
+        return LIMITATION_TEMPLATES[LimitationCode(code)]
+    return None
+
+
+def render_claim(claim: object, body: ReportBody) -> Rendered | None:
+    """The reviewed sentence for ``claim`` over ``body``; ``None`` if it names nothing real."""
+    facts = {item.id: item for item in body.facts}
+    if isinstance(claim, ScopeClaim):
+        counts = (str(claim.hypotheses), str(claim.tested), str(claim.facts))
+        return Rendered(
+            f"{_STATUS_PHRASES[claim.status]} Hypotheses evaluated: {counts[0]}; tested: "
+            f"{counts[1]}; verified measurements: {counts[2]}.",
+            counts,
+        )
+    if isinstance(claim, FactClaim):
+        fact = facts.get(claim.fact_id)
+        return _render_fact(fact) if fact is not None else None
+    if isinstance(claim, ComparisonClaim):
+        first, second = (facts.get(item) for item in claim.fact_ids)
+        if first is None or second is None:
+            return None
+        (left, left_slots), (right, right_slots) = _fact_label(first), _fact_label(second)
+        relation = (
+            "equal in magnitude to"
+            if claim.relation == "equal"
+            else f"{claim.relation} in magnitude than"
+        )
+        return Rendered(
+            f"The difference for {left} ({first.id}) is {relation} the difference for {right} "
+            f"({second.id}).",
+            (*left_slots, first.id, *right_slots, second.id),
+        )
+    if isinstance(claim, VerdictClaim):
+        row = next(
+            (item for item in body.hypotheses if item.hypothesis_id == claim.hypothesis_id), None
+        )
+        if row is None:
+            return None
+        return Rendered(
+            f"Hypothesis {row.hypothesis_id} ({row.description}): "
+            f"{_VERDICT_PHRASES[claim.verdict]}.",
+            (row.hypothesis_id, row.description),
+        )
+    if isinstance(claim, FindingClaim):
+        if claim.round >= len(body.critiques):
+            return None
+        findings = body.critiques[claim.round].findings
+        if claim.index >= len(findings):
+            return None
+        finding = findings[claim.index]
+        text = f"Critique round {claim.round} recorded {_FINDING_PHRASES[claim.code]}"
+        slots = [str(claim.round)]
+        if finding.hypothesis_id is not None:
+            text += f" for hypothesis {finding.hypothesis_id}"
+            slots.append(finding.hypothesis_id)
+        if finding.task_id is not None:
+            text += f" on task {finding.task_id}"
+            slots.append(finding.task_id)
+        return Rendered(text + ".", tuple(slots))
+    if isinstance(claim, TaskClaim):
+        return Rendered(f"Task {claim.task_id} {_TASK_PHRASES[claim.status]}.", (claim.task_id,))
+    if isinstance(claim, LimitationClaim):
+        wording = _limitation_text(claim.code)
+        if wording is None:
+            return None
+        if claim.task_id is not None:
+            return Rendered(f"Task {claim.task_id}: {wording}", (claim.task_id,))
+        if claim.hypothesis_id is not None:
+            return Rendered(f"Hypothesis {claim.hypothesis_id}: {wording}", (claim.hypothesis_id,))
+        return Rendered(wording, ())
+    if isinstance(claim, RecommendationClaim):
+        rule = RECOMMENDATION_RULES.get(claim.rule_id)
+        if rule is None:
+            return None
+        match = next(
+            (item for item in body.recommendations if item.id == claim.recommendation_id), None
+        )
+        slots = [claim.recommendation_id]
+        text = f"Recommendation {claim.recommendation_id}"
+        if match is not None and match.hypothesis_id is not None:
+            text += f" (hypothesis {match.hypothesis_id})"
+            slots.append(match.hypothesis_id)
+        text += f": {rule[0]}"
+        if rule[1]:
+            text += " " + UNPROVEN_SUFFIX
+        return Rendered(text, tuple(slots))
+    if isinstance(claim, NoRecommendationClaim):
+        return Rendered(NOTE_TEMPLATES["no_eligible_recommendation"], ())
+    return None
+
+
+def render_sections(draft: NarrativeDraft, body: ReportBody) -> tuple[ReportSection, ...]:
+    """Every claim rendered by its reviewed template; ``ReportError`` if one names nothing."""
+    sections: list[ReportSection] = []
+    for section in draft.sections:
+        sentences = []
+        for claim in section.claims:
+            rendered = render_claim(claim, body)
+            if rendered is None:
+                raise ReportError("claim_unrenderable")
+            sentences.append(Sentence(claim=claim, text=rendered.text))
+        sections.append(ReportSection(name=section.name, sentences=tuple(sentences)))
+    return tuple(sections)
+
+
+# Which claim types each section may hold.
+SECTION_CLAIMS: dict[str, frozenset[str]] = {
+    "executive_summary": frozenset(
+        {
+            "scope",
+            "fact",
+            "comparison",
+            "verdict",
+            "limitation",
+            "recommendation",
+            "no_recommendation",
+        }
+    ),
+    "findings": frozenset({"fact", "comparison"}),
+    "hypotheses": frozenset({"verdict"}),
+    "critique": frozenset({"finding"}),
+    "limitations": frozenset({"limitation", "task"}),
+    "recommendations": frozenset({"recommendation", "no_recommendation"}),
+}
+# Critique findings a narrative must state: those that bear on the conclusions.
+MATERIAL_DISPOSITIONS = frozenset(
+    {"retain_data_verdict", "retain_limitation", "accept_limitation", "follow_up"}
+)
+
+
+def fallback_narrative(body: ReportBody, *, fallback: bool = True) -> NarrativeDraft:
+    """The deterministic narrative: every fact, verdict, material finding, limitation, note, and
+    recommendation, in report order. No model call; the same checks apply as to a model's."""
+    notes = body.notes(fallback=fallback)
+    tested = sum(row.status == "tested" for row in body.hypotheses)
+    summary: list[Any] = [
+        ScopeClaim(
+            status=body.status,
+            hypotheses=len(body.hypotheses),
+            tested=tested,
+            facts=len(body.facts),
+        )
+    ]
+    summary += [
+        VerdictClaim(hypothesis_id=row.hypothesis_id, verdict=row.verdict)
+        for row in body.hypotheses
+        if row.verdict is not None and row.status == "tested"
+    ]
+    summary.append(LimitationClaim(code="causation_not_established"))
+    findings = [FactClaim(fact_id=fact.id, direction=fact.direction) for fact in body.facts]
+    verdicts = [
+        VerdictClaim(hypothesis_id=row.hypothesis_id, verdict=row.verdict)
+        for row in body.hypotheses
+        if row.verdict is not None
+    ]
+    critique = [
+        FindingClaim(round=record.round, index=index, code=finding.code)
+        for record in body.critiques
+        for index, finding in enumerate(record.findings)
+        if finding.disposition in MATERIAL_DISPOSITIONS
+    ]
+    limitations: list[Any] = [
+        LimitationClaim(code=item.code.value, task_id=item.task_id) for item in body.limitations
+    ]
+    limitations += [
+        LimitationClaim(code=note.code, hypothesis_id=note.hypothesis_id) for note in notes
+    ]
+    recommendations: list[Any] = [
+        RecommendationClaim(recommendation_id=item.id, rule_id=item.rule_id)
+        for item in body.recommendations
+    ] or [NoRecommendationClaim()]
+    return NarrativeDraft(
+        sections=(
+            NarrativeSection(name="executive_summary", claims=tuple(summary)),
+            NarrativeSection(name="findings", claims=tuple(findings)),
+            NarrativeSection(name="hypotheses", claims=tuple(verdicts)),
+            NarrativeSection(name="critique", claims=tuple(critique)),
+            NarrativeSection(name="limitations", claims=tuple(limitations)),
+            NarrativeSection(name="recommendations", claims=tuple(recommendations)),
+        )
+    )
+
+
+def assemble_report(
+    body: ReportBody,
+    draft: NarrativeDraft,
+    *,
+    fallback_reason: FallbackReason | None,
+    violations: tuple[ReportViolationCode, ...] = (),
+) -> VerifiedReport:
+    """The report object for ``body`` with ``draft`` rendered. Verification is separate."""
+    fallback = fallback_reason is not None
+    return VerifiedReport(
+        investigation_status=body.status,
+        availability=availability_for(body.status),
+        mode="deterministic_fallback" if fallback else "model_assisted",
+        fallback_reason=fallback_reason,
+        narrative_violations=violations,
+        narrative_prompt_version=None if fallback else NARRATIVE_PROMPT_VERSION,
+        scope_digest=body.scope_digest,
+        tasks=body.tasks,
+        query_tables=body.query_tables,
+        citations=body.citations,
+        critiques=body.critiques,
+        limitations=body.limitations,
+        notes=body.notes(fallback=fallback),
+        facts=body.facts,
+        hypotheses=body.hypotheses,
+        recommendations=body.recommendations,
+        sections=render_sections(draft, body),
+    )
+
+
 __all__ = [
+    "APPROVED_PHRASES",
+    "MATERIAL_DISPOSITIONS",
+    "NARRATIVE_PROMPT_VERSION",
+    "NOTE_TEMPLATES",
+    "SECTION_CLAIMS",
+    "UNPROVEN_SUFFIX",
+    "Rendered",
+    "assemble_report",
+    "fallback_narrative",
+    "render_claim",
+    "render_sections",
     "CONFLICT_CODES",
     "RECOMMENDATION_RULES",
     "ReportBody",

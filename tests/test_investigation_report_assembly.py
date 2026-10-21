@@ -149,7 +149,10 @@ def test_hypothesis_rows_carry_verdicts_and_spec_descriptions(churn: Any) -> Non
     for row in rows.values():
         assert all(statement not in row.description for statement in statements)
     assert rows["h1"].description.startswith("rate of ")
-    assert "standardized over tenure_months_start bands cut at 6" in rows["h1"].description
+    assert (
+        "follow-up h1_rate_r1s0: the same test standardized over tenure_months_start bands cut at 6"
+        in rows["h1"].description
+    )
     assert rows["h3"].description.startswith("no approved test")
 
 
