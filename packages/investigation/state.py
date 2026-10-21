@@ -141,6 +141,8 @@ StateErrorCode = Literal[
     # INV-7: a critique or follow-up round disagrees with the plan, evidence, or its approval.
     "critique_mismatch",
     "follow_up_unbound",
+    # INV-8: a report record disagrees with its draft or the lifecycle status.
+    "report_mismatch",
     # Raised when reading a checkpoint (``src/orchestration/investigation_checkpoint.py``).
     "checkpoint_unreadable",
     "checkpointer_not_strict",
@@ -344,6 +346,8 @@ GatewayTool = Literal[
     "draft_findings",
     "review_findings",
     "open_follow_up_round",
+    # INV-8: the owner-only, bounded narrative call for the verified report.
+    "compose_narrative",
 ]
 DecisionResult = Literal["succeeded", "refused", "failed", "cancelled"]
 
@@ -621,6 +625,115 @@ class FollowUpRoundRecord(_State):
             or self.approval.follow_up_digest != self.follow_up_digest
         ):
             raise ValueError("the approval binds this round's exact task set")
+        return self
+
+
+# --- INV-8: verified report records -------------------------------------------------------------
+
+# The report body lives in process (``packages/investigation/report.py``); state keeps only what
+# was composed and what verification decided, as codes, counts, and a digest of the canonical body.
+ReportMode = Literal["model_assisted", "deterministic_fallback"]
+ReportAvailability = Literal["complete", "partial", "codes_only"]
+FallbackReason = Literal[
+    "narrative_not_applicable",  # a v1 plan: no hypotheses, no narrative call
+    "narrative_not_eligible",  # the run did not complete normally
+    "narrative_disabled",  # the owner was configured without a narrative call
+    "narrative_model_unavailable",  # no admissible bounded model
+    "narrative_budget_unavailable",  # the ledger had no room for the full reservation
+    "narrative_unavailable",  # provider failure, timeout, or an over-large prompt
+    "narrative_invalid",  # malformed output or a refusal
+    "narrative_rejected",  # the narrative failed verification
+]
+ReportViolationCode = Literal[
+    "schema_invalid",
+    "scope_mismatch",
+    "status_misrepresented",
+    "section_missing",
+    "report_inconsistent",
+    "numeric_unsupported",
+    "numeric_mismatch",
+    "unsupported_comparison",
+    "citation_unknown",
+    "citation_stale",
+    "citation_misattributed",
+    "evidence_omitted",
+    "causal_claim",
+    "recommendation_unsupported",
+    "recommendation_omitted",
+    "playbook_rule_unknown",
+    "verdict_mismatch",
+    "hypothesis_omitted",
+    "limitation_missing",
+    "limitation_unsupported",
+    "finding_mismatch",
+    "finding_omitted",
+    "claim_contradiction",
+    "task_status_misrepresented",
+    "rendered_text_mismatch",
+]
+MAX_REPORT_VIOLATIONS = 25
+ReportViolations = Annotated[
+    tuple[ReportViolationCode, ...], Field(default=(), max_length=MAX_REPORT_VIOLATIONS)
+]
+
+
+def _report_mode_consistent(
+    mode: str, reason: str | None, violations: tuple[str, ...], digest: str | None
+) -> None:
+    if len(set(violations)) != len(violations):
+        raise ValueError("violation codes are unique")
+    if (mode == "unavailable") != (digest is None):
+        raise ValueError("only an unavailable report has no digest")
+    if mode == "model_assisted" and (reason is not None or violations):
+        raise ValueError("a model-assisted report has no fallback reason")
+    if mode == "deterministic_fallback" and reason is None:
+        raise ValueError("a fallback states its reason")
+    if mode != "unavailable" and bool(violations) != (reason == "narrative_rejected"):
+        raise ValueError("only a rejected narrative carries violation codes")
+
+
+class ReportDraftRecord(_State):
+    """What ``compose_report`` composed (writer ``reporter``): the candidate's mode, the reason it
+    is a fallback, the narrative's violation codes, and the candidate's SHA-256. ``unavailable``
+    means composition itself failed (a defect, caught so the run status is unchanged)."""
+
+    mode: ReportMode | Literal["unavailable"]
+    fallback_reason: FallbackReason | None = None
+    violations: ReportViolations
+    report_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> ReportDraftRecord:
+        _report_mode_consistent(
+            self.mode, self.fallback_reason, self.violations, self.report_sha256
+        )
+        return self
+
+
+class ReportRecord(_State):
+    """What ``verify_report`` decided (writer ``report_verifier``). ``passed`` names the report
+    returned in process by its SHA-256; ``failed`` returns no report. Never text or numbers."""
+
+    verification: Literal["passed", "failed"]
+    mode: ReportMode | Literal["unavailable"]
+    availability: ReportAvailability | None = None
+    fallback_reason: FallbackReason | None = None
+    violations: ReportViolations
+    facts: StrictCount = Field(default=0, ge=0, le=64)
+    hypotheses: StrictCount = Field(default=0, ge=0, le=8)
+    recommendations: StrictCount = Field(default=0, ge=0, le=64)
+    report_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> ReportRecord:
+        passed = self.verification == "passed"
+        if passed != (self.mode != "unavailable") or passed != (self.availability is not None):
+            raise ValueError("only a passed report has a mode and availability")
+        if not passed and (self.facts or self.hypotheses or self.recommendations):
+            raise ValueError("a failed report has no counts")
+        _report_mode_consistent(
+            self.mode, self.fallback_reason, self.violations, self.report_sha256
+        )
         return self
 
 
@@ -974,6 +1087,9 @@ reduce_scope = _write_once(InvestigationScope)
 reduce_plan_approval = _write_once(PlanApprovalRecord)
 reduce_terminal = _write_once(TerminalRecord)
 reduce_proposal_record = _write_once(ProposalRecord)
+# INV-8: written once each, after ``finish`` and before ``terminal``.
+reduce_report_draft = _write_once(ReportDraftRecord)
+reduce_report_record = _write_once(ReportRecord)
 
 
 Writer = Literal[
@@ -985,6 +1101,9 @@ Writer = Literal[
     "terminal",
     "investigator",
     "critic",
+    # INV-8: the report composer and, separately, its verifier.
+    "reporter",
+    "report_verifier",
 ]
 
 # Written by ``guarded_node`` alongside every validated update, never by a step. It has no reducer,
@@ -1011,6 +1130,8 @@ class InvestigationState(TypedDict, total=False):
     verdicts: Annotated[dict[str, dict[str, Any]], reduce_verdicts]
     critiques: Annotated[list[dict[str, Any]], reduce_critiques]
     follow_up_rounds: Annotated[list[dict[str, Any]], reduce_follow_up_rounds]
+    report_draft: Annotated[dict[str, Any], reduce_report_draft]
+    report_record: Annotated[dict[str, Any], reduce_report_record]
     step_writer: Writer
 
 
@@ -1030,6 +1151,8 @@ REDUCERS: dict[str, Reducer] = {
     "verdicts": reduce_verdicts,
     "critiques": reduce_critiques,
     "follow_up_rounds": reduce_follow_up_rounds,
+    "report_draft": reduce_report_draft,
+    "report_record": reduce_report_record,
 }
 
 _UNSET: dict[str, Any] = {
@@ -1061,6 +1184,9 @@ CHANNEL_OWNERS: dict[str, Writer] = {
     # INV-7: the Critic's validated round records; follow-up rounds belong to the Supervisor.
     "critiques": "critic",
     "follow_up_rounds": "supervisor",
+    # INV-8: what was composed, and what verification decided, by two different writers.
+    "report_draft": "reporter",
+    "report_record": "report_verifier",
 }
 
 
@@ -1105,6 +1231,8 @@ class InvestigationStateView(_State):
     verdicts: dict[str, VerdictRecord] = Field(default_factory=dict)
     critiques: tuple[CritiqueRecord, ...] = ()
     follow_up_rounds: tuple[FollowUpRoundRecord, ...] = ()
+    report_draft: ReportDraftRecord | None = None
+    report_record: ReportRecord | None = None
     step_writer: Writer | None = None
 
     @field_validator("admitted_follow_ups", mode="before")
@@ -1208,7 +1336,51 @@ def _invariant_violation(view: InvestigationStateView) -> StateErrorCode | None:
         or _follow_up_round_violation(view)
         or _critique_violation(view)
         or _verdict_violation(view)
+        or _report_violation(view)
     )
+
+
+# Terminal statuses an execution run reports on (the interim and verified reports).
+REPORT_STATUSES: frozenset[InvestigationStatus] = frozenset(
+    {
+        InvestigationStatus.COMPLETED,
+        InvestigationStatus.COMPLETED_PARTIAL,
+        InvestigationStatus.FAILED,
+        InvestigationStatus.CANCELLED,
+        InvestigationStatus.BUDGET_EXHAUSTED,
+    }
+)
+
+
+def _report_violation(view: InvestigationStateView) -> StateErrorCode | None:
+    """INV-8: a report exists only for a reportable terminal run; its record follows its draft and
+    keeps the draft's candidate unless verification rejected the narrative or the composition."""
+    draft, record = view.report_draft, view.report_record
+    if draft is None and record is None:
+        return None
+    if view.status not in REPORT_STATUSES or draft is None:
+        return "report_mismatch"
+    if record is None or record.verification == "failed":
+        return None
+    if draft.mode == "unavailable":
+        return "report_mismatch"  # nothing was composed, so nothing can have passed
+    if record.mode == "model_assisted" and (
+        draft.mode != "model_assisted" or record.report_sha256 != draft.report_sha256
+    ):
+        return "report_mismatch"
+    if record.mode == "deterministic_fallback":
+        kept = (
+            draft.mode == "deterministic_fallback"
+            and record.fallback_reason == draft.fallback_reason
+            and record.violations == draft.violations
+            and record.report_sha256 == draft.report_sha256
+        )
+        rejected = record.fallback_reason == "narrative_rejected" and (
+            draft.mode == "model_assisted" or draft.fallback_reason == "narrative_rejected"
+        )
+        if not (kept or rejected):
+            return "report_mismatch"
+    return None
 
 
 def _derived_violation(view: InvestigationStateView) -> StateErrorCode | None:
@@ -1426,6 +1598,11 @@ def _activity_violation(
     """
     if "proposal_record" in update and current.get("status") != InvestigationStatus.PLANNING:
         return "not_running"  # a planning record is written while planning, never later
+    if any(name in update for name in ("report_draft", "report_record")) and (
+        view.status not in REPORT_STATUSES or current.get("terminal") not in ({}, None)
+    ):
+        # INV-8: a report is written after ``finish`` and before the terminal record, only.
+        return "report_mismatch"
     if view.status is InvestigationStatus.RUNNING:
         return None
     terminal = view.status in TERMINAL_STATUSES
