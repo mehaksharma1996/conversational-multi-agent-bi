@@ -163,7 +163,7 @@ def test_7_an_unsupported_recommendation_is_rejected(churn: Any) -> None:
     extra = Recommendation(
         id="r9",
         rule_id="complete_test",
-        rule_version="inv8-recommendation-rules-v1",
+        rule_version="inv8-recommendation-rules-v2",
         hypothesis_id="h1",
         limitation_codes=("test_not_completed",),
     )

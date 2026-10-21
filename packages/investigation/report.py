@@ -59,6 +59,7 @@ from packages.investigation.dispatch import (
     RUN_LIMITATIONS,
     Limitation,
     LimitationCode,
+    first_closing_refusal,
     terminal_category,
 )
 from packages.investigation.evidence import (
@@ -97,6 +98,7 @@ from packages.investigation.interim_report import (
     report_status,
 )
 from packages.investigation.lifecycle import InvestigationStatus
+from packages.investigation.refusals import REFUSAL_CATEGORY
 from packages.investigation.state import (
     MAX_CRITIC_ROUNDS,
     MAX_FINDINGS,
@@ -119,7 +121,8 @@ from packages.investigation.verdicts import hypothesis_tests
 
 REPORT_SCHEMA_VERSION: Literal[1] = 1
 VERIFIED_LABEL: Literal["verified, association only"] = "verified, association only"
-RULES_VERSION: Literal["inv8-recommendation-rules-v1"] = "inv8-recommendation-rules-v1"
+# v2 (PR #184 review): ``rerun_investigation`` is conditional on resolving a documented blocker.
+RULES_VERSION: Literal["inv8-recommendation-rules-v2"] = "inv8-recommendation-rules-v2"
 MAX_FACTS = 2 * MAX_REPORT_TASKS
 MAX_RECOMMENDATIONS = 32
 MAX_NOTES = 32
@@ -162,6 +165,17 @@ NoteCode = Literal[
 NOTE_CODES: frozenset[str] = frozenset(get_args(NoteCode))
 LIMITATION_CODES: frozenset[str] = frozenset(item.value for item in LimitationCode)
 FactDirection = Literal["increase", "decrease", "no_change"]
+# Outcome categories that document a restriction a plain rerun cannot get past: security,
+# authorization, and policy refusals; query safety; absent resources; provider configuration;
+# and a rejected approval (PR #184 review).
+BlockerCategory = Literal[
+    "policy_refused",
+    "unsafe_query",
+    "resource_unavailable",
+    "provider_configuration",
+    "approval_rejected",
+]
+BLOCKER_CATEGORIES: frozenset[str] = frozenset(get_args(BlockerCategory))
 FactOutcome = Literal["supports", "refutes", "below_threshold"]
 HypothesisStatus = Literal["tested", "incomplete", "untested", "not_evaluated"]
 Relationship = Literal["association", "causation"]
@@ -280,11 +294,18 @@ class Recommendation(_Model):
     limitation_codes: tuple[CodeName, ...] = Field(default=(), max_length=8)
     findings: tuple[FindingRef, ...] = Field(default=(), max_length=8)
     unproven: Annotated[bool, Strict()] = False
+    # ``rerun_investigation`` only: the documented restriction that stopped the run. Running the
+    # investigation again is then recommended only after that blocker is resolved.
+    blocker: BlockerCategory | None = None
 
     @model_validator(mode="after")
     def _triggered(self) -> Recommendation:
         if not (self.fact_ids or self.evidence_ids or self.limitation_codes or self.findings):
             raise ValueError("a recommendation cites what triggered it")
+        if self.blocker is not None and (
+            self.rule_id != "rerun_investigation" or self.blocker not in self.limitation_codes
+        ):
+            raise ValueError("only a rerun names a blocker, and it cites the blocker")
         return self
 
 
@@ -419,7 +440,7 @@ class VerifiedReport(_Model):
     fallback_reason: FallbackReason | None = None
     narrative_violations: ReportViolations
     narrative_prompt_version: Annotated[str, StringConstraints(max_length=64)] | None = None
-    rules_version: Literal["inv8-recommendation-rules-v1"] = RULES_VERSION
+    rules_version: Literal["inv8-recommendation-rules-v2"] = RULES_VERSION
     scope_digest: Digest
     tasks: tuple[ReportTaskRow, ...] = Field(min_length=1, max_length=MAX_REPORT_TASKS)
     query_tables: tuple[ReportQueryTable, ...] = Field(default=(), max_length=MAX_REPORT_TASKS)
@@ -830,6 +851,18 @@ RECOMMENDATION_RULES: dict[str, tuple[str, bool]] = {
         False,
     ),
 }
+# ``rerun_investigation`` when a documented blocker stopped the run: conditional on resolving it.
+BLOCKER_PHRASES: dict[str, str] = {
+    "policy_refused": "security, authorization, or policy restriction",
+    "unsafe_query": "query-safety restriction",
+    "resource_unavailable": "resource restriction",
+    "provider_configuration": "model-provider configuration restriction",
+    "approval_rejected": "approval restriction",
+}
+BLOCKED_RERUN_TEXT = (
+    "Resolve the documented {blocker} that stopped the investigation first; run it again only "
+    "after that blocker is resolved, never while it remains."
+)
 
 
 def compose_recommendations(
@@ -888,7 +921,14 @@ def compose_recommendations(
         )
     run_code = RUN_LIMITATIONS.get(InvestigationStatus(inputs.status))
     if run_code is not None:
-        found.append({"rule_id": "rerun_investigation", "limitation_codes": (run_code.value,)})
+        blocker = run_blocker(inputs)
+        found.append(
+            {
+                "rule_id": "rerun_investigation",
+                "limitation_codes": (run_code.value, *((blocker,) if blocker else ())),
+                "blocker": blocker,
+            }
+        )
     return tuple(
         Recommendation.model_validate(
             {
@@ -900,6 +940,26 @@ def compose_recommendations(
         )
         for index, item in enumerate(found, start=1)
     )
+
+
+def run_blocker(inputs: ReportInputs) -> str | None:
+    """The documented restriction that stopped a run, if any (PR #184 review).
+
+    The first investigation-terminal refusal's category decides; without one, a ``failed`` run's
+    terminal record category (the first unsuccessful task's). An owner-cancelled or exhausted run
+    without a closing refusal ended for that reason, so an earlier recoverable task failure is not
+    its blocker. Cancellation, budget exhaustion, timeouts, and provider or internal failures are
+    not blockers: running again may complete the work.
+    """
+    view = inputs.view
+    refusal = first_closing_refusal(view)
+    if refusal is not None:
+        category: str | None = REFUSAL_CATEGORY[refusal]
+    elif inputs.status == InvestigationStatus.FAILED and view.terminal is not None:
+        category = view.terminal.category
+    else:
+        category = None
+    return category if category in BLOCKER_CATEGORIES else None
 
 
 def compose_notes(
@@ -1016,8 +1076,11 @@ NOTE_TEMPLATES: dict[str, str] = {
     "causation_not_established": (
         "Observational evidence can show association only; it cannot establish causation."
     ),
+    # States only what the trusted methodology guarantees: the measurements are observational
+    # comparisons of recorded data (PR #184 review); causation is the separate mandatory note.
     "observational_data_only": (
-        "Every measurement comes from observational data; no controlled comparison was run."
+        "Every measurement is an observational comparison of recorded data and shows association "
+        "only."
     ),
     "hypothesis_untested": "This hypothesis was not tested: the data it needs was not available.",
     "hypothesis_not_evaluated": "The investigation stopped before this hypothesis was evaluated.",
@@ -1179,7 +1242,10 @@ def render_claim(claim: object, body: ReportBody) -> Rendered | None:
         if match is not None and match.hypothesis_id is not None:
             text += f" (hypothesis {match.hypothesis_id})"
             slots.append(match.hypothesis_id)
-        text += f": {rule[0]}"
+        wording = rule[0]
+        if match is not None and match.blocker is not None and claim.rule_id == match.rule_id:
+            wording = BLOCKED_RERUN_TEXT.format(blocker=BLOCKER_PHRASES[match.blocker])
+        text += f": {wording}"
         if rule[1]:
             text += " " + UNPROVEN_SUFFIX
         return Rendered(text, tuple(slots))
@@ -1346,6 +1412,10 @@ def assemble_report(
 
 
 __all__ = [
+    "BLOCKED_RERUN_TEXT",
+    "BLOCKER_CATEGORIES",
+    "BLOCKER_PHRASES",
+    "run_blocker",
     "UNRENDERABLE_TEXT",
     "MAX_NARRATIVE_CHARS",
     "parse_narrative",

@@ -263,7 +263,7 @@ def test_hypothesis_rows_keep_status_and_verdict_together() -> None:
 def test_a_recommendation_cites_its_trigger() -> None:
     with pytest.raises(ValidationError):
         Recommendation(
-            id="r1", rule_id="complete_test", rule_version="inv8-recommendation-rules-v1"
+            id="r1", rule_id="complete_test", rule_version="inv8-recommendation-rules-v2"
         )
 
 
