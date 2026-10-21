@@ -294,6 +294,8 @@ def test_the_checkpoint_schema_changes_only_by_approved_additions() -> None:
         "verdicts",  # INV-6 S1: the investigator's write-once verdict channel
         "critiques",  # INV-7: the Critic's round records
         "follow_up_rounds",  # INV-7: approved follow-up rounds (Supervisor)
+        "report_draft",  # INV-8: the composed report candidate (codes and a digest)
+        "report_record",  # INV-8: the verification outcome (codes and a digest)
     }
     assert set(typing.get_args(state.GatewayTool)) == {
         "begin_attempt",
@@ -307,6 +309,7 @@ def test_the_checkpoint_schema_changes_only_by_approved_additions() -> None:
         "draft_findings",  # INV-7: the transient claim draft (owner-only)
         "review_findings",  # INV-7: the Critic's gap review (owner-only)
         "open_follow_up_round",  # INV-7: an approved round's opening (owner-only)
+        "compose_narrative",  # INV-8: the bounded report narrative call (owner-only)
     }
     assert set(typing.get_args(state.EvidenceRecord.model_fields["kind"].annotation)) == {
         "query",
@@ -318,5 +321,12 @@ def test_the_checkpoint_schema_changes_only_by_approved_additions() -> None:
 def test_no_payload_or_report_type_is_a_state_channel_value() -> None:
     hints = typing.get_type_hints(state.InvestigationState, include_extras=True)
     text = repr(hints)
-    for name in ("EvidencePayload", "InterimReport", "DispatchAction", "UntrustedModelText"):
+    for name in (
+        "EvidencePayload",
+        "InterimReport",
+        "VerifiedReport",
+        "NarrativeDraft",
+        "DispatchAction",
+        "UntrustedModelText",
+    ):
         assert name not in text

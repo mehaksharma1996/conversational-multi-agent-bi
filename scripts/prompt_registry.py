@@ -26,9 +26,16 @@ REGISTRY_PATH = ROOT / "evals" / "v1" / "prompt-registry.json"
 
 
 def resolve(target: str) -> Any:
-    """Import ``module:Qualified.name`` and return the object."""
-    module_name, _, qualified = target.partition(":")
+    """Import ``module:Qualified.name`` and return the object, or the module itself for a module
+    target (``package.module``, no ``:``).
+
+    A module target hashes the whole module: use it when a prompt's instructions, markers, and
+    layout live at module level, so a function hash alone would miss part of the construction.
+    """
+    module_name, separator, qualified = target.partition(":")
     value: Any = importlib.import_module(module_name)
+    if not separator:
+        return value
     for part in qualified.split("."):
         value = getattr(value, part)
     return value

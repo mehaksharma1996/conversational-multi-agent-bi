@@ -186,6 +186,8 @@ def execution(
     limits: BudgetLimits = EXECUTION_LIMITS,
     ledger_clock: Callable[[], float] | None = None,
     authorizer: Any = None,
+    max_input: int = MAX_INPUT,
+    narrative: bool = True,
 ) -> Execution:
     plan = plan or churn_plan()
     spy = SpyRetriever() if retriever is _DEFAULT else retriever
@@ -203,12 +205,13 @@ def execution(
         cancellation=cancellation,
         document_resolver=resolver,
         llm_client=llm,
-        max_input_tokens_per_call=MAX_INPUT,
+        max_input_tokens_per_call=max_input,
         table_resolver=tables,
         sql_executor=executor,
         limits=limits,
         ledger_clock=ledger_clock or (lambda: 0.0),
         follow_up_authorizer=authorizer,
+        narrative=narrative,
     )
     return Execution(
         run=run,

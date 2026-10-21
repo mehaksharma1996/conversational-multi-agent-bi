@@ -56,6 +56,28 @@
       "reason": "Initial registry baseline: the prompts as evaluated by evals/v1 at registration.",
       "approved_by": "repository maintainers",
       "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    },
+    {
+      "id": "investigation-review-prompts",
+      "target": "src.orchestration.review_prompts",
+      "purpose": "INV-7 findings draft (inv7-findings-prompt-v1) and Critic coverage review (inv7-critic-prompt-v1), rendered only by the tool gateway; the module holds every instruction, marker, and layout rule.",
+      "sha256": "920a1b6c70f8369cdce2bbb98a01d71c11163e44e4de06d1f2128b830f667218",
+      "version": 1,
+      "changed": "2026-10-21",
+      "reason": "INV-8 (#141) decision V10: registered as a whole-module target so the fingerprint covers the complete prompt construction. The prompt text is unchanged since INV-7 (#140), which pinned it by tests only. No evaluation baseline exercises it (investigation routing is off, #142).",
+      "approved_by": "user-directed INV-8 engineering work; pending maintainer review",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    },
+    {
+      "id": "investigation-report-narrative",
+      "target": "src.orchestration.report_prompt",
+      "purpose": "INV-8 report narrative (inv8-narrative-prompt-v1): one bounded call that may only choose and order typed claims over listed fact fields and fixed codes; rendered only by the tool gateway, and the report it feeds is accepted only by the deterministic verifier.",
+      "sha256": "493576780f1488a4ec94b7b7227c86729ea2b557ee08613759b5b3f2282158af",
+      "version": 1,
+      "changed": "2026-10-21",
+      "reason": "INV-8 (#141): new model prompt, registered as a whole-module target (decision V10). No evaluation baseline exercises it (investigation routing is off, #142); live narrative evaluation is deferred to #145/#147.",
+      "approved_by": "user-directed INV-8 engineering work; pending maintainer review",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
     }
   ],
   "models": {

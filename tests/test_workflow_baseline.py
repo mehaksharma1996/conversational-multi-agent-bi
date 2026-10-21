@@ -849,11 +849,20 @@ def test_a_first_baseline_needs_a_justification(committed: dict[str, Any]) -> No
 
 def test_the_committed_review_explains_the_baseline(committed: dict[str, Any]) -> None:
     review = committed["review"]
+    # INV-8 (#141): the only accepted change since the initial E1b-2 baseline is the prompt
+    # registry's digest (provenance); every case, outcome, metric, and safety result is unchanged.
     assert review == {
-        "accepted_changes": ["initial baseline"],
+        "accepted_changes": [
+            'provenance.prompt_registry_sha256: "fa1d9f8acb6c643a2c90972b44355cdc2156f64585da914b'
+            '5929b9ac3eb309bd" -> "a44fce458d04c65af0693205b4d997bb025e3b09f55b6979822c82b03'
+            '703b1ad"'
+        ],
         "justification": (
-            "Initial E1b-2 scripted workflow baseline at manifest 2026-10-14.1: 9/9 measured "
-            "cases pass, 9 not measured, all five safety invariants pass."
+            "INV-8 (#141) decision V10: the prompt registry gains whole-module entries for the "
+            "INV-7 review prompts and the INV-8 narrative prompt, so its file digest (provenance "
+            "only) changes. No case, coverage, outcome, dimension, metric, or safety result "
+            "changes; no baseline case exercises these prompts because investigation routing is "
+            "off (#142)."
         ),
     }
 

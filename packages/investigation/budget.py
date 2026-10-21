@@ -286,6 +286,26 @@ class BudgetLedger:
             self._outstanding[reservation.id] = reservation
             return reservation
 
+    def can_authorize(self, request: BudgetRequest) -> bool:
+        """Whether ``authorize(request)`` would succeed now. Reserves, charges, and closes nothing.
+
+        For callers that may skip optional work (INV-8's report narrative) rather than exhaust
+        the ledger; ``authorize`` remains the only way to reserve, and it re-checks.
+        """
+        if not isinstance(request, BudgetRequest):
+            return False
+        with self._lock:
+            if self._closed is not None:
+                return False
+            if self._elapsed() >= self._limits.wall_clock_seconds:
+                return False
+            return all(
+                not getattr(request, name)
+                or self._consumed[name] + self._reserved[name] + getattr(request, name)
+                <= getattr(self._limits, name)
+                for name in _COUNTED
+            )
+
     def remaining_wall_clock(self) -> float:
         """Return the remaining monotonic allowance, or fail closed.
 

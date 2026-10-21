@@ -567,5 +567,8 @@ def test_the_specialist_port_has_no_owner_operation() -> None:
         "draft_findings",
         "review_findings",
         "open_follow_up_round",
+        # INV-8
+        "compose_narrative",
+        "narrative_readiness",
     ):
         assert not hasattr(port, name)

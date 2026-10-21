@@ -486,6 +486,88 @@ recall is an evaluation question, #145 and #147). Standardization is descriptive
 metrics only. A follow-up that does not complete downgrades its hypothesis to `untestable`.
 Checkpoints and replay protection remain process-local. The verified report is INV-8 (#141).
 
+## Amendment 6: the verified report (INV-8, #141, 2026-10-21)
+
+INV-8 makes decision 12 concrete. Every execution run that reaches `finish` ends with a report
+accepted by a deterministic verifier. Routing stays off (#142), and production stays fail-closed:
+without a reviewed bounded adapter no narrative call runs, so production reports are the
+deterministic fallback. Details are in `docs/architecture/investigation-workflow.md` and
+`docs/agents/briefs/141-inv8-verified-reporting.md` (decisions V1 to V10 and their review).
+
+1. **One reporting architecture (V1).** `packages/investigation/report.py` extends the INV-5
+   interim report: the verified report reuses its verified task, query, citation, critique, and
+   limitation rows. `InterimReport` is unchanged.
+2. **Deterministic facts (V2).**
+   - Every number in a report is a fact built from verified derived evidence with exact
+     arithmetic, by one formatter.
+   - The verifier recomputes each fact on a separate path (from the source query payload) and
+     requires equality.
+3. **No model-written text (V3, V4).**
+   - The narrative model may only choose and order typed claims of a finite set. Every sentence
+     is rendered from a reviewed template plus verified values.
+   - The verifier checks each claim's assertions against the evidence, re-renders every sentence
+     (exact equality), and scans the masked text for causal, numeric, and comparative wording.
+   - The structural controls are primary; the scan is supplementary.
+   - Every report states that observational evidence cannot establish causation.
+4. **Method recommendations only (V5).**
+   - A reviewed, versioned catalogue (`inv8-recommendation-rules-v2`) of six investigation-method
+     rules, each fired by a verified trigger and citing it.
+   - `rerun_investigation` is conditional (PR #184 review, v2): when a documented security,
+     authorization, policy, query-safety, resource, provider-configuration, or approval
+     restriction stopped the run, the recommendation names it and says to run again only after
+     it is resolved. The blocker comes from the first investigation-terminal refusal's category,
+     else, for a `failed` run, the terminal record's.
+   - It is not a business playbook. A rule that touches an intervention is labelled unproven, and
+     an unknown rule is `playbook_rule_unknown`.
+5. **Descriptions from approved specs (V6).** Hypotheses are described from their approved typed
+   tests. Amendment 4 decision 4 stands: statements never reach a report.
+6. **One bounded narrative call (V7).**
+   - It is an owner-only gateway operation, `compose_narrative`, made at most once, after the
+     final verdicts and before the gateway closes.
+   - It runs only for a v2 run that would end `completed` or `completed_partial`, and only after a
+     no-charge readiness check (an admissible bounded model, and ledger headroom via
+     `BudgetLedger.can_authorize`).
+   - Its prompt (`inv8-narrative-prompt-v1`) carries fact fields and fixed codes, never rows,
+     documents, or statements.
+   - No retry and no loop.
+7. **Report status (V8).**
+   - The report keeps the run's terminal status, and its `availability` is `complete`, `partial`,
+     or `codes_only`.
+   - Any narrative failure gives the deterministic fallback, with a fixed reason (and a rejected
+     narrative's violation codes).
+   - A stopped run never gets a narrative or reads as complete. A report defect never changes the
+     run status.
+8. **Graph and state (V9).**
+   - Two guarded steps between `finish` and `terminal`: `compose_report` (writer `reporter`,
+     channel `report_draft`) and `verify_report` (writer `report_verifier`, channel
+     `report_record`).
+   - Both channels are write-once and content-free (modes, codes, counts, SHA-256), and allowed
+     only in that window.
+   - The report is returned in process and only when its digest matches. No report storage is
+     added before INV-11.
+   - `GatewayTool` gains `compose_narrative`. `STATE_VERSION` stays 1: earlier checkpoints restore
+     unchanged, and older readers refuse the new vocabulary.
+9. **Prompt registry (V10).**
+   - The registry gains whole-module targets (`package.module`). The INV-7 review prompts
+     (`src.orchestration.review_prompts`) and the INV-8 narrative prompt
+     (`src.orchestration.report_prompt`) are registered so, and their fingerprints cover their
+     complete construction.
+   - The INV-6 planning prompt stays unregistered, explicitly listed with its reason. Its rendered
+     prompts remain pinned by tests; registering it is a separate reviewed change.
+   - The registry file's digest is critical provenance of the v2 workflow baseline. It was
+     updated through the documented `--update --justification` procedure: only that digest and
+     the review record changed. Every case, outcome, metric, and safety result is identical
+     (9/9 measured pass), and no baseline case exercises these prompts.
+
+**Known limitations and deferred work.**
+- The narrative's quality and the scan's recall are untested on a real provider (#145, #147).
+- `citation_unknown` cannot distinguish a fabricated ID from another investigation's; both are
+  rejected.
+- The report lives in process only (#144, INV-11).
+- The recommendation catalogue is new reviewed content and needs maintainer review like a prompt.
+- Registering the INV-6 planning prompt with a complete provenance fingerprint (module source,
+  evaluated instruction text including imported vocabulary, and a rendered sample) is #185.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,
