@@ -62,7 +62,9 @@ document retrieval, anomaly detection, visualization, and report generation.
 ## Architecture
 
 - `app.py` is the developer-only Streamlit compatibility entry point; React/FastAPI is the primary
-  local product under ADR 0011.
+  local product under ADR 0011. Streamlit is not in `requirements.lock`: it lives in a separate
+  environment (`requirements-streamlit.lock`, `Dockerfile.streamlit`) with known Pillow advisories;
+  see `docs/operations/streamlit-developer-environment.md`. Its UI tests skip without it.
 - `apps/web/` is the React and TypeScript browser client.
 - `apps/api/` is the versioned FastAPI service boundary.
 - `apps/mcp/` is the read-only stdio MCP server over the guarded SQL and retrieval core (ADR 0014); it is never imported by `src/` or `packages/`.

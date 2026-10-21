@@ -123,14 +123,15 @@ services:
     tmpfs:
       - /tmp
 
-  # Optional compatibility UI: docker compose --profile streamlit up -d --wait
+  # Optional, developer-only compatibility UI with its own image and lock (Pillow 12.3.0 with
+  # known advisories; trusted local use only): docker compose --profile streamlit up -d --wait
   streamlit:
     <<: *hardened
     profiles: ["streamlit"]
     build:
       context: .
-      dockerfile: Dockerfile.api
-    image: conversational-bi/api:local
+      dockerfile: Dockerfile.streamlit
+    image: conversational-bi/streamlit:local
     command:
       - streamlit
       - run

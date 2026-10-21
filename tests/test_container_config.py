@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
 DOCKERFILE_API = (ROOT / "Dockerfile.api").read_text(encoding="utf-8")
 DOCKERFILE_WEB = (ROOT / "Dockerfile.web").read_text(encoding="utf-8")
+DOCKERFILE_STREAMLIT = (ROOT / "Dockerfile.streamlit").read_text(encoding="utf-8")
+DOCKERFILES = [DOCKERFILE_API, DOCKERFILE_WEB, DOCKERFILE_STREAMLIT]
+DOCKERFILE_IDS = ["api", "web", "streamlit"]
 NGINX = (ROOT / "docker" / "nginx" / "default.conf").read_text(encoding="utf-8")
 SERVICES: dict[str, dict[str, Any]] = COMPOSE["services"]
 SECRET_NAME = re.compile(r"KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL", re.IGNORECASE)
@@ -123,10 +126,14 @@ def test_web_waits_for_a_healthy_api_and_images_use_local_tags() -> None:
         assert "latest" not in service["image"]
 
 
-def test_streamlit_profile_shares_the_api_image_and_has_its_own_healthcheck() -> None:
+def test_streamlit_profile_has_its_own_image_and_healthcheck() -> None:
     streamlit = SERVICES["streamlit"]
 
-    assert streamlit["image"] == SERVICES["api"]["image"]
+    # The optional developer-only UI never shares the production API image (its lock keeps
+    # Pillow below 13 because Streamlit requires it).
+    assert streamlit["build"]["dockerfile"] == "Dockerfile.streamlit"
+    assert streamlit["image"] != SERVICES["api"]["image"]
+    assert SERVICES["api"]["build"]["dockerfile"] == "Dockerfile.api"
     assert streamlit["healthcheck"]["test"][0] == "CMD"
     assert "_stcore/health" in " ".join(streamlit["healthcheck"]["test"])
 
@@ -158,7 +165,7 @@ def test_every_interpolated_compose_variable_is_documented_in_env_example() -> N
 # --- Dockerfiles -----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dockerfile", [DOCKERFILE_API, DOCKERFILE_WEB], ids=["api", "web"])
+@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=DOCKERFILE_IDS)
 def test_dockerfiles_are_multi_stage_with_digest_pinned_bases(dockerfile: str) -> None:
     # Literal digest-pinned FROM lines (not ARG defaults) so Dependabot's docker ecosystem can
     # propose digest updates; later stages may only derive from an earlier named stage.
@@ -182,7 +189,7 @@ def test_dockerfiles_are_multi_stage_with_digest_pinned_bases(dockerfile: str) -
     assert not [line for line in _instructions(dockerfile, "ARG") if "_IMAGE=" in line]
 
 
-@pytest.mark.parametrize("dockerfile", [DOCKERFILE_API, DOCKERFILE_WEB], ids=["api", "web"])
+@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=DOCKERFILE_IDS)
 def test_dockerfiles_bake_no_secrets_and_declare_a_healthcheck(dockerfile: str) -> None:
     assert _instructions(dockerfile, "HEALTHCHECK")
     for instruction in ("ARG", "ENV"):
@@ -213,6 +220,33 @@ def test_api_dependencies_install_reproducibly_from_the_lock_file() -> None:
     assert "download.pytorch.org/whl/cpu" in DOCKERFILE_API
     assert "pip install --upgrade" not in DOCKERFILE_API
     assert "requirements-dev" not in DOCKERFILE_API
+
+
+def _pins(name: str) -> dict[str, str]:
+    lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
+    pins = [line.split(";")[0].strip() for line in lines if "==" in line]
+    return {pin.split("==")[0].lower(): pin.split("==")[1] for pin in pins}
+
+
+def test_streamlit_never_reaches_the_production_environment_or_image() -> None:
+    production = _pins("requirements.lock")
+    assert "streamlit" not in production
+    assert "streamlit" not in _pins("requirements.txt")
+    assert int(production["pillow"].split(".")[0]) >= 13  # patched; Streamlit caps it below 13
+    steps = " ".join(_instructions(DOCKERFILE_API, "COPY") + _instructions(DOCKERFILE_API, "RUN"))
+    assert "requirements-streamlit" not in steps
+    assert "app.py" not in steps and ".streamlit" not in steps
+    assert "import streamlit" not in steps and "STREAMLIT_" not in DOCKERFILE_API
+    assert "find_spec('streamlit') is not None" in DOCKERFILE_API  # the build fails if it appears
+
+
+def test_the_streamlit_image_installs_only_its_isolated_lock() -> None:
+    developer = _pins("requirements-streamlit.lock")
+    assert "streamlit" in developer
+    assert "-c requirements-streamlit.lock" in DOCKERFILE_STREAMLIT
+    assert "-c requirements.lock" not in DOCKERFILE_STREAMLIT
+    assert _instructions(DOCKERFILE_STREAMLIT, "USER") == ["USER 10001:10001"]
+    assert _instructions(DOCKERFILE_STREAMLIT, "CMD")[0].startswith('CMD ["streamlit", "run"')
 
 
 def test_web_image_uses_reproducible_installs_and_an_unprivileged_server() -> None:
