@@ -20,6 +20,6 @@ opentelemetry-sdk==1.45.0
 opentelemetry-exporter-otlp-proto-grpc==1.45.0
 chromadb==1.5.9
 sentence-transformers==6.1.0
-pypdf==6.19.0
+pypdf==6.21.1
 reportlab==5.0.1
 sqlparse==0.6.0
