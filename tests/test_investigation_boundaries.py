@@ -128,6 +128,10 @@ BANNED_NAMES = frozenset(
         "FollowUpApproval",
         "FollowUpAuthorizer",
         "FollowUpApprovalRequest",
+        # INV-8: the report narrative call stays with the trusted owner
+        "compose_narrative",
+        "narrative_readiness",
+        "ComposeNarrative",
         # authority and consent come from the trusted adapter, never from investigation code
         "InvestigationAuthority",
         "ConsentSnapshot",

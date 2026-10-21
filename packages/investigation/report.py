@@ -44,7 +44,15 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Annotated, Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, Strict, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    Strict,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from packages.investigation.contracts import FieldName, HypothesisId, PlanTask, TaskId
 from packages.investigation.dispatch import (
@@ -1272,6 +1280,28 @@ def fallback_narrative(body: ReportBody, *, fallback: bool = True) -> NarrativeD
     )
 
 
+MAX_NARRATIVE_CHARS = 32_000
+
+
+def parse_narrative(text: object) -> NarrativeDraft | None:
+    """Strict JSON object to ``NarrativeDraft``; ``None`` for anything else (never repaired).
+
+    A refusal, prose, an unknown field or claim type, or an over-long answer is ``None``.
+    """
+    if type(text) is not str or len(text) > MAX_NARRATIVE_CHARS:
+        return None
+    try:
+        raw = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    if type(raw) is not dict:
+        return None
+    try:
+        return NarrativeDraft.model_validate(raw)
+    except ValidationError:
+        return None
+
+
 def assemble_report(
     body: ReportBody,
     draft: NarrativeDraft,
@@ -1303,6 +1333,8 @@ def assemble_report(
 
 
 __all__ = [
+    "MAX_NARRATIVE_CHARS",
+    "parse_narrative",
     "APPROVED_PHRASES",
     "MATERIAL_DISPOSITIONS",
     "NARRATIVE_PROMPT_VERSION",

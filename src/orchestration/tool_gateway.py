@@ -119,6 +119,18 @@ ending the investigation. Malformed output is ``invalid`` and never retried. Eve
 admitted follow-up task also requires its round's approval to be present and unexpired, else the
 task is refused with ``follow_up_not_authorized``.
 
+**INV-8 (#141).** One more owner-only operation, naming no task:
+
+- ``compose_narrative(state, ComposeNarrative)`` (Business Investigator): at most one per run,
+  after the final verdicts, and only while the run would end ``completed`` or
+  ``completed_partial``. It makes one bounded model call whose prompt is rendered here from the
+  deterministic report body (``report_prompt``): fact fields and fixed codes, with no rows,
+  document text, or statements. The output is parsed strictly (``NarrativeDraft``) and returned
+  in process only. The draft is untrusted: the report is rendered from reviewed templates and
+  accepted only by ``verify_report``.
+- ``narrative_readiness()`` (no decision, no charge): whether a narrative call could be admitted
+  now, so the owner can skip it instead of exhausting the ledger.
+
 A gateway built with ``retry_categories`` (the run owner passes ``RETRYABLE_CATEGORIES``) also
 refuses a second attempt unless the attempt's last recorded failure is in that set, so an unknown
 invocation outcome is never retried even by a misbehaving caller.
@@ -175,6 +187,7 @@ from packages.investigation.critique import (
     parse_critic_review,
     parse_findings_draft,
 )
+from packages.investigation.dispatch import DispatchError, final_status
 from packages.investigation.evidence import (
     MAX_ANSWER_CHARS,
     MAX_CELL_CHARS,
@@ -215,6 +228,13 @@ from packages.investigation.refusals import (
     RefusalCode,
     RefusalSeverity,
 )
+from packages.investigation.report import (
+    NarrativeDraft,
+    ReportError,
+    compose_body,
+    parse_narrative,
+    report_inputs,
+)
 from packages.investigation.state import (
     MAX_EVIDENCE_STATUSES,
     MAX_FOLLOW_UP_ROUNDS,
@@ -252,6 +272,7 @@ from src.orchestration.guarded_sql import (
     SQLExecutor,
 )
 from src.orchestration.policy_grounding import verify_policy_sql
+from src.orchestration.report_prompt import render_narrative_prompt
 from src.orchestration.review_prompts import render_critic_prompt, render_findings_prompt
 from src.storage.query_executor import QueryTimeoutError, UnsafeQueryError, validate_read_query
 from src.storage.sqlite_store import StoredTable
@@ -378,6 +399,13 @@ class OpenFollowUpRound(_Request):
     approval: FollowUpApproval
 
 
+class ComposeNarrative(_Request):
+    """Owner-only (INV-8): the bounded report narrative call. Names no task."""
+
+    task_id: None = None
+    role: AgentRole
+
+
 _TaskRequest = (
     BeginAttempt
     | ResearchDocuments
@@ -390,7 +418,11 @@ _TaskRequest = (
     | DraftFindings
     | ReviewFindings
     | OpenFollowUpRound
+    | ComposeNarrative
 )
+
+# INV-8: whether a narrative call could be admitted now (``narrative_readiness``).
+NarrativeReadiness = Literal["ready", "closed", "model_unavailable", "budget_unavailable"]
 
 # How the run owner closes the gateway, and the ledger close reason each one records.
 ExecutionCloseReason = Literal["completed", "cancelled", "shutdown"]
@@ -423,6 +455,8 @@ class GatewayResult:
     draft: FindingsDraft | None = None
     review: CriticReview | None = None
     review_status: ReviewStatus | None = None
+    # INV-8: the narrative call's parsed, untrusted draft (in process only) and its status.
+    narrative: NarrativeDraft | None = None
 
 
 @dataclass(frozen=True)
@@ -924,6 +958,24 @@ class InvestigationToolGateway:
             "open_follow_up_round", OpenFollowUpRound, state, request, self._open_round
         )
 
+    # --- owner-only report operations (INV-8) --------------------------------------------------
+
+    def compose_narrative(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """One bounded model call choosing typed claims for the verified report; once per run."""
+        return self._operate("compose_narrative", ComposeNarrative, state, request, self._narrative)
+
+    def narrative_readiness(self) -> NarrativeReadiness:
+        """Whether a narrative call could be admitted now. No decision, reservation, or charge."""
+        if self._closure() is not None:
+            return "closed"
+        try:
+            _, model_request = self._model_admission()
+        except _Refused:
+            return "model_unavailable"
+        if not self._ledger.can_authorize(model_request):
+            return "budget_unavailable"
+        return "ready"
+
     def close(self, reason: ExecutionCloseReason) -> None:
         """Close permanently: revoke every token, handle, and correction, and close the ledger.
 
@@ -1246,6 +1298,35 @@ class InvestigationToolGateway:
         review = parse_critic_review(text)
         status: ReviewStatus = "valid" if review is not None else "invalid"
         return replace(self._result(call, "succeeded"), review=review, review_status=status)
+
+    def _narrative(self, call: _Call, request: ComposeNarrative) -> GatewayResult:
+        view = call.view
+        if call.role is not AgentRole.BUSINESS_INVESTIGATOR:
+            raise _Refused(RefusalCode.ROLE_NOT_PERMITTED)
+        if not isinstance(view.plan, InvestigationPlanV2):
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED)
+        if not view.verdicts or any(item.tool == "compose_narrative" for item in view.decisions):
+            raise _Refused(RefusalCode.INVALID_REQUEST)  # after the verdicts, and only once
+        try:
+            status = final_status(view, cancelled=False, defect=False)
+        except DispatchError:
+            raise _Refused(RefusalCode.INVALID_REQUEST) from None
+        if status not in {InvestigationStatus.COMPLETED, InvestigationStatus.COMPLETED_PARTIAL}:
+            raise _Refused(RefusalCode.INVALID_REQUEST)
+        try:
+            inputs = report_inputs(view, self.evidence_payloads(view), status=status)
+            prompt = render_narrative_prompt(compose_body(inputs))
+        except (ReportError, ValueError):
+            raise _Refused(RefusalCode.INVALID_REQUEST) from None
+        text, failure = self._review_call(prompt)
+        if failure is not None:
+            result = self._result(call, "failed", category=failure)
+            return replace(result, review_status="unavailable")
+        narrative = parse_narrative(text)
+        status_code: ReviewStatus = "valid" if narrative is not None else "invalid"
+        return replace(
+            self._result(call, "succeeded"), narrative=narrative, review_status=status_code
+        )
 
     def _open_round(self, call: _Call, request: OpenFollowUpRound) -> GatewayResult:
         view = call.view
