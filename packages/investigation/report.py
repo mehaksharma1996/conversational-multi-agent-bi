@@ -38,14 +38,41 @@ The report lives in process; state keeps only ``ReportDraftRecord`` and ``Report
 from __future__ import annotations
 
 import hashlib
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from fractions import Fraction
 from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, Strict, StringConstraints, model_validator
 
-from packages.investigation.contracts import FieldName, HypothesisId, TaskId
-from packages.investigation.dispatch import Limitation, LimitationCode
-from packages.investigation.evidence import canonical_json
-from packages.investigation.hypotheses import Direction, EqualityFilter, Stratification
+from packages.investigation.contracts import FieldName, HypothesisId, PlanTask, TaskId
+from packages.investigation.dispatch import (
+    RUN_LIMITATIONS,
+    Limitation,
+    LimitationCode,
+    terminal_category,
+)
+from packages.investigation.evidence import (
+    DerivedEvidencePayload,
+    DerivedRatio,
+    DocumentEvidencePayload,
+    QueryEvidencePayload,
+    canonical_json,
+    verify_payload,
+)
+from packages.investigation.hypotheses import (
+    Direction,
+    EqualityFilter,
+    Hypothesis,
+    HypothesisTestSpec,
+    InvestigationPlanV2,
+    RateMetric,
+    ResolvedTest,
+    SpecIncomplete,
+    Stratification,
+    resolve_any,
+)
 from packages.investigation.interim_report import (
     MAX_REPORT_CITATIONS,
     MAX_REPORT_LIMITATIONS,
@@ -56,21 +83,29 @@ from packages.investigation.interim_report import (
     ReportStatus,
     ReportTaskRow,
     ReportTaskStatus,
+    compose_interim_report,
+    report_status,
 )
+from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.state import (
     MAX_CRITIC_ROUNDS,
     MAX_FINDINGS,
+    REPORT_STATUSES,
     Digest,
     FallbackReason,
     FindingCode,
     GatewayEvidenceId,
+    InvestigationScope,
+    InvestigationStateView,
     ReportAvailability,
     ReportMode,
     ReportViolationCode,
     ReportViolations,
+    TerminalRecord,
     VerdictCode,
     VerdictReason,
 )
+from packages.investigation.verdicts import hypothesis_tests
 
 REPORT_SCHEMA_VERSION: Literal[1] = 1
 VERIFIED_LABEL: Literal["verified, association only"] = "verified, association only"
@@ -79,7 +114,8 @@ MAX_FACTS = 2 * MAX_REPORT_TASKS
 MAX_RECOMMENDATIONS = 32
 MAX_NOTES = 32
 MAX_SECTION_CLAIMS = 64
-MAX_TEXT_CHARS = 600
+MAX_TEXT_CHARS = 1600
+MAX_DESCRIPTION_CHARS = 1200
 
 FactId = Annotated[str, StringConstraints(pattern=r"^f[1-9][0-9]?$")]
 RecommendationId = Annotated[str, StringConstraints(pattern=r"^r[1-9][0-9]?$")]
@@ -198,7 +234,7 @@ class HypothesisRow(_Model):
     """
 
     hypothesis_id: HypothesisId
-    description: Label
+    description: Annotated[str, StringConstraints(min_length=1, max_length=MAX_DESCRIPTION_CHARS)]
     status: HypothesisStatus
     verdict: VerdictCode | None = None
     reasons: tuple[VerdictReason, ...] = Field(default=(), max_length=8)
@@ -415,7 +451,525 @@ def report_digest(report: VerifiedReport) -> str:
     return hashlib.sha256(canonical_json(report).encode("utf-8")).hexdigest()
 
 
+# --- S2: deterministic assembly ------------------------------------------------------------------
+
+
+class ReportError(ValueError):
+    """The report cannot be composed from these inputs. The message is a fixed code."""
+
+
+def fixed(value: Fraction, places: int, *, signed: bool = False) -> str:
+    """``value`` to ``places`` decimals, rounding half away from zero; ``+`` when ``signed``.
+
+    The only number formatter in a report: a displayed value is always reproducible exactly.
+    """
+    scale = 10**places
+    magnitude = abs(value) * scale
+    whole = int(magnitude)
+    if magnitude - whole >= Fraction(1, 2):
+        whole += 1
+    negative = value < 0 and whole != 0
+    digits = str(whole).rjust(places + 1, "0")
+    text = f"{digits[:-places]}.{digits[-places:]}" if places else digits
+    if negative:
+        return "-" + text
+    return ("+" + text) if signed and whole else text
+
+
+def scope_digest(scope: InvestigationScope) -> str:
+    """SHA-256 of the scope's canonical JSON: binds a report to one investigation, content-free."""
+    canonical = json.dumps(
+        scope.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+type _Payload = QueryEvidencePayload | DocumentEvidencePayload | DerivedEvidencePayload
+
+
+@dataclass(frozen=True)
+class ReportInputs:
+    """What every report function reads: the validated view at a reportable terminal status (a
+    synthesized, deterministic terminal record if ``terminal`` has not run yet) and the gateway's
+    typed payloads. Build it with ``report_inputs``."""
+
+    view: InvestigationStateView
+    payloads: Mapping[str, _Payload]
+    status: ReportStatus
+
+
+def report_inputs(
+    view: InvestigationStateView,
+    payloads: Mapping[str, _Payload],
+    *,
+    status: InvestigationStatus | None = None,
+) -> ReportInputs:
+    """Inputs for the report of ``view``.
+
+    ``status`` predicts the terminal status of a run that is still ``running``. Only the gateway's
+    narrative call uses it, and the report is re-composed at the real terminal status later.
+    """
+    if view.plan is None or view.scope is None:
+        raise ReportError("report_state_incomplete")
+    if status is not None:
+        if view.status is not InvestigationStatus.RUNNING or status not in REPORT_STATUSES:
+            raise ReportError("status_not_reportable")
+        view = view.model_copy(update={"status": status})
+    final = view.status
+    if final is None or final not in REPORT_STATUSES:
+        raise ReportError("status_not_reportable")
+    if view.terminal is None:
+        terminal = TerminalRecord(status=final, category=terminal_category(view, final))
+        view = view.model_copy(update={"terminal": terminal})
+    usable = {key: value for key, value in payloads.items() if key in view.evidence}
+    return ReportInputs(view=view, payloads=usable, status=report_status(final))
+
+
+def _ratio(value: DerivedRatio) -> Fraction:
+    return Fraction(value.numerator) / value.denominator
+
+
+def _value(ratio: Fraction, source: DerivedRatio) -> FactValue:
+    return FactValue(
+        numerator=source.numerator, denominator=source.denominator, display=fixed(ratio, 4)
+    )
+
+
+def _direction(difference: Fraction) -> FactDirection:
+    if difference > 0:
+        return "increase"
+    return "decrease" if difference < 0 else "no_change"
+
+
+def _metric_label(test: ResolvedTest) -> str:
+    metric = test.metric
+    if isinstance(metric, RateMetric):
+        return f"rate of {metric.event} among {metric.population}"
+    return f"mean of {metric.value}"
+
+
+def _claimed_effect(test: ResolvedTest, difference: Fraction) -> Fraction:
+    """The effect in the claimed direction, as the verdict rules measure it."""
+    return -difference if test.claim.direction == "decrease" else difference
+
+
+def _outcome(test: ResolvedTest, difference: Fraction) -> FactOutcome:
+    effect = _claimed_effect(test, difference)
+    if effect <= 0:
+        return "refutes"
+    return "supports" if effect >= Fraction(test.claim.min_effect) else "below_threshold"
+
+
+def build_fact(
+    fact_id: str,
+    test: ResolvedTest,
+    *,
+    measure: DerivedRatio,
+    reference: DerivedRatio,
+    derived_evidence_id: str,
+    query_evidence_id: str,
+) -> ReportFact:
+    """One fact from an approved test and its two exact sides, oriented as the verdict rules
+    orient them: ``measure`` is the comparison side for ``increase`` and ``higher_than`` and the
+    baseline for ``decrease`` (``verdicts._keys``)."""
+    if test.claim.direction == "decrease":
+        baseline, comparison = measure, reference
+    else:
+        baseline, comparison = reference, measure
+    low, high = _ratio(baseline), _ratio(comparison)
+    difference = high - low
+    proportion = isinstance(test.metric, RateMetric)
+    group = test.comparison_group if test.claim.direction == "higher_than" else None
+    period = test.period
+    return ReportFact(
+        id=fact_id,
+        hypothesis_id=test.hypothesis_id,
+        task_id=test.task_id,
+        unit="proportion" if proportion else "mean",
+        metric_label=_metric_label(test),
+        filters=test.filters,
+        basis="group" if group is not None else "period",
+        field=group.field if group is not None else period.field,
+        baseline_label=group.value if group is not None else period.baseline,
+        comparison_label=(
+            next((item.value for item in test.filters if item.field == group.field), "the group")
+            if group is not None
+            else period.comparison
+        ),
+        baseline=_value(low, baseline),
+        comparison=_value(high, comparison),
+        difference=fixed(difference, 4, signed=True),
+        percentage_points=fixed(difference * 100, 1, signed=True) if proportion else None,
+        relative_change=fixed(difference / low * 100, 1, signed=True) if low else None,
+        direction=_direction(difference),
+        claimed_direction=test.claim.direction,
+        outcome=_outcome(test, difference),
+        standardized_by=test.stratification,
+        derived_evidence_id=derived_evidence_id,
+        query_evidence_id=query_evidence_id,
+    )
+
+
+def report_tests(view: InvestigationStateView) -> list[tuple[str, PlanTask]]:
+    """(hypothesis ID, task) for every approved SQL test and admitted follow-up, in plan order."""
+    plan = view.plan
+    if not isinstance(plan, InvestigationPlanV2):
+        return []
+    found: list[tuple[str, PlanTask]] = []
+    for hypothesis in plan.hypotheses:
+        for task_id in hypothesis_tests(hypothesis, view):
+            task = view.admitted_task(task_id)
+            spec = task.input if task is not None else None
+            if task is None or (
+                isinstance(spec, HypothesisTestSpec) and spec.method == "document_check"
+            ):
+                continue
+            found.append((hypothesis.id, task))
+    return found
+
+
+def task_query_evidence(view: InvestigationStateView, task_id: str) -> str | None:
+    """The single query evidence a succeeded test task's outcome cites, if exactly one."""
+    record = view.tasks.get(task_id)
+    if record is None or record.status != "succeeded" or record.outcome is None:
+        return None
+    sources = [ref.id for ref in record.outcome.evidence_refs if ref.kind == "query"]
+    return sources[0] if len(sources) == 1 else None
+
+
+def compose_facts(inputs: ReportInputs) -> tuple[ReportFact, ...]:
+    """The fact sheet, read from verified derived evidence: one fact per derived observation.
+
+    A derived payload counts only when it verifies against its record and its single source is
+    the test task's own verified query evidence. Unusable tests yield no fact; a failed run's
+    report carries codes only.
+    """
+    view, plan = inputs.view, inputs.view.plan
+    if inputs.status == "failed" or not isinstance(plan, InvestigationPlanV2):
+        return ()
+    facts: list[ReportFact] = []
+    for _hypothesis_id, task in report_tests(view):
+        source_id = task_query_evidence(view, task.id)
+        source = view.evidence.get(source_id) if source_id is not None else None
+        if source_id is None or source is None:
+            continue
+        if verify_payload(source, inputs.payloads.get(source_id)) is not None:
+            continue
+        for evidence_id, evidence in sorted(view.evidence.items()):
+            payload = inputs.payloads.get(evidence_id)
+            if (
+                evidence.kind != "derived"
+                or evidence.task_id != task.id
+                or not isinstance(payload, DerivedEvidencePayload)
+                or verify_payload(evidence, payload) is not None
+                or payload.source_evidence_ids != (source_id,)
+            ):
+                continue
+            try:
+                test = resolve_any(plan, task)
+            except SpecIncomplete:
+                break
+            facts.append(
+                build_fact(
+                    f"f{len(facts) + 1}",
+                    test,
+                    measure=payload.measure,
+                    reference=payload.reference,
+                    derived_evidence_id=evidence_id,
+                    query_evidence_id=source_id,
+                )
+            )
+            break
+    return tuple(facts)
+
+
+def _describe_test(test: ResolvedTest) -> str:
+    text = _metric_label(test)
+    if test.filters:
+        text += " where " + ", ".join(f"{item.field} = {item.value}" for item in test.filters)
+    period = test.period
+    if test.claim.direction == "higher_than" and test.comparison_group is not None:
+        group = test.comparison_group
+        text += f", compared with {group.field} = {group.value} in {period.field} "
+        text += period.comparison
+    else:
+        text += f", {period.field} {period.baseline} to {period.comparison}"
+    text += ", claimed " + test.claim.direction.replace("_", " ")
+    text += f" of at least {fixed(Fraction(test.claim.min_effect), 4)}"
+    if test.stratification is not None:
+        cuts = ", ".join(str(cut) for cut in test.stratification.cut_points)
+        text += f", standardized over {test.stratification.field} bands cut at {cuts}"
+    return text
+
+
+def describe_hypothesis(view: InvestigationStateView, hypothesis: Hypothesis) -> str:
+    """The hypothesis as its approved, typed tests state it (V6); never its statement."""
+    plan = view.plan
+    assert isinstance(plan, InvestigationPlanV2)
+    parts: list[str] = []
+    for task_id in hypothesis_tests(hypothesis, view):
+        task = view.admitted_task(task_id)
+        if task is None:
+            continue
+        spec = task.input
+        if isinstance(spec, HypothesisTestSpec) and spec.method == "document_check":
+            parts.append(f"document check {task_id}")
+            continue
+        try:
+            parts.append(_describe_test(resolve_any(plan, task)))
+        except SpecIncomplete:
+            parts.append(f"test {task_id}")
+    if not parts:
+        parts.append("no approved test, because the data it needs is not available")
+    if hypothesis.context_tasks:
+        parts.append("document context from " + ", ".join(hypothesis.context_tasks))
+    return "; ".join(parts)[:MAX_DESCRIPTION_CHARS]
+
+
+# Critique findings that put the data in tension with other evidence. A contradiction's conflicting
+# evidence is its document; conflicting test evidence is shown whole.
+CONFLICT_CODES = frozenset({"document_contradiction", "conflicting_evidence"})
+
+
+def compose_hypotheses(
+    inputs: ReportInputs, facts: tuple[ReportFact, ...]
+) -> tuple[HypothesisRow, ...]:
+    """One row per approved hypothesis, with its validated verdict as state records it."""
+    view, plan = inputs.view, inputs.view.plan
+    if not isinstance(plan, InvestigationPlanV2):
+        return ()
+    rows: list[HypothesisRow] = []
+    for hypothesis in plan.hypotheses:
+        tests = hypothesis_tests(hypothesis, view)
+        record = view.verdicts.get(hypothesis.id)
+        status: HypothesisStatus
+        if record is None:
+            status = "not_evaluated"
+        elif record.verdict != "untestable":
+            status = "tested"
+        elif hypothesis.testability == "untestable":
+            status = "untested"
+        else:
+            status = "incomplete"
+        evidence = record.evidence_ids if record is not None else ()
+        conflicting = tuple(
+            dict.fromkeys(
+                evidence_id
+                for critique in view.critiques
+                for finding in critique.findings
+                if finding.hypothesis_id == hypothesis.id and finding.code in CONFLICT_CODES
+                for evidence_id in finding.evidence_ids
+                if finding.code == "conflicting_evidence"
+                or view.evidence[evidence_id].kind == "document"
+            )
+        )
+        rows.append(
+            HypothesisRow(
+                hypothesis_id=hypothesis.id,
+                description=describe_hypothesis(view, hypothesis),
+                status=status,
+                verdict=record.verdict if record is not None else None,
+                reasons=record.reasons if record is not None else (),
+                test_task_ids=hypothesis.tests,
+                follow_up_task_ids=tuple(
+                    task_id for task_id in tests if task_id not in hypothesis.tests
+                ),
+                fact_ids=tuple(item.id for item in facts if item.hypothesis_id == hypothesis.id),
+                evidence_ids=evidence,
+                conflicting_evidence_ids=conflicting,
+            )
+        )
+    return tuple(rows)
+
+
+# Reviewed investigation-method rules (V5): wording, and whether the rule concerns acting on the
+# business. This is not a business playbook: no rule asserts that any intervention works.
+RECOMMENDATION_RULES: dict[str, tuple[str, bool]] = {
+    "controlled_evaluation": (
+        "Treat this association as a candidate explanation only, and validate any proposed "
+        "intervention in a controlled evaluation before acting on it.",
+        True,
+    ),
+    "collect_missing_data": (
+        "Collect the data this hypothesis needs so that it can be tested.",
+        False,
+    ),
+    "complete_test": (
+        "Repeat or extend the incomplete test once its evidence is complete, before drawing a "
+        "conclusion.",
+        False,
+    ),
+    "reconcile_document": (
+        "Reconcile the cited document with the verified data before it is relied on.",
+        False,
+    ),
+    "review_follow_up": (
+        "Review and, if appropriate, authorize the follow-up test the critique justified, then "
+        "run the investigation again.",
+        False,
+    ),
+    "rerun_investigation": (
+        "Run the investigation again to complete the work that did not finish.",
+        False,
+    ),
+}
+
+
+def compose_recommendations(
+    inputs: ReportInputs,
+    hypotheses: tuple[HypothesisRow, ...],
+    limitations: tuple[Limitation, ...],
+) -> tuple[Recommendation, ...]:
+    """Every triggered method rule, in a fixed order, citing its trigger; possibly none."""
+    found: list[dict[str, object]] = []
+    for row in hypotheses:
+        if row.verdict == "supported_association":
+            found.append(
+                {
+                    "rule_id": "controlled_evaluation",
+                    "hypothesis_id": row.hypothesis_id,
+                    "fact_ids": row.fact_ids,
+                    "evidence_ids": row.evidence_ids,
+                }
+            )
+        elif row.status == "untested":
+            found.append(
+                {
+                    "rule_id": "collect_missing_data",
+                    "hypothesis_id": row.hypothesis_id,
+                    "limitation_codes": ("hypothesis_untested",),
+                }
+            )
+        elif row.status == "incomplete":
+            found.append(
+                {
+                    "rule_id": "complete_test",
+                    "hypothesis_id": row.hypothesis_id,
+                    "limitation_codes": row.reasons,
+                }
+            )
+    contradicted: dict[str, dict[str, object]] = {}
+    for critique in inputs.view.critiques:
+        for index, finding in enumerate(critique.findings):
+            key = finding.hypothesis_id or ""
+            if finding.code != "document_contradiction" or key in contradicted:
+                continue
+            contradicted[key] = {
+                "rule_id": "reconcile_document",
+                "hypothesis_id": finding.hypothesis_id,
+                "evidence_ids": finding.evidence_ids,
+                "findings": (FindingRef(round=critique.round, index=index),),
+            }
+    found.extend(contradicted.values())
+    codes = {item.code for item in limitations if item.task_id is None}
+    if LimitationCode.FOLLOW_UP_NOT_AUTHORIZED in codes:
+        found.append(
+            {
+                "rule_id": "review_follow_up",
+                "limitation_codes": (LimitationCode.FOLLOW_UP_NOT_AUTHORIZED.value,),
+            }
+        )
+    run_code = RUN_LIMITATIONS.get(InvestigationStatus(inputs.status))
+    if run_code is not None:
+        found.append({"rule_id": "rerun_investigation", "limitation_codes": (run_code.value,)})
+    return tuple(
+        Recommendation.model_validate(
+            {
+                "id": f"r{index}",
+                "rule_version": RULES_VERSION,
+                "unproven": RECOMMENDATION_RULES[str(item["rule_id"])][1],
+                **item,
+            }
+        )
+        for index, item in enumerate(found, start=1)
+    )
+
+
+def compose_notes(
+    hypotheses: tuple[HypothesisRow, ...],
+    facts: tuple[ReportFact, ...],
+    recommendations: tuple[Recommendation, ...],
+    *,
+    fallback: bool,
+) -> tuple[ReportNote, ...]:
+    """Mandatory disclosures: causation always first; then what the evidence cannot show."""
+    notes = [ReportNote(code="causation_not_established")]
+    if facts:
+        notes.append(ReportNote(code="observational_data_only"))
+    for row in hypotheses:
+        if row.status == "untested":
+            notes.append(ReportNote(code="hypothesis_untested", hypothesis_id=row.hypothesis_id))
+        elif row.status == "not_evaluated":
+            notes.append(
+                ReportNote(code="hypothesis_not_evaluated", hypothesis_id=row.hypothesis_id)
+            )
+    if any(item.unproven for item in recommendations):
+        notes.append(ReportNote(code="intervention_unproven"))
+    if not recommendations:
+        notes.append(ReportNote(code="no_eligible_recommendation"))
+    if fallback:
+        notes.append(ReportNote(code="narrative_fallback"))
+    return tuple(notes)
+
+
+@dataclass(frozen=True)
+class ReportBody:
+    """Everything in a report except its narrative and mode: deterministic, from ``inputs``."""
+
+    status: ReportStatus
+    scope_digest: str
+    tasks: tuple[ReportTaskRow, ...]
+    query_tables: tuple[ReportQueryTable, ...]
+    citations: tuple[ReportCitation, ...]
+    critiques: tuple[ReportCritiqueRow, ...]
+    limitations: tuple[Limitation, ...]
+    facts: tuple[ReportFact, ...]
+    hypotheses: tuple[HypothesisRow, ...]
+    recommendations: tuple[Recommendation, ...]
+
+    def notes(self, *, fallback: bool) -> tuple[ReportNote, ...]:
+        return compose_notes(self.hypotheses, self.facts, self.recommendations, fallback=fallback)
+
+
+def compose_body(inputs: ReportInputs) -> ReportBody:
+    """The deterministic report body. Reuses the interim composer's verified rows (V1)."""
+    view = inputs.view
+    assert view.scope is not None
+    interim = compose_interim_report(view, inputs.payloads)
+    facts = compose_facts(inputs)
+    hypotheses = compose_hypotheses(inputs, facts)
+    return ReportBody(
+        status=inputs.status,
+        scope_digest=scope_digest(view.scope),
+        tasks=interim.tasks,
+        query_tables=interim.query_tables,
+        citations=interim.citations,
+        critiques=interim.critiques,
+        limitations=interim.limitations,
+        facts=facts,
+        hypotheses=hypotheses,
+        recommendations=compose_recommendations(inputs, hypotheses, interim.limitations),
+    )
+
+
 __all__ = [
+    "CONFLICT_CODES",
+    "RECOMMENDATION_RULES",
+    "ReportBody",
+    "ReportError",
+    "ReportInputs",
+    "build_fact",
+    "compose_body",
+    "compose_facts",
+    "compose_hypotheses",
+    "compose_notes",
+    "compose_recommendations",
+    "describe_hypothesis",
+    "fixed",
+    "report_inputs",
+    "report_tests",
+    "scope_digest",
+    "task_query_evidence",
     "LIMITATION_CODES",
     "NOTE_CODES",
     "REPORT_SCHEMA_VERSION",
