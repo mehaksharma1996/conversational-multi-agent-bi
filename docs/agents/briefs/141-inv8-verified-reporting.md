@@ -228,8 +228,9 @@ The table above is the S0 proposal. These rulings supersede it where they differ
     `tests/test_investigation_planning_prompt.py`) is unchanged. Follow-up: register
     `src.orchestration.planning_prompt` as a module target under its own reviewed change. Filing
     that as an issue needs the user's approval.
-  - The evaluation runner's fingerprints are a separate list and are unchanged, so no baseline
-    changes.
+  - The evaluation runner's fingerprints are a separate list and are unchanged. (Corrected in
+    S7: the registry file's digest *is* critical provenance of the v2 workflow baseline, so the
+    baseline was updated by the documented procedure; see Readiness.)
 
 ## Report schema (S1, `packages/investigation/report.py`)
 
@@ -360,3 +361,53 @@ the Streamlit isolation from #176, and INV-7 behaviour (except the extra steps a
 - **Partial registry discovery.** Extending discovery to `render_*prompt` while excluding the
   planning renderers is a deliberate, documented gap.
 - **Process-local report.** Persistence and display belong to #144.
+
+## Readiness (S7, 2026-10-21)
+
+Delivered on `feat/iteration2-inv8-verified-reporting`, one commit per stage after `b31991a`:
+
+| Stage | Delivered |
+|---|---|
+| S0 | This brief, the review outcome |
+| S1 | `VerifiedReport` contracts and typed claims; `report_draft` / `report_record` channels, `reporter` / `report_verifier` writers, `compose_narrative` tool |
+| S2 | Fact sheet, hypothesis rows, method recommendations, notes (`compose_body`) |
+| S3 | Reviewed templates and rendering; `verify_report` with the twelve seeded violations and V4 adversarial cases |
+| S4 | `report_prompt.py` (`inv8-narrative-prompt-v1`), gateway `compose_narrative`, `narrative_readiness`, `BudgetLedger.can_authorize`, strict parsing |
+| S5 | `report_composer.py`: candidate, fallback, acceptance |
+| S6 | Owner and graph integration: `compose_report` and `verify_report` steps, `ExecutionResult.report`, step bound + 3 |
+| S7 | Churn acceptance, architecture conformance, registry module targets, ADR 0024 Amendment 6, workflow document |
+
+Results:
+- **Seeded violations.** All twelve are rejected with their codes, alongside the V4 adversarial
+  cases (implied and paraphrased causation, number words, unsupported comparisons).
+- **Churn report.** It is model-assisted and verified through the real graph:
+  - SMB Basic 0.0600 → 0.1400 (+0.0800, +8.0 pp, +133.3 %);
+  - tenure-standardized Q2 0.1410, change +0.0810, matching the oracle within 0.0001;
+  - H1/H2 supported, H3 untestable, H4 refuted;
+  - memo citation and contradiction, tenure follow-up, every limitation, and method
+    recommendations.
+- **Failure paths.** Every narrative failure falls back with the run status unchanged. Cancelled
+  and failed runs make no narrative call and never read as complete.
+- **Conformance.** Every ADR 0024 component is a guarded node and acts in the churn run.
+- **Regressions.**
+  - Every INV-3 to INV-7 suite passes. The only edits to existing tests are the two step-bound
+    pins (+3), the approved-schema pin (two channels, one tool), and the owner-only name lists.
+  - The workflow baseline's review pin was updated with its provenance (below).
+- **Workflow baseline.** The registry entries changed the registry file's digest, which the v2
+  workflow baseline records as critical provenance. It was updated with
+  `python -m tests.e2e.workflow_baseline_runner --update --justification ...`. Only that digest and
+  the review record changed: 9/9 measured cases pass, 9 not measured, and all five safety
+  invariants pass.
+- **Checks.** `python -m scripts.check_all` passes 5/5 (ruff check, ruff format, mypy, pytest,
+  evaluations). The OpenAPI compatibility check reports no breaking change, and `git diff --check`
+  is clean.
+
+Deviations and choices:
+- The narrative call is v2-only. v1 runs get the fallback with `narrative_not_applicable`.
+- `citation_unknown` covers fabricated and foreign IDs alike. A whole report from another
+  investigation is `scope_mismatch`.
+- Test fixtures bill one token per byte. The churn narrative prompt (about 5.4k bytes) needs a
+  12k per-call cap in tests; over the cap the call is refused before it runs (`unavailable`), as
+  designed.
+- Follow-up issue to file (needs approval): register the INV-6 planning prompt as a module target.
+

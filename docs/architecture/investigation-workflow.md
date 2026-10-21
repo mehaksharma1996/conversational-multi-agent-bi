@@ -40,7 +40,7 @@ Approved plan → background job → EXECUTION SUBGRAPH — execution budget
        [batched SQL approval interrupt when required]
    → collect → business_investigator: hypotheses → hypothesis tests → verdicts
    → critic → supervisor_replan (≤2 rounds; follow-ups re-validated) → dispatch …
-   → compose_report → verify_report → terminal status
+   → compose_narrative (≤1 bounded call) → finish → compose_report → verify_report → terminal
 ```
 
 ## Roles
@@ -624,3 +624,80 @@ the `critique` and `replan` steps write nothing once cancellation is observed. B
 during a follow-up ends `budget_exhausted` without verdicts, while the critique records keep each
 round's verdict snapshot. The interim report shows critique rows as codes and states every round
 that did not fully happen.
+
+## Verified report (INV-8)
+
+ADR 0024 Amendment 6; brief `docs/agents/briefs/141-inv8-verified-reporting.md` (decisions V1 to
+V10).
+
+**Topology.** Every execution run that reaches `finish` ends with a verified report:
+
+```text
+… investigate (final verdicts) → dispatch: compose_narrative (at most once) → close(completed)
+  → finish → compose_report (writer reporter) → verify_report (writer report_verifier) → terminal
+```
+
+| Component | Does | Never |
+|---|---|---|
+| Report body (`packages/investigation/report.py`) | Builds facts from verified derived evidence with exact arithmetic, hypothesis rows from approved typed specs, method recommendations, and mandatory notes; reuses the interim report's rows | Reads a statement, document prose, or a model's number |
+| Narrative call (gateway `compose_narrative`, one bounded model call) | Chooses and orders typed claims over listed fact fields and fixed codes (`inv8-narrative-prompt-v1`) | Writes text; sees rows, SQL, documents, or statements; runs twice, retries, or runs for a stopped run |
+| Composer (`report_composer.candidate_report`) | Renders the claims from reviewed templates, or composes the deterministic fallback | Makes a model call |
+| Verifier (`report_verifier.verify_report`) | Recomputes facts from the source query payloads; checks every row, citation, verdict, finding, limitation, recommendation, claim, and rendered sentence; scans the masked text | Trusts the report or any model |
+
+**Facts and formatting.**
+- Exact fractions, displayed half away from zero.
+- Proportions and means are shown to 4 decimals. Differences are signed. Percentage points
+  (difference × 100) and relative change (difference ÷ baseline × 100, omitted for a zero
+  baseline) are shown to 1 decimal.
+- A standardized fact names its stratification.
+- An unusable test yields no fact; its hypothesis row shows why.
+
+**Claims.** The claim types are `scope`, `fact`, `comparison` (magnitudes of two differences in one
+unit, compared exactly), `verdict`, `finding`, `task`, `limitation`, `recommendation`, and
+`no_recommendation`. Unknown fields or types fail parsing (`narrative_invalid`). A `causation`
+relationship parses and is rejected (`causal_claim`).
+
+**Verification codes.**
+
+| Group | Codes |
+|---|---|
+| Numbers | `numeric_unsupported`, `numeric_mismatch`, `unsupported_comparison` |
+| Citations | `citation_unknown` (absent from this investigation: fabricated or foreign), `citation_stale`, `citation_misattributed`, `scope_mismatch`, `evidence_omitted` |
+| Integrity | `causal_claim`, `verdict_mismatch`, `claim_contradiction`, `task_status_misrepresented`, `status_misrepresented`, `finding_mismatch` |
+| Completeness | `section_missing`, `hypothesis_omitted`, `finding_omitted`, `limitation_missing`, `limitation_unsupported`, `recommendation_unsupported`, `recommendation_omitted`, `playbook_rule_unknown` |
+| Text | `rendered_text_mismatch` |
+| Shape | `report_inconsistent`, `schema_invalid` |
+
+The text scan masks data slots and the reviewed disclaimers, then looks for causal or efficacy
+wording, digits or number words, and comparatives outside a comparison. It is defence in depth;
+the structural checks and template-only text are primary.
+
+**Recommendations** (`inv8-recommendation-rules-v1`) are investigation-method rules only:
+- `controlled_evaluation` (labelled unproven);
+- `collect_missing_data`;
+- `complete_test`;
+- `reconcile_document`;
+- `review_follow_up`;
+- `rerun_investigation`.
+
+Each cites its trigger. With none, the report says so (`no_eligible_recommendation`).
+
+**Status and fallback.**
+- `investigation_status` is always the run's terminal status, and `availability` is `complete`,
+  `partial`, or `codes_only`.
+- A run that is not `completed`/`completed_partial`, a v1 plan, a disabled narrative, no admissible
+  model, or no ledger headroom (`BudgetLedger.can_authorize`, checked without charging) makes no
+  narrative call.
+- A provider failure, a timeout, an over-large prompt, malformed output, a refusal, or a rejected
+  narrative gives the deterministic fallback with its reason. A rejected narrative's violation
+  codes are kept in the report and in `report_record`.
+- The fallback passes the same verification. If it does not, no report is returned (`unavailable`),
+  and the run status never changes.
+
+**State.**
+- `report_draft` (writer `reporter`) and `report_record` (writer `report_verifier`) are write-once
+  and content-free (modes, reasons, codes, counts, SHA-256).
+- They may be written only after `finish` and before the terminal record.
+- The report itself is returned in process (`ExecutionResult.report`), and only when its digest
+  equals the recorded one.
+- `STATE_VERSION` stays 1.
