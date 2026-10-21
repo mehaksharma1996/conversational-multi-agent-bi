@@ -119,6 +119,118 @@ model call.
 | V9 | **Storage.** The `VerifiedReport` is returned in `ExecutionResult.report` (in process). The checkpointed `report_record` holds only the report schema version, `mode` (`model_assisted`, `deterministic_fallback`, or `codes_only`), `verification` (`passed`), up to 8 fixed reason codes, counts, and the SHA-256 of the report's canonical JSON. It holds no text, numbers, or claims. If the fallback itself fails verification (a defect), `report_record.mode` is `unavailable` with reason `fallback_failed_verification`, no report is returned, and the run status is unchanged. `STATE_VERSION` stays 1 (an additive channel; older readers refuse it). |
 | V10 | **Prompts and the registry.** The narrative prompt is `inv8-narrative-prompt-v1` (`src/orchestration/report_prompt.py:render_narrative_prompt`). Add **three** registry entries: INV-7's `render_findings_prompt` and `render_critic_prompt`, and INV-8's `render_narrative_prompt`. Each is approved "user-directed INV-8 engineering work; pending maintainer review". Extend the discovery test to `render_*prompt` functions under `src/orchestration/`, *excluding* the INV-6 planning renderers, whose text is a module constant the registry's function hash would not cover. That exclusion is explicit and documented, and stays deferred until the registry can hash constants. No existing hash or evaluation baseline changes. The narrative prompt also gets a pinned rendered-churn-prompt digest test. |
 
+## Review outcome (2026-10-21)
+
+The table above is the S0 proposal. These rulings supersede it where they differ.
+
+- **V1 approved.** The verified report reuses the interim composer's verified rows and the existing
+  evidence contracts. `InterimReport` is unchanged.
+- **V2 approved.** The rules for the fact sheet:
+  - **Values.** Exact `Fraction`s, displayed half-up: proportions and means to 4 decimals;
+    percentage points (difference × 100) and relative change (difference ÷ baseline × 100) to
+    1 decimal, both signed. Relative change is omitted when the baseline is 0, and percentage
+    points exist for rates only.
+  - **What becomes a fact.** A test whose observation is unusable, or that has no matching
+    derived evidence, yields no fact. Its hypothesis row shows why (verdict reasons).
+  - **Independent recomputation.** The composer reads the derived payload; the verifier
+    recomputes each fact from the source *query* payload (`observe`), a separate path, and
+    compares.
+- **V3 approved with modification: finite claim types and reviewed templates only.** The model
+  returns typed claims and never writes prose:
+  - the claim types are `scope`, `fact`, `comparison`, `verdict`, `finding`, `task`, `limitation`,
+    `recommendation`, and `no_recommendation`;
+  - the model's only freedom is which claims to include, their order, and their section;
+  - every sentence is rendered by `packages/investigation/report.py` from a reviewed template plus
+    verified values;
+  - unknown fields are refused, so free text cannot even be parsed.
+
+  The verifier checks the structured claims *and* the final rendered text:
+  - it re-renders every sentence and requires exact equality (`rendered_text_mismatch`);
+  - it masks approved data slots (fact values, IDs, approved filter values, descriptions), then
+    rejects:
+    - any remaining digit or number word ("doubled", "twice", "half", "percent", "one" …
+      `numeric_unsupported`);
+    - causal or efficacy wording (`causal_claim`);
+    - comparative wording outside a `comparison` claim (`unsupported_comparison`).
+- **V4 approved with modification.** The primary controls are structural:
+  - the `relationship` field;
+  - assertion-to-evidence checks for direction, verdict, comparison, and status;
+  - the template-only output.
+
+  The lexicon is supplementary only. Adversarial tests cover implied and paraphrased causation,
+  numeric words, and unsupported comparisons. `causation_not_established` is a mandatory note in
+  **every** report, codes-only included, and its approved wording is the only allowed occurrence
+  of causal vocabulary.
+- **V5 revised: investigation-method recommendations only.** `RECOMMENDATION_RULES`
+  (`inv8-recommendation-rules-v1`) holds six method rules, each triggered by verified evidence or a
+  stated limitation:
+
+  | Rule | Trigger |
+  |---|---|
+  | `controlled_evaluation` | a supported association |
+  | `collect_missing_data` | `required_data_absent` |
+  | `complete_test` | an incomplete test |
+  | `reconcile_document` | a `document_contradiction` finding |
+  | `review_follow_up` | `follow_up_not_authorized` |
+  | `rerun_investigation` | a cancelled, exhausted, or failed run |
+
+  Any recommendation that touches a business intervention is labelled *unproven, requires
+  validation* (note `intervention_unproven`). The catalogue is not a business playbook. If no rule
+  triggers, the report states `no_eligible_recommendation`. A rule ID outside the catalogue is
+  `playbook_rule_unknown`.
+- **V6 approved.**
+- **V7 approved conditionally.** The narrative call is made by the owner only after the final
+  verdicts and before the gateway closes, and only for v2 plans (v1 runs get the deterministic
+  report with reason `narrative_not_applicable`). Checks before the call:
+  - the trusted cancellation, authority, and lifecycle checks of `_operate`;
+  - the gateway itself refuses a second narrative call and refuses a status that is not eligible;
+  - a no-charge readiness pre-check (model admissible, ledger headroom via the new pure
+    `BudgetLedger.can_authorize`).
+
+  There is no retry and no loop. The successful `model_assisted` path is exercised through the
+  real graph in the churn acceptance test.
+- **V8 revised.** The report has its own status fields:
+  - `investigation_status`, always the run's terminal status;
+  - `availability`: `complete` (completed), `partial` (completed_partial, cancelled,
+    budget_exhausted), or `codes_only` (failed);
+  - `verification`: `verified`;
+  - `mode`: `model_assisted` or `deterministic_fallback`.
+
+  How the narrative call is decided:
+  - **Not attempted:** cancelled, failed, and exhausted runs never reach it, and no narrative
+    work happens after a stop.
+  - **Fallback reasons:** `narrative_not_applicable`, `narrative_not_eligible`,
+    `narrative_disabled`, `narrative_model_unavailable`, `narrative_budget_unavailable`,
+    `narrative_unavailable` (provider failure or timeout), `narrative_invalid` (malformed output or
+    a refusal), and `narrative_rejected` (with its violation codes kept in the report, never
+    suppressed).
+  - **Errors:** a composition or verification exception is caught, so the report becomes
+    `unavailable` in `report_record` and the run status is unchanged.
+- **V9 approved.** Two write-once, content-free channels, each with its own writer (separation of
+  duties):
+  - `report_draft` (writer `reporter`): candidate mode, fallback reason, violation codes, and the
+    candidate SHA-256;
+  - `report_record` (writer `report_verifier`): verification outcome, final mode, availability,
+    reason codes, counts, and the final SHA-256.
+
+  Both may be written only after `finish` and before `terminal`. The report body stays in process;
+  no persistent storage is added before INV-11.
+- **V10 revised: no partial fingerprints.** The registry gains module targets
+  (`module.path`, no `:qualname`), which hash the whole module's source.
+  - `src.orchestration.review_prompts` (both INV-7 prompts) and the new
+    `src.orchestration.report_prompt` are each self-contained: every instruction, schema, marker,
+    and layout rule lives in the module. Values fed into them are data, as for the existing
+    entries (policy doc, "data fed into a prompt").
+  - The narrative prompt lists facts as structured fields formatted inside `report_prompt.py` and
+    lists limitation and rule IDs by code, so the hash covers its whole construction.
+  - The INV-6 planning prompt stays unregistered. Its gap is documented here and in ADR 0024
+    Amendment 6. Its regression coverage (rendered-prompt pins in
+    `tests/test_investigation_planning_prompt.py`) is unchanged. Follow-up: register
+    `src.orchestration.planning_prompt` as a module target under its own reviewed change. Filing
+    that as an issue needs the user's approval.
+  - The evaluation runner's fingerprints are a separate list and are unchanged, so no baseline
+    changes.
+
 ## Report schema (S1, `packages/investigation/report.py`)
 
 ```text
