@@ -383,6 +383,12 @@ class LimitationCode(StrEnum):
     REPORT_ROWS_LIMITED = "report_rows_limited"
     # INV-6: a hypothesis-bearing run stopped before its verdicts could be evaluated.
     VERDICTS_NOT_EVALUATED = "verdicts_not_evaluated"
+    # INV-7: critique and follow-up rounds that did not (fully) happen.
+    CRITIQUE_UNAVAILABLE = "critique_unavailable"
+    FOLLOW_UP_NOT_AUTHORIZED = "follow_up_not_authorized"
+    FOLLOW_UP_INVALID = "follow_up_invalid"
+    REPLAN_LIMIT_REACHED = "replan_limit_reached"
+    CRITIQUE_ROUNDS_EXHAUSTED = "critique_rounds_exhausted"
 
 
 # A run that ended this way always states it.

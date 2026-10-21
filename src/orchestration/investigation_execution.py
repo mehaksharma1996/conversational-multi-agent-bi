@@ -51,6 +51,28 @@ method and assignee). On a normal end, before closing the gateway, the owner:
 After a stop (cancellation, budget exhaustion, a closing refusal) or a defect, no verdict is
 written. Verdicts never change the final status.
 
+**Critique and bounded replanning (INV-7, #140).** Between the derivations and the verdict step,
+a v2 run reviews each round (at most two critic rounds, two follow-up rounds):
+
+1. ``dispatch``: the owner-only ``draft_findings`` (the Business Investigator's transient claims)
+   and ``review_findings`` (one charged critic round, the Critic model's proposed gaps), one
+   gateway operation per step; their parsed output stays in this process;
+2. ``critique`` (writer ``critic``): the Critic recomputes every finding from verified evidence
+   (``critique_round``), the owner re-validates it (``validate_critique``), and, for confirmed
+   ``follow_up`` findings, the Supervisor's ``FollowUpPlanner`` builds stratified re-tests that
+   must pass ``validate_follow_up_round`` and the round, attempt, and budget limits, then be
+   approved for their exact task set by the trusted ``FollowUpAuthorizer``. The record states
+   the outcome (``none_needed``, ``admitted``, ``not_authorized``, ``invalid``, ``round_limit``,
+   ``budget``) and a content-free verdict snapshot;
+3. for an admitted round: ``dispatch`` opens it through the gateway (approval re-verified, one
+   replan round charged), ``replan`` (writer ``supervisor``) admits the follow-ups and the round
+   record, and ``dispatch`` registers them; the dispatcher then runs them like any task, and the
+   next round is reviewed when they end.
+
+Review stops when a critique admits nothing, after critique 1's round, or when the critic-round
+budget is spent; a critique never retries a task. With no authorizer (production until INV-10),
+no follow-up is ever admitted. The final verdicts then cover every admitted follow-up.
+
 **Failure.** A node error, a bare gateway refusal, or the step bound is a defect: the owner closes
 the gateway (``shutdown``) and reports ``failed`` in process; the thread may be unreadable and is
 never resumed. Checkpoints are process-local (ADR 0024 D9).
@@ -70,6 +92,14 @@ from langgraph.graph.state import CompiledStateGraph
 
 from packages.investigation.budget import EXECUTION_LIMITS, BudgetLedger, BudgetLimits, Clock
 from packages.investigation.contracts import AgentRole, InvestigationPlan, TaskKind
+from packages.investigation.critique import (
+    NUMERIC_TYPES,
+    CriticReview,
+    CritiqueInputs,
+    CritiqueInvalid,
+    FindingsDraft,
+    validate_critique,
+)
 from packages.investigation.dispatch import (
     RETRYABLE_CATEGORIES,
     ActionKind,
@@ -91,13 +121,31 @@ from packages.investigation.gateway import (
     InvestigationAuthority,
     WallClock,
 )
-from packages.investigation.hypotheses import HypothesisTestSpec, InvestigationPlanV2
+from packages.investigation.hypotheses import (
+    FollowUpTask,
+    HypothesisTestSpec,
+    InvestigationPlanV2,
+)
 from packages.investigation.lifecycle import InvestigationStatus, approval_expired
 from packages.investigation.refusals import RefusalCode
+from packages.investigation.replanning import (
+    FollowUpApprovalRequest,
+    FollowUpAuthorizer,
+    FollowUpBuildError,
+)
 from packages.investigation.state import (
+    MAX_CRITIC_ROUNDS,
+    MAX_FOLLOW_UP_ROUNDS,
+    MAX_FOLLOW_UPS_IN_ROUND,
     STATE_VERSION,
+    CritiqueFinding,
+    CritiqueRecord,
+    FollowUpApproval,
+    FollowUpRoundRecord,
     InvestigationScope,
     InvestigationStateView,
+    ReplanOutcome,
+    ReviewStatus,
     TaskOutcome,
     TaskRecord,
     TerminalRecord,
@@ -105,16 +153,24 @@ from packages.investigation.state import (
     plan_digest,
     restore_state,
 )
+from packages.investigation.validation import (
+    ResourceContext,
+    SchemaContext,
+    validate_follow_up_round,
+)
 from packages.investigation.verdicts import (
     Verdict,
     VerdictInvalid,
     derived_matches,
+    hypothesis_tests,
     validate_verdict,
 )
 from src.agents.sql_agent import execute_sql
 from src.investigation.business_investigator import BusinessInvestigator
+from src.investigation.critic import Critic
 from src.investigation.document_researcher import DocumentResearcher
 from src.investigation.sql_analyst import SQLAnalyst
+from src.investigation.supervisor import FollowUpPlanner
 from src.orchestration.guarded_sql import SQLExecutor
 from src.orchestration.investigation_checkpoint import load_investigation_state
 from src.orchestration.investigation_graph import InvestigationGraphBuilder
@@ -122,11 +178,14 @@ from src.orchestration.investigation_proposal import InvestigationProposalRun
 from src.orchestration.tool_gateway import (
     DeriveEvidence,
     DocumentResolver,
+    DraftFindings,
     FinishAttempt,
     GatewayResult,
     IdSource,
     InvestigationToolGateway,
+    OpenFollowUpRound,
     PolicyCriteriaSource,
+    ReviewFindings,
     SkipTask,
     TableResolver,
     _random_hex,
@@ -137,6 +196,11 @@ SEEDING_STEPS = 8
 CLOSING_STEPS = 4
 # begin, prepare, execute, correction, execute: the most operations one attempt can make.
 OPERATIONS_PER_ATTEMPT = 5
+# INV-7, per critic round: the draft, the review, the readiness no-op, the critique, the round
+# opening, the replan, and the registration, with a margin of one.
+REVIEW_STEPS_PER_ROUND = 8
+# INV-7, per follow-up: one attempt (no retry), its finish, and its derivation.
+FOLLOW_UP_STEPS = OPERATIONS_PER_ATTEMPT + 2
 
 # Which specialist runs each executable task kind, and the role it must be assigned to (R7).
 _SPECIALISTS: dict[TaskKind, tuple[AgentRole, type[SQLAnalyst] | type[DocumentResearcher]]] = {
@@ -252,7 +316,14 @@ def step_bound(plan: InvestigationPlan) -> int:
     # INV-6: one derivation per hypothesis test, the readiness no-op, and the ``investigate`` step.
     tests = sum(task.kind is TaskKind.HYPOTHESIS_TEST for task in plan.tasks)
     hypotheses = tests + 2 if isinstance(plan, InvestigationPlanV2) else 0
-    return SEEDING_STEPS + 1 + per_task + hypotheses + CLOSING_STEPS
+    # INV-7: every critic round and every follow-up a v2 run may admit, at their worst case.
+    review = (
+        MAX_CRITIC_ROUNDS * REVIEW_STEPS_PER_ROUND
+        + MAX_FOLLOW_UP_ROUNDS * MAX_FOLLOW_UPS_IN_ROUND * FOLLOW_UP_STEPS
+        if isinstance(plan, InvestigationPlanV2)
+        else 0
+    )
+    return SEEDING_STEPS + 1 + per_task + hypotheses + review + CLOSING_STEPS
 
 
 # --- the result -----------------------------------------------------------------------------------
@@ -292,6 +363,7 @@ class InvestigationExecutionRun:
         ledger_clock: Clock = time.monotonic,
         new_id: IdSource = _random_hex,
         fingerprint_key: bytes | None = None,
+        follow_up_authorizer: FollowUpAuthorizer | None = None,
     ) -> None:
         try:
             check_execution_limits(limits)
@@ -300,6 +372,14 @@ class InvestigationExecutionRun:
         handoff = _verify_handoff(proposal, authority, clock)
         _claim(handoff)
         self._handoff = handoff
+        # INV-7: the confirmed schema the plan was proposed against (names and types only).
+        schema = proposal.schema_fields
+        self._schema = SchemaContext.of(name for name, _ in schema)
+        self._numeric_fields = frozenset(
+            name.casefold() for name, kind in schema if kind in NUMERIC_TYPES
+        )
+        self._clock = clock
+        self._authorizer = follow_up_authorizer
         self._cancellation = cancellation
         self._limits = limits
         # The execution ledger is the owner's own, never the planning ledger.
@@ -319,6 +399,7 @@ class InvestigationExecutionRun:
             sql_executor=sql_executor,
             fingerprint_key=fingerprint_key,
             retry_categories=RETRYABLE_CATEGORIES,
+            numeric_fields=self._numeric_fields,
         )
         self._port = self._gateway.specialist_port()
         scope = handoff.scope
@@ -333,6 +414,18 @@ class InvestigationExecutionRun:
             assert route is not None  # checked by the handoff
             self._specialists[task.id] = route[1](task.id)
         self._investigator = BusinessInvestigator()
+        self._critic = Critic()
+        self._planner = FollowUpPlanner()
+        self._draft: FindingsDraft | None = None
+        self._draft_status: ReviewStatus | None = None
+        self._review: CriticReview | None = None
+        self._review_status: ReviewStatus | None = None
+        self._critique_ready = False
+        self._reviewing_done = False
+        self._pending: tuple[tuple[FollowUpTask, ...], tuple[int, ...], FollowUpApproval] | None
+        self._pending = None
+        self._replan_ready = False
+        self._register_next: tuple[FollowUpTask, ...] = ()
         self._derive_attempted: set[str] = set()
         self._investigate_ready = False
         self._verdicts_done = False
@@ -354,6 +447,8 @@ class InvestigationExecutionRun:
         builder.add_step("start", "lifecycle", _status(InvestigationStatus.RUNNING))
         builder.add_step("dispatch", "dispatcher", self._dispatch)
         builder.add_step("investigate", "investigator", self._investigate)
+        builder.add_step("critique", "critic", self._critique)
+        builder.add_step("replan", "supervisor", self._replan)
         builder.add_step("finish", "lifecycle", self._finish)
         builder.add_step("terminal", "terminal", self._terminal)
         builder.add_edge(START, "intake")
@@ -371,9 +466,17 @@ class InvestigationExecutionRun:
         builder.add_conditional_edges(
             "dispatch",
             self._route,
-            {"dispatch": "dispatch", "investigate": "investigate", "finish": "finish"},
+            {
+                "dispatch": "dispatch",
+                "investigate": "investigate",
+                "critique": "critique",
+                "replan": "replan",
+                "finish": "finish",
+            },
         )
         builder.add_edge("investigate", "dispatch")
+        builder.add_edge("critique", "dispatch")
+        builder.add_edge("replan", "dispatch")
         builder.add_edge("finish", "terminal")
         builder.add_edge("terminal", END)
         self._graph = builder.compile()
@@ -452,6 +555,13 @@ class InvestigationExecutionRun:
     def _route(self, _state: Mapping[str, Any]) -> str:
         if self._final_ready:
             return "finish"
+        if self._critique_ready or self._replan_ready:
+            if self._cancel_requested():
+                # Cancelled during review or replanning: write nothing; dispatch stops the run.
+                self._critique_ready = self._replan_ready = False
+                self._pending = None
+                return "dispatch"
+            return "critique" if self._critique_ready else "replan"
         return "investigate" if self._investigate_ready else "dispatch"
 
     def _cancel_requested(self) -> bool:
@@ -476,6 +586,8 @@ class InvestigationExecutionRun:
                 return self._defective(view)
             self._documents_available = result.resources.documents_available
             return self._snapshot()
+        if self._register_next:  # bookkeeping, even when cancelled: every task is recorded
+            return self._register_follow_ups()  # admitted by ``replan``: register before dispatch
         action = next_action(view, self._signals(view, cancelled), limits=self._limits)
         if action.kind is ActionKind.STOP:
             assert action.status is not None
@@ -483,17 +595,18 @@ class InvestigationExecutionRun:
         if action.kind is ActionKind.FINISH_RUN:
             plan = self._handoff.plan
             if isinstance(plan, InvestigationPlanV2) and not self._verdicts_done:
-                return self._prepare_verdicts(plan, view, state)
+                return self._finish_round(plan, view, state)
             self._gateway.close("completed")
             return self._close_out(view, "internal")
         return self._apply(view, self._operate(action, state))
 
     # --- hypotheses (INV-6) --------------------------------------------------------------------
 
-    def _prepare_verdicts(
+    def _finish_round(
         self, plan: InvestigationPlanV2, view: InvestigationStateView, state: Mapping[str, Any]
     ) -> dict[str, Any]:
-        """Derive the next usable observation, one gateway operation; then hand over to verdicts."""
+        """One step of a round's end: a derivation, a review call, a round opening, or the
+        follow-ups' registration; once none is due, hand over to the verdict step."""
         payloads = self._gateway.evidence_payloads(view)
         pending = [
             task_id
@@ -503,11 +616,249 @@ class InvestigationExecutionRun:
         if pending:
             task_id = pending[0]
             self._derive_attempted.add(task_id)
-            task = next(item for item in plan.tasks if item.id == task_id)
+            task = view.admitted_task(task_id)
+            assert task is not None
             request = DeriveEvidence(task_id=task_id, role=task.assignee)
             return self._apply(view, self._gateway.derive_evidence(state, request))
+        if self._review_due(view):
+            return self._review_step(view, state)
+        if self._pending is not None and not self._replan_ready:
+            return self._open_round(view, state)
         self._investigate_ready = True
         return self._snapshot()
+
+    # --- critique and replanning (INV-7) -------------------------------------------------------
+
+    def _review_due(self, view: InvestigationStateView) -> bool:
+        """Critique n is due after round n's tasks ended, while critic rounds remain; a round whose
+        draft already ran always finishes (its review charged the round it is completing)."""
+        if self._draft_status is not None:
+            return True
+        index = len(view.critiques)
+        usage = view.budget_usage
+        return (
+            not self._reviewing_done
+            and self._pending is None
+            and index < MAX_CRITIC_ROUNDS
+            and index == len(view.follow_up_rounds)
+            and usage is not None
+            and usage.critic_rounds < self._limits.critic_rounds
+        )
+
+    def _review_step(
+        self, view: InvestigationStateView, state: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """The draft, then the review (one gateway operation each), then the critique step."""
+        index = len(view.critiques)
+        if self._draft_status is None:
+            role = AgentRole.BUSINESS_INVESTIGATOR
+            result = self._gateway.draft_findings(state, DraftFindings(role=role, round=index))
+            self._draft = result.draft if result.refusal is None else None
+            self._draft_status = (
+                result.review_status
+                if result.refusal is None and result.review_status
+                else "unavailable"
+            )
+            return self._apply(view, result)
+        if self._review_status is None:
+            request = ReviewFindings(role=AgentRole.CRITIC, round=index)
+            result = self._gateway.review_findings(state, request)
+            self._review = result.review if result.refusal is None else None
+            self._review_status = (
+                result.review_status
+                if result.refusal is None and result.review_status
+                else "unavailable"
+            )
+            return self._apply(view, result)
+        self._critique_ready = True
+        return self._snapshot()
+
+    def _validated_verdicts(
+        self, plan: InvestigationPlanV2, view: InvestigationStateView, payloads: Mapping[str, Any]
+    ) -> tuple[Verdict, ...]:
+        usable = {
+            key: value
+            for key, value in payloads.items()
+            if not isinstance(value, DerivedEvidencePayload)
+        }
+        verdicts: list[Verdict] = []
+        for proposal in self._investigator.propose_verdicts(plan, view, payloads):
+            try:
+                verdicts.append(validate_verdict(proposal, plan, view, usable))
+            except VerdictInvalid:
+                raise ExecutionRunError("verdict_invalid") from None  # a defect: fails closed
+        return tuple(verdicts)
+
+    def _critique(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """The guarded Critic writer: one validated, content-free critique record."""
+        view = restore_state(state)
+        plan = self._handoff.plan
+        assert isinstance(plan, InvestigationPlanV2)
+        assert self._draft_status is not None and self._review_status is not None
+        payloads = self._gateway.evidence_payloads(view)
+        verdicts = self._validated_verdicts(plan, view, payloads)
+        inputs = CritiqueInputs(
+            plan=plan,
+            view=view,
+            payloads=payloads,
+            verdicts=verdicts,
+            numeric_fields=self._numeric_fields,
+            draft=self._draft,
+            draft_status=self._draft_status,
+            review=self._review,
+            review_status=self._review_status,
+        )
+        try:
+            proposal = validate_critique(self._critic.review(inputs), inputs)
+        except CritiqueInvalid:
+            raise ExecutionRunError("critique_invalid") from None  # a defect: fails closed
+        replan = self._replan_decision(plan, view, proposal.findings)
+        record = CritiqueRecord(
+            round=len(view.critiques),
+            draft_status=self._draft_status,
+            review_status=self._review_status,
+            findings=proposal.findings,
+            rejected_proposals=proposal.rejected_proposals,
+            verdicts=tuple(self._record(verdict, view, payloads) for verdict in verdicts),
+            replan=replan,
+        )
+        self._draft = self._review = None
+        self._draft_status = self._review_status = None
+        self._critique_ready = False
+        if replan != "admitted":
+            self._reviewing_done = True  # nothing more to review: verdicts come next
+        return {"critiques": [record.model_dump(mode="json")]}
+
+    def _replan_decision(
+        self,
+        plan: InvestigationPlanV2,
+        view: InvestigationStateView,
+        findings: tuple[CritiqueFinding, ...],
+    ) -> ReplanOutcome:
+        """Whether the Supervisor admits a follow-up round; on ``admitted``, keep it pending."""
+        if not any(item.disposition == "follow_up" for item in findings):
+            return "none_needed"
+        usage = view.budget_usage
+        round_index = len(view.follow_up_rounds) + 1
+        if (
+            round_index > MAX_FOLLOW_UP_ROUNDS
+            or usage is None
+            or usage.replan_rounds >= self._limits.replan_rounds
+        ):
+            return "round_limit"
+        try:
+            tasks, indexes = self._planner.plan_round(plan, findings, round_index=round_index)
+        except FollowUpBuildError:
+            return "invalid"
+        scope = self._handoff.scope
+        violations = validate_follow_up_round(
+            tasks,
+            plan=plan,
+            admitted=view.admitted_follow_ups,
+            completed_rounds=len(view.follow_up_rounds),
+            evidence_ids=frozenset(view.evidence),
+            resources=ResourceContext(
+                has_table=scope.dataset_id is not None,
+                has_documents=bool(self._documents_available),
+            ),
+            schema=self._schema,
+            numeric_fields=self._numeric_fields,
+            limits=self._limits,
+        )
+        codes = {item.code for item in violations}
+        if "round_limit_exceeded" in codes:
+            return "round_limit"
+        if "task_budget_exceeded" in codes:
+            return "budget"
+        if codes:
+            return "invalid"
+        if usage.task_attempts + len(tasks) > self._limits.task_attempts:
+            return "budget"  # cumulative attempts never reset: the round could not all run
+        approval = self._authorized(plan, round_index, tasks)
+        if approval is None:
+            return "not_authorized"
+        self._pending = (tasks, indexes, approval)
+        return "admitted"
+
+    def _authorized(
+        self, plan: InvestigationPlanV2, round_index: int, tasks: tuple[FollowUpTask, ...]
+    ) -> FollowUpApproval | None:
+        """The trusted approval of exactly this round's task set, or ``None`` (fail closed)."""
+        if self._authorizer is None:
+            return None  # production until INV-10 (#143)
+        request = FollowUpApprovalRequest.of(
+            self._handoff.scope, plan_digest(plan), round_index, tasks
+        )
+        try:
+            approval = self._authorizer.authorize(request)
+            now = self._clock.now()
+        except Exception:
+            return None
+        plan_approval = self._handoff.authority.approval
+        if (
+            type(approval) is not FollowUpApproval
+            or approval.round != round_index
+            or approval.follow_up_digest != request.follow_up_digest
+            or not (
+                plan_approval.approved_at
+                <= approval.approved_at
+                <= now
+                < approval.deadline
+                <= plan_approval.deadline
+            )
+        ):
+            return None
+        return approval
+
+    def _open_round(self, view: InvestigationStateView, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Open the pending round through the gateway: approval re-verified, one replan round."""
+        assert self._pending is not None
+        _, _, approval = self._pending
+        request = OpenFollowUpRound(
+            role=AgentRole.SUPERVISOR,
+            round=len(view.follow_up_rounds) + 1,
+            follow_up_digest=approval.follow_up_digest,
+            approval=approval,
+        )
+        result = self._gateway.open_follow_up_round(state, request)
+        if result.refusal is None:
+            self._replan_ready = True
+        else:  # not admitted after all; the decision records why
+            self._pending = None
+            self._reviewing_done = True
+        return self._apply(view, result)
+
+    def _replan(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """The guarded Supervisor writer: the approved round's follow-ups and its record."""
+        view = restore_state(state)
+        assert self._pending is not None
+        tasks, indexes, approval = self._pending
+        record = FollowUpRoundRecord(
+            round=len(view.follow_up_rounds) + 1,
+            critique_round=len(view.follow_up_rounds),
+            task_ids=tuple(task.id for task in tasks),
+            finding_indexes=indexes,
+            follow_up_digest=approval.follow_up_digest,
+            approval=approval,
+        )
+        self._pending = None
+        self._replan_ready = False
+        self._register_next = tasks
+        return {
+            "admitted_follow_ups": [task.model_dump(mode="json") for task in tasks],
+            "follow_up_rounds": [record.model_dump(mode="json")],
+        }
+
+    def _register_follow_ups(self) -> dict[str, Any]:
+        """Register the admitted follow-ups as pending, each with its own SQL Analyst."""
+        tasks, self._register_next = self._register_next, ()
+        for task in tasks:
+            self._specialists[task.id] = SQLAnalyst(task.id)
+        return {
+            "tasks": {
+                task.id: TaskRecord(task_id=task.id).model_dump(mode="json") for task in tasks
+            }
+        }
 
     def _investigate(self, state: Mapping[str, Any]) -> dict[str, Any]:
         """The guarded verdict writer: validated, content-free records for every hypothesis."""
@@ -515,18 +866,8 @@ class InvestigationExecutionRun:
         plan = self._handoff.plan
         assert isinstance(plan, InvestigationPlanV2)
         payloads = self._gateway.evidence_payloads(view)
-        proposals = self._investigator.propose_verdicts(plan, view, payloads)
         records: dict[str, Any] = {}
-        for proposal in proposals:
-            usable = {
-                key: value
-                for key, value in payloads.items()
-                if not isinstance(value, DerivedEvidencePayload)
-            }
-            try:
-                verdict = validate_verdict(proposal, plan, view, usable)
-            except VerdictInvalid:
-                raise ExecutionRunError("verdict_invalid") from None  # a defect: fails closed
+        for verdict in self._validated_verdicts(plan, view, payloads):
             record = self._record(verdict, view, payloads)
             records[record.hypothesis_id] = record.model_dump(mode="json")
         self._investigate_ready = False
@@ -544,6 +885,7 @@ class InvestigationExecutionRun:
         plan = self._handoff.plan
         assert isinstance(plan, InvestigationPlanV2)
         hypothesis = next(item for item in plan.hypotheses if item.id == verdict.hypothesis_id)
+        tests = hypothesis_tests(hypothesis, view)  # INV-7: approved tests, then follow-ups
         derived: list[str] = []
         missing = False
         for observation in verdict.observations:
@@ -571,14 +913,14 @@ class InvestigationExecutionRun:
                 verdict="untestable",
                 reasons=("evidence_missing",),
                 evidence_ids=tuple(dict.fromkeys(cited)),
-                test_task_ids=hypothesis.tests,
+                test_task_ids=tests,
             )
         return VerdictRecord(
             hypothesis_id=verdict.hypothesis_id,
             verdict=verdict.verdict,
             reasons=verdict.reasons,
             evidence_ids=tuple(dict.fromkeys((*derived, *cited))),
-            test_task_ids=hypothesis.tests,
+            test_task_ids=tests,
         )
 
     def _signals(self, view: InvestigationStateView, cancelled: bool) -> DispatchSignals:

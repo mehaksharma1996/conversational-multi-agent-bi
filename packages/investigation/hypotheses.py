@@ -16,6 +16,10 @@ to measure and the approved thresholds; the values are recomputed from gateway-i
 Compact format (D2): a plan may set ``test_defaults`` (a metric and a period) that a hypothesis test
 inherits when it omits them. ``resolve_test`` applies the defaults deterministically, and both the
 defaults and the tests are inside the approved digest.
+
+INV-7 (decision C4): an admitted follow-up is a ``FollowUpTask`` whose ``StratifiedTestSpec``
+re-runs one approved SQL rate test within fixed integer bands (``Stratification``). It is explicit
+(no defaults), outside the plan digest, and bound instead to its round's follow-up approval.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ from packages.investigation.contracts import (
     MAX_PLAN_TASKS,
     MAX_SUB_QUESTIONS,
     MAX_TASK_FIELDS,
+    AgentRole,
     DocumentResearchInput,
     FieldName,
     HypothesisId,
@@ -160,6 +165,63 @@ class HypothesisTestSpec(HypothesisTestInput):
         return self
 
 
+MAX_CUT_POINTS = 3
+CUT_POINT_LIMIT = 1_000_000
+STRATUM_COLUMN = "stratum"
+CutPoint = Annotated[int, Strict(), Field(ge=-CUT_POINT_LIMIT, le=CUT_POINT_LIMIT)]
+
+
+class Stratification(_Contract):
+    """Fixed integer bands over one numeric field (INV-7 decision C4).
+
+    ``band_0`` holds values below the first cut point, ``band_i`` holds values in
+    ``[cut_{i-1}, cut_i)``, and the last band holds values at or above the last cut point. Labels
+    are fixed, so neither a model nor a reader ever names a band.
+    """
+
+    field: FieldName
+    cut_points: tuple[CutPoint, ...] = Field(min_length=1, max_length=MAX_CUT_POINTS)
+
+    @model_validator(mode="after")
+    def _ascending(self) -> Stratification:
+        cuts = self.cut_points
+        if any(low >= high for low, high in zip(cuts, cuts[1:], strict=False)):
+            raise ValueError("cut points must be strictly ascending")
+        return self
+
+    @property
+    def bands(self) -> tuple[str, ...]:
+        return tuple(f"band_{index}" for index in range(len(self.cut_points) + 1))
+
+
+class StratifiedTestSpec(HypothesisTestSpec):
+    """An INV-7 follow-up: an approved SQL rate test re-run within fixed strata (decision C4).
+
+    Everything is explicit (no plan defaults), so the follow-up digest binds the whole
+    specification. The result is evaluated by direct standardization with baseline weights.
+    """
+
+    stratification: Stratification
+
+    @model_validator(mode="after")
+    def _stratified(self) -> StratifiedTestSpec:
+        if self.method != "stratified_comparison":
+            raise ValueError("a follow-up re-test is a stratified comparison")
+        if not isinstance(self.metric, RateMetric) or self.period is None or self.claim is None:
+            raise ValueError("a stratified re-test names a rate metric, a period, and a claim")
+        if self.claim.direction == "higher_than" or self.comparison_group is not None:
+            raise ValueError("a stratified re-test compares periods only")
+        keys = {
+            self.period.field.casefold(),
+            self.metric.event.casefold(),
+            self.metric.population.casefold(),
+            *(item.field.casefold() for item in self.filters),
+        }
+        if self.stratification.field.casefold() in keys:
+            raise ValueError("the stratification field is not already a key or a count")
+        return self
+
+
 class PlanTaskV2(PlanTask):
     """A v2 plan task: the v1 inputs, with hypothesis tests as ``HypothesisTestSpec``."""
 
@@ -167,6 +229,39 @@ class PlanTaskV2(PlanTask):
         SQLAnalysisInput | DocumentResearchInput | HypothesisTestSpec,
         Field(discriminator="kind"),
     ]
+
+
+class FollowUpTask(PlanTask):
+    """An admitted INV-7 follow-up: one stratified re-test of one approved test (decision C4).
+
+    It is executed by the SQL Analyst, once (no retry), after the approved test it re-examines.
+    Plan validation never sees it: it is admitted only by the Supervisor's follow-up round, under
+    a follow-up approval bound to the exact task set.
+    """
+
+    input: StratifiedTestSpec
+
+    @model_validator(mode="after")
+    def _follow_up(self) -> FollowUpTask:
+        if self.assignee is not AgentRole.SQL_ANALYST or self.max_attempts != 1:
+            raise ValueError("a follow-up re-test runs once, through the SQL Analyst")
+        if len(self.depends_on) != 1:
+            raise ValueError("a follow-up re-test depends on exactly the test it re-examines")
+        return self
+
+
+def parse_follow_up(raw: object) -> PlanTask:
+    """Validate an admitted follow-up. A stratified input selects ``FollowUpTask``, exactly.
+
+    Dispatch is on the presence of ``stratification`` in the raw input, never by trying one model
+    after the other; anything else is validated as a plain ``PlanTask``.
+    """
+    if isinstance(raw, PlanTask):
+        raw = raw.model_dump(mode="json")
+    task_input = raw.get("input") if isinstance(raw, dict) else None
+    if isinstance(task_input, dict) and "stratification" in task_input:
+        return FollowUpTask.model_validate(raw)
+    return PlanTask.model_validate(raw)
 
 
 class Hypothesis(_Contract):
@@ -258,7 +353,10 @@ def is_v2(plan: InvestigationPlan) -> bool:
 
 
 class ResolvedTest(_Contract):
-    """The effective, approved specification of one SQL hypothesis test."""
+    """The effective, approved specification of one SQL hypothesis test.
+
+    ``stratification`` is set only for an INV-7 stratified follow-up (``resolve_follow_up``).
+    """
 
     task_id: TaskId
     hypothesis_id: HypothesisId
@@ -268,7 +366,8 @@ class ResolvedTest(_Contract):
     period: PeriodSpec
     comparison_group: EqualityFilter | None
     claim: ClaimSpec
-    fields: tuple[FieldName, ...] = Field(min_length=1, max_length=MAX_TASK_FIELDS + 4)
+    fields: tuple[FieldName, ...] = Field(min_length=1, max_length=MAX_TASK_FIELDS + 5)
+    stratification: Stratification | None = None
 
 
 class SpecIncomplete(ValueError):
@@ -305,7 +404,54 @@ def resolve_test(plan: InvestigationPlanV2, task: PlanTask) -> ResolvedTest:
     )
 
 
+def resolve_follow_up(task: PlanTask) -> ResolvedTest:
+    """The effective specification of an admitted stratified follow-up; else ``SpecIncomplete``.
+
+    A follow-up spec is explicit by contract, so no plan defaults apply.
+    """
+    spec = task.input
+    if not isinstance(task, FollowUpTask) or not isinstance(spec, StratifiedTestSpec):
+        raise SpecIncomplete("not_a_follow_up")
+    metric, period, claim = spec.metric, spec.period, spec.claim
+    assert isinstance(metric, RateMetric) and period is not None and claim is not None
+    named = [
+        period.field,
+        *(item.field for item in spec.filters),
+        metric.event,
+        metric.population,
+        spec.stratification.field,
+    ]
+    return ResolvedTest(
+        task_id=task.id,
+        hypothesis_id=spec.hypothesis_id,
+        method=spec.method,
+        metric=metric,
+        filters=spec.filters,
+        period=period,
+        comparison_group=None,
+        claim=claim,
+        fields=tuple(dict.fromkeys([*spec.fields, *named])),
+        stratification=spec.stratification,
+    )
+
+
+def resolve_any(plan: InvestigationPlanV2, task: PlanTask) -> ResolvedTest:
+    """``resolve_follow_up`` for a stratified follow-up, else ``resolve_test`` against ``plan``."""
+    if isinstance(task, FollowUpTask):
+        return resolve_follow_up(task)
+    return resolve_test(plan, task)
+
+
 __all__ = [
+    "CUT_POINT_LIMIT",
+    "FollowUpTask",
+    "MAX_CUT_POINTS",
+    "STRATUM_COLUMN",
+    "StratifiedTestSpec",
+    "Stratification",
+    "parse_follow_up",
+    "resolve_any",
+    "resolve_follow_up",
     "MAX_HYPOTHESES",
     "MIN_DENOMINATOR_FLOOR",
     "PLAN_V2",

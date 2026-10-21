@@ -46,7 +46,6 @@ from tests.investigation_fixtures import (
     evidence_record,
     investigation_authority,
     running_state,
-    sql_task,
     task_record,
 )
 
@@ -543,11 +542,8 @@ def test_each_writer_alone_accepts_what_the_combined_step_must_not() -> None:
                 "dispatcher",
                 lambda s: {"tasks": {"trend": task_record("trend", "running", 1)}},
             ),
-            (
-                "admit",
-                "supervisor",
-                lambda s: {"admitted_follow_ups": [sql_task("drilldown").model_dump(mode="json")]},
-            ),
+            # Re-asserting the write-once plan is valid alone; it still makes a second writer.
+            ("replan", "supervisor", lambda s: {"plan": s["plan"]}),
         ],
     ],
     ids=["completed+start", "cancelled+start", "unrelated-channels"],

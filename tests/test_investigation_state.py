@@ -53,13 +53,19 @@ from packages.investigation.state import (
 )
 from src.agents.rag_agent import EvidenceStatus
 from src.orchestration.policy_grounding import PolicySQLStatus
+from tests.investigation_critique_fakes import (
+    admission,
+    admitted_state,
+    critique,
+    stratified_follow_up,
+    v2_running_state,
+)
 from tests.investigation_fixtures import (
     SCOPE,
     apply_update,
     churn_plan,
     evidence_record,
     running_state,
-    sql_task,
     task_record,
 )
 
@@ -290,12 +296,13 @@ def test_tasks_must_be_admitted_and_keyed_by_their_own_id() -> None:
 
 
 def test_follow_ups_are_append_only_and_cannot_reuse_plan_ids() -> None:
-    state = running_state()
-    follow_up = sql_task("drilldown").model_dump(mode="json")
-    added = apply_update(state, "supervisor", {"admitted_follow_ups": [follow_up]})
-    _rejected("duplicate_id", "supervisor", added, {"admitted_follow_ups": [follow_up]})
-    clash = sql_task("trend").model_dump(mode="json")
-    _rejected("follow_up_conflict", "supervisor", state, {"admitted_follow_ups": [clash]})
+    follow_up = stratified_follow_up()
+    added = admitted_state([follow_up])  # INV-7: admitted with its critique and approved round
+    again = {"admitted_follow_ups": [follow_up.model_dump(mode="json")]}
+    _rejected("duplicate_id", "supervisor", added, again)
+    reviewed = apply_update(v2_running_state(), "critic", {"critiques": [critique(0)]})
+    clash = stratified_follow_up("h4_rate")  # reuses a plan task ID
+    _rejected("follow_up_conflict", "supervisor", reviewed, admission([clash]))
 
 
 # --- evidence -----------------------------------------------------------------------------------
@@ -460,12 +467,9 @@ def test_terminal_investigations_refuse_new_evidence(status: str) -> None:
 
 @_TERMINAL
 def test_terminal_investigations_refuse_new_task_records(status: str) -> None:
-    follow_up = sql_task("drilldown")
-    state = apply_update(
-        running_state(), "supervisor", {"admitted_follow_ups": [follow_up.model_dump(mode="json")]}
-    )
+    state = admitted_state([stratified_follow_up()])
     state = apply_update(state, "lifecycle", {"status": status})  # admitted, never registered
-    update = {"tasks": {"drilldown": task_record("drilldown")}}
+    update = {"tasks": {"h1_tenure": task_record("h1_tenure")}}
     _rejected("investigation_terminal", "dispatcher", state, update)
 
 
@@ -493,9 +497,11 @@ def test_terminal_investigations_refuse_new_budget_spending(status: str) -> None
 
 @_TERMINAL
 def test_terminal_investigations_freeze_follow_ups(status: str) -> None:
-    state = _closed(status)
-    follow_up = sql_task("drilldown").model_dump(mode="json")
-    _rejected("investigation_terminal", "supervisor", state, {"admitted_follow_ups": [follow_up]})
+    reviewed = apply_update(v2_running_state(), "critic", {"critiques": [critique(0)]})
+    state = apply_update(reviewed, "lifecycle", {"status": status})
+    _rejected("investigation_terminal", "supervisor", state, admission([stratified_follow_up()]))
+    unreviewed = apply_update(v2_running_state(), "lifecycle", {"status": status})
+    _rejected("investigation_terminal", "critic", unreviewed, {"critiques": [critique(0)]})
 
 
 def test_an_expired_plan_cannot_be_approved_afterwards() -> None:

@@ -61,7 +61,8 @@ Approved plan → background job → EXECUTION SUBGRAPH — execution budget
 | Task status | Dispatcher, applying gateway-issued updates | Moves forward only: pending → running → terminal |
 | Evidence | Dispatcher, applying gateway-issued records | Insert-only; IDs assigned by the gateway |
 | Hypotheses and verdicts | Business Investigation | Verdicts must cite existing evidence |
-| Critiques | Critic | Append-only |
+| Critiques (INV-7) | Critic | Append-only, one per critic round (0, 1); content-free codes and IDs |
+| Follow-up rounds (INV-7) | Supervisor | Append-only (1, 2); each bound to its critique, findings, and an approval of its exact task set |
 | Budget usage | Dispatcher, applying gateway ledger snapshots | Cumulative; never reset |
 | Proposal record (INV-4) | Supervisor, bound to the planning ledger | Written once while `planning`; equals the closed planning ledger; matches the plan digest |
 | Approvals | API resume path | Typed decisions only |
@@ -568,3 +569,58 @@ Numbers come only from typed payload counts, never from a model, the plan, or do
 is never zero. No verdict is written after a stop or a defect (the report states
 `verdicts_not_evaluated`), and verdicts never change the final status. Checkpoints hold verdict codes,
 derived-evidence metadata, and IDs only.
+
+## Critique and bounded replanning (INV-7)
+
+ADR 0024 Amendment 5; brief `docs/agents/briefs/140-inv7-critic-replanning.md` (decisions C1 to
+C9).
+
+**Topology.** A v2 run reviews each round between its derivations and the verdict step:
+
+```text
+dispatch* → derive* → draft_findings → review_findings → critique
+   ├─ admitted: open_follow_up_round → replan → register → dispatch* (follow-ups) → derive* → …
+   └─ otherwise: investigate (final verdicts) → close(completed) → finish → terminal
+```
+
+`draft_findings`, `review_findings`, `open_follow_up_round`, and the registration are `dispatch`
+steps, one owner-only gateway operation each. `critique` (writer `critic`) and `replan` (writer
+`supervisor`) are guarded steps. At most two critic rounds (0 and 1) and two follow-up rounds (1 and
+2) exist: critique *n* reviews the results of round *n*, and round 2's results are evaluated but
+not critiqued again (`critique_rounds_exhausted`).
+
+| Component | Does | Never |
+|---|---|---|
+| Business Investigator draft (gateway, bounded model call) | Drafts transient, typed claims about the verified results | Enters state, checkpoints, or reports |
+| Critic review (gateway, bounded model call, one charged critic round) | Proposes at most 3 stratification gaps | Sees rows, numbers, document text, or the draft |
+| Critic (`src/investigation/critic.py`) | Recomputes every finding from verified evidence (`critique_round`) | Holds the gateway, a model, the ledger, or authority; creates tasks; writes state |
+| Supervisor `FollowUpPlanner` | Builds stratified re-tests from confirmed gaps | Authors text, widens a test, approves, or schedules |
+| Run owner | Validates (`validate_critique`, `validate_follow_up_round`), asks the trusted `FollowUpAuthorizer`, writes through guarded steps | Constructs a `FollowUpApproval` |
+
+**Findings** (fixed severity and disposition per code): `numeric_mismatch` and `direction_mismatch`
+(a claim against the recomputed observation, tolerance 0.0001), `causal_overreach`,
+`document_contradiction` (a claim resting on a verified citation from an approved document task,
+against the data), `unsupported_reference` (a fabricated or foreign ID, never stored),
+`evidence_not_bound`, `document_evidence_unverified`, `insufficient_evidence`,
+`conflicting_evidence`, `incomplete_coverage` (accepted as a limitation; a critique never retries a
+task), and `missing_stratification` (a model gap that deterministic checks confirmed: an approved,
+completed SQL rate test; a confirmed numeric schema field that is not already a key; not addressed
+before).
+
+**Follow-ups.** Only stratified re-tests (`FollowUpTask`, `StratifiedTestSpec`): the target test's
+metric, filters, period, and claim unchanged, plus integer bands over the stratification field, run
+once by the SQL Analyst. The result is evaluated by direct standardization with baseline weights,
+exactly, from the band counts (`standardized_rate_difference`), and becomes an additional required
+test of its hypothesis. A round is admitted only after validation, the round and cumulative attempt
+limits, and an approval for exactly its task set (`follow_up_digest`) inside the plan approval's
+window. The gateway re-verifies the approval when it opens the round and on every operation on a
+follow-up task (`follow_up_not_authorized`, task severity). Production has no authorizer, so it
+admits nothing until INV-10.
+
+**Failures.** A malformed draft or review is `invalid` and never retried; a provider failure or a
+prompt over the input cap is `unavailable` (the latter is never sent and charges nothing). The
+deterministic checks that need no draft still run. A late answer after cancellation is discarded;
+the `critique` and `replan` steps write nothing once cancellation is observed. Budget exhaustion
+during a follow-up ends `budget_exhausted` without verdicts, while the critique records keep each
+round's verdict snapshot. The interim report shows critique rows as codes and states every round
+that did not fully happen.

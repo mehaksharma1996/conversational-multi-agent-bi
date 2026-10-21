@@ -71,6 +71,9 @@ SPECIALIST_IMPORTS: dict[str, frozenset[str] | None] = {
     "packages.investigation.hypotheses": ANY,
     "packages.investigation.evidence": ANY,
     "packages.investigation.verdicts": ANY,
+    # INV-7: the pure critique checks, and the Supervisor's deterministic follow-up builder only
+    "packages.investigation.critique": ANY,
+    "packages.investigation.replanning": frozenset({"build_follow_ups", "FollowUpBuildError"}),
     "src.orchestration.tool_gateway": _TOOL_REQUESTS,
     "src.orchestration.investigation_graph": frozenset({"InvestigationGraphBuilder"}),
     # INV-4 S2e: the Supervisor plans only through the two-operation port.
@@ -115,6 +118,16 @@ BANNED_NAMES = frozenset(
         "derive_evidence",
         "DeriveEvidence",
         "derived_payload_for",
+        # INV-7: review calls, round opening, and follow-up approvals stay with the trusted owner
+        "draft_findings",
+        "review_findings",
+        "open_follow_up_round",
+        "DraftFindings",
+        "ReviewFindings",
+        "OpenFollowUpRound",
+        "FollowUpApproval",
+        "FollowUpAuthorizer",
+        "FollowUpApprovalRequest",
         # authority and consent come from the trusted adapter, never from investigation code
         "InvestigationAuthority",
         "ConsentSnapshot",

@@ -41,7 +41,8 @@ class BusinessInvestigator:
     def derivations(
         self, plan: InvestigationPlanV2, view: InvestigationStateView, payloads: Payloads
     ) -> tuple[str, ...]:
-        """Test task IDs, in plan order, whose usable observation has no derived evidence yet."""
+        """Test task IDs, in plan then admission order, whose usable observation has no derived
+        evidence yet."""
         derived_sources = {
             source
             for record in view.evidence.values()
@@ -57,7 +58,12 @@ class BusinessInvestigator:
                     and observation.evidence_id not in derived_sources
                 ):
                     wanted.append(observation.task_id)
-        tests = [task.id for task in plan.tasks if task.kind is TaskKind.HYPOTHESIS_TEST]
+        # INV-7: admitted follow-up re-tests are hypothesis tests too, after the approved ones.
+        tests = [
+            task.id
+            for task in (*plan.tasks, *view.admitted_follow_ups)
+            if task.kind is TaskKind.HYPOTHESIS_TEST
+        ]
         return tuple(task_id for task_id in tests if task_id in wanted)
 
     def propose_verdicts(

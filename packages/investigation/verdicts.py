@@ -21,6 +21,12 @@ group - comparison group for ``higher_than``):
 - effect <= 0 (no change, or the opposite direction): the test refutes;
 - otherwise ``effect_below_threshold``.
 
+INV-7 (decision C4): an admitted stratified follow-up is an additional required test of its
+hypothesis. Its result has a ``stratum`` column (``band_0`` ... ``band_n``) beside the period and
+filter keys; every band's baseline and comparison rows must exist exactly once and meet
+``min_denominator``. The comparison period is directly standardized to the baseline's band
+composition, exactly, and compared with the crude baseline rate (``standardized_rate``).
+
 Unusable evidence (absent, failed, truncated, NULL, too-small denominators, inconsistent shape or
 counts, conflicting values) makes the test, and therefore the hypothesis, ``untestable``: absence of
 evidence is never evidence of no effect. A hypothesis is ``supported_association`` only when every
@@ -41,19 +47,25 @@ from packages.investigation.contracts import HypothesisId, TaskId, _Contract
 from packages.investigation.evidence import (
     DerivedEvidencePayload,
     DerivedRatio,
+    DerivedStratum,
     DocumentEvidencePayload,
     QueryEvidencePayload,
+    crude_baseline,
     document_citations_valid,
+    exact_ratio,
+    standardized_rate,
     verify_payload,
 )
 from packages.investigation.hypotheses import (
+    STRATUM_COLUMN,
+    FollowUpTask,
     Hypothesis,
     InvestigationPlanV2,
     MeanMetric,
     RateMetric,
     ResolvedTest,
     SpecIncomplete,
-    resolve_test,
+    resolve_any,
 )
 from packages.investigation.state import (
     GatewayEvidenceId,
@@ -106,6 +118,8 @@ class TestObservation(_Contract):
     measure: Measure | None = None  # the group or period the claim is about
     reference: Measure | None = None  # what it is compared against
     effect: Finite | None = None  # in the claimed direction
+    # INV-7: a stratified follow-up's band counts, from which both measures recompute.
+    strata: tuple[DerivedStratum, ...] = Field(default=(), max_length=4)
 
     @model_validator(mode="after")
     def _consistent(self) -> TestObservation:
@@ -215,10 +229,70 @@ def _keys(test: ResolvedTest) -> tuple[dict[str, str], dict[str, str]]:
     return comparison, baseline
 
 
+def _outcome(effect: Fraction, test: ResolvedTest) -> TestOutcome:
+    if effect <= 0:
+        return "refutes"
+    if effect >= Fraction(test.claim.min_effect):
+        return "supports"
+    return "below_threshold"
+
+
+def _observe_stratified(
+    test: ResolvedTest, evidence_id: str, payload: QueryEvidencePayload
+) -> TestObservation:
+    """Direct standardization of a stratified follow-up, exactly, from the band counts (C4)."""
+    stratification = test.stratification
+    assert stratification is not None
+    folded = {name.casefold(): index for index, name in enumerate(payload.columns)}
+    group = {item.field.casefold(): item.value for item in test.filters}
+    period = test.period.field.casefold()
+    needed = {period, *group, STRATUM_COLUMN, "numerator", "denominator"}
+    if any(name not in folded for name in needed):
+        return _unusable(test.task_id, "evidence_inconsistent")
+    strata: list[DerivedStratum] = []
+    for label in stratification.bands:
+        ratios: list[DerivedRatio] = []
+        for value in (test.period.baseline, test.period.comparison):
+            row = _row_for(payload, folded, {**group, period: value, STRATUM_COLUMN: label})
+            if isinstance(row, str):
+                return _unusable(test.task_id, row)
+            measured = _measure(test, row, folded)
+            if isinstance(measured, str):
+                return _unusable(test.task_id, measured)
+            ratios.append(
+                DerivedRatio(numerator=measured.numerator, denominator=measured.denominator)
+            )
+        strata.append(DerivedStratum(label=label, baseline=ratios[0], comparison=ratios[1]))
+    crude = crude_baseline(strata)
+    try:
+        standard = exact_ratio(standardized_rate(strata))
+    except ValueError:
+        return _unusable(test.task_id, "evidence_inconsistent")
+    sides = (standard, crude) if test.claim.direction == "increase" else (crude, standard)
+    measure, reference = (
+        Measure(numerator=ratio.numerator, denominator=ratio.denominator, value=float(ratio.exact))
+        for ratio in sides
+    )
+    effect = sides[0].exact - sides[1].exact
+    outcome = _outcome(effect, test)
+    return TestObservation(
+        task_id=test.task_id,
+        evidence_id=evidence_id,
+        outcome=outcome,
+        reason="effect_below_threshold" if outcome == "below_threshold" else None,
+        measure=measure,
+        reference=reference,
+        effect=float(effect),
+        strata=tuple(strata),
+    )
+
+
 def observe(test: ResolvedTest, evidence_id: str, payload: QueryEvidencePayload) -> TestObservation:
     """Recompute one test's measures and outcome from its verified query payload."""
     if payload.truncated:
         return _unusable(test.task_id, "evidence_truncated")
+    if test.stratification is not None:
+        return _observe_stratified(test, evidence_id, payload)
     folded = {name.casefold(): index for index, name in enumerate(payload.columns)}
     counts = (
         ("numerator", "denominator")
@@ -248,14 +322,7 @@ def observe(test: ResolvedTest, evidence_id: str, payload: QueryEvidencePayload)
         Fraction(measure.numerator) / measure.denominator
         - Fraction(reference.numerator) / reference.denominator
     )
-    threshold = Fraction(test.claim.min_effect)
-    outcome: TestOutcome
-    if effect <= 0:
-        outcome = "refutes"
-    elif effect >= threshold:
-        outcome = "supports"
-    else:
-        outcome = "below_threshold"
+    outcome = _outcome(effect, test)
     return TestObservation(
         task_id=test.task_id,
         evidence_id=evidence_id,
@@ -275,7 +342,12 @@ def _measured_key(test: ResolvedTest) -> tuple[object, ...]:
         else ("mean", metric.value if isinstance(metric, MeanMetric) else "")
     )
     filters = tuple(sorted((item.field.casefold(), item.value) for item in test.filters))
-    return (*name, filters, test.period.field.casefold())
+    strata = (
+        ()
+        if test.stratification is None
+        else (test.stratification.field.casefold(), test.stratification.cut_points)
+    )
+    return (*name, filters, test.period.field.casefold(), strata)
 
 
 # --- one hypothesis ---------------------------------------------------------------------------
@@ -331,6 +403,16 @@ def _context(
     return tuple(verified), len(verified) == len(hypothesis.context_tasks)
 
 
+def hypothesis_tests(hypothesis: Hypothesis, view: InvestigationStateView) -> tuple[str, ...]:
+    """A hypothesis's required tests: its approved tests, then its admitted follow-ups (C6)."""
+    follow_ups = tuple(
+        task.id
+        for task in view.admitted_follow_ups
+        if isinstance(task, FollowUpTask) and task.input.hypothesis_id == hypothesis.id
+    )
+    return (*hypothesis.tests, *follow_ups)
+
+
 def evaluate_hypothesis(
     plan: InvestigationPlanV2,
     hypothesis_id: str,
@@ -349,13 +431,13 @@ def evaluate_hypothesis(
             reasons=("required_data_absent",),
             context_evidence_ids=context_ids,
         )
-    tasks = {task.id: task for task in plan.tasks}
+    tasks = {task.id: task for task in (*plan.tasks, *view.admitted_follow_ups)}
     observations: list[TestObservation] = []
     seen: dict[tuple[object, ...], tuple[float, float]] = {}
     conflicting = False
-    for task_id in hypothesis.tests:
+    for task_id in hypothesis_tests(hypothesis, view):
         try:
-            test = resolve_test(plan, tasks[task_id])
+            test = resolve_any(plan, tasks[task_id])
         except (KeyError, SpecIncomplete):
             raise VerdictInvalid("spec_incomplete") from None
         if test.hypothesis_id != hypothesis.id:
@@ -434,7 +516,7 @@ def validate_verdict(
     hypothesis = next((item for item in plan.hypotheses if item.id == verdict.hypothesis_id), None)
     if hypothesis is None:
         raise VerdictInvalid("unknown_hypothesis")
-    allowed = {*hypothesis.tests, *hypothesis.context_tasks}
+    allowed = {*hypothesis_tests(hypothesis, view), *hypothesis.context_tasks}
     for evidence_id in (*verdict.query_evidence_ids, *verdict.context_evidence_ids):
         record = view.evidence.get(evidence_id)
         if record is None:
@@ -460,6 +542,21 @@ def derived_payload_for(
     measure, reference = observation.measure, observation.reference
     if observation.evidence_id is None or measure is None or reference is None:
         raise VerdictInvalid("observation_unusable")
+    if test.stratification is not None:
+        return DerivedEvidencePayload(
+            evidence_id=evidence_id,
+            task_id=observation.task_id,
+            attempt=attempt,
+            operation="standardized_rate_difference",
+            source_evidence_ids=(observation.evidence_id,),
+            measure=DerivedRatio(numerator=measure.numerator, denominator=measure.denominator),
+            reference=DerivedRatio(
+                numerator=reference.numerator, denominator=reference.denominator
+            ),
+            value=observation.effect if observation.effect is not None else 0.0,
+            strata=observation.strata,
+            standardized="measure" if test.claim.direction == "increase" else "reference",
+        )
     operation = "rate_difference" if isinstance(test.metric, RateMetric) else "mean_difference"
     return DerivedEvidencePayload(
         evidence_id=evidence_id,
@@ -489,4 +586,5 @@ def derived_matches(observation: TestObservation, payload: DerivedEvidencePayloa
         and (payload.reference.numerator, payload.reference.denominator)
         == (reference.numerator, reference.denominator)
         and payload.value == observation.effect
+        and payload.strata == observation.strata
     )

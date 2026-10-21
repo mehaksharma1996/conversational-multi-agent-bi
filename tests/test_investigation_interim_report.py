@@ -292,6 +292,8 @@ def test_the_checkpoint_schema_changes_only_by_approved_additions() -> None:
         "terminal",
         "proposal_record",
         "verdicts",  # INV-6 S1: the investigator's write-once verdict channel
+        "critiques",  # INV-7: the Critic's round records
+        "follow_up_rounds",  # INV-7: approved follow-up rounds (Supervisor)
     }
     assert set(typing.get_args(state.GatewayTool)) == {
         "begin_attempt",
@@ -302,6 +304,9 @@ def test_the_checkpoint_schema_changes_only_by_approved_additions() -> None:
         "finish_attempt",
         "skip_task",  # INV-5 S2: added with the gateway operation
         "derive_evidence",  # INV-6 D4: the owner-only derivation
+        "draft_findings",  # INV-7: the transient claim draft (owner-only)
+        "review_findings",  # INV-7: the Critic's gap review (owner-only)
+        "open_follow_up_round",  # INV-7: an approved round's opening (owner-only)
     }
     assert set(typing.get_args(state.EvidenceRecord.model_fields["kind"].annotation)) == {
         "query",
