@@ -413,6 +413,7 @@ def get_conversation(
     "/conversations/{conversation_id}/messages",
     dependencies=[requires(Capability.ANALYSIS_RUN)],
     response_model=MessageResponse,
+    response_model_exclude_unset=True,
     status_code=status.HTTP_201_CREATED,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
@@ -583,6 +584,7 @@ def create_message(
     "/messages/{message_id}/approval",
     dependencies=[requires(Capability.ANALYSIS_RUN)],
     response_model=MessageResponse,
+    response_model_exclude_unset=True,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
 )
@@ -717,6 +719,7 @@ def decide_sql_approval(
     "/conversations/{conversation_id}/messages",
     dependencies=[requires(Capability.WORKSPACE_READ)],
     response_model=MessageListResponse,
+    response_model_exclude_unset=True,
     responses=STANDARD_ERROR_RESPONSES,
     tags=["conversations"],
 )

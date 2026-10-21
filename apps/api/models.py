@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from packages.jobs import JobStatus
+from src.orchestration.investigation_routing import InvestigationProposalReason
 
 
 class StrictModel(BaseModel):
@@ -356,7 +357,7 @@ class ProvenanceResponse(StrictModel):
     initial_model_route: Literal["memory", "sql", "rag", "hybrid", "unsupported"] | None
     initial_route_confidence: float | None
     route_reconsideration_triggered: bool
-    final_route: Literal["memory", "sql", "rag", "hybrid", "unsupported"] | None
+    final_route: Literal["memory", "sql", "rag", "hybrid", "unsupported", "investigation"] | None
     final_route_confidence: float | None
     deterministic_route_fallback: bool
     source_count: int
@@ -398,6 +399,18 @@ class ProvenanceResponse(StrictModel):
     execution: ExecutionSummaryResponse
 
 
+class InvestigationProposalMessage(StrictModel):
+    """A read-only recommendation, never an approval or execution handle."""
+
+    type: Literal["investigation_proposed"]
+    schema_version: Literal[1]
+    summary: str
+    request_reference: str
+    reason_codes: list[InvestigationProposalReason]
+    status: Literal["not_started"]
+    approval_required: Literal[True]
+
+
 class MessageResponse(StrictModel):
     id: str
     conversation_id: str
@@ -405,11 +418,12 @@ class MessageResponse(StrictModel):
     status: Literal["complete", "pending_approval", "rejected"]
     question: str
     answer: str
-    route: Literal["memory", "sql", "rag", "hybrid", "unsupported"]
+    route: Literal["memory", "sql", "rag", "hybrid", "unsupported", "investigation"]
     sql: str | None
     rows: list[dict[str, Any]] | None
     sources: list[SourceResponse]
     provenance: ProvenanceResponse
+    proposal: InvestigationProposalMessage | None = None
     request_id: str
     created_at: datetime
 

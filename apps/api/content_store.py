@@ -159,6 +159,8 @@ def _diagnostics_from_json(raw: str) -> AnswerDiagnostics:
         selected["criteria_keys"] = tuple(selected["criteria_keys"])
     if "evidence_statuses" in selected:
         selected["evidence_statuses"] = tuple(selected["evidence_statuses"])
+    if "investigation_reason_codes" in selected:
+        selected["investigation_reason_codes"] = tuple(selected["investigation_reason_codes"])
     return AnswerDiagnostics(**selected)
 
 

@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 from src.agents.rag_agent import EvidenceStatus
-from src.orchestration.investigation_routing import InvestigationProposalReason
+from src.orchestration.investigation_routing import (
+    InvestigationProposalReason,
+    InvestigationProposalSchemaVersion,
+    InvestigationRouteVersion,
+)
 from src.orchestration.policy_grounding import PolicySQLStatus
 
 RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported", "investigation"]
@@ -74,8 +78,8 @@ class AnswerDiagnostics:
     llm_output_tokens: int | None = None
     llm_estimated_cost_usd: float | None = None
     llm_fallbacks: int = 0
-    investigation_proposal_schema_version: int | None = None
-    investigation_route_version: str | None = None
+    investigation_proposal_schema_version: InvestigationProposalSchemaVersion | None = None
+    investigation_route_version: InvestigationRouteVersion | None = None
     investigation_reason_codes: tuple[InvestigationProposalReason, ...] = ()
 
 

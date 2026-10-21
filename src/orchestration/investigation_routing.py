@@ -10,10 +10,17 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal
 
-INVESTIGATION_ROUTE_VERSION = "inv9-routing-v1"
-INVESTIGATION_PROPOSAL_SCHEMA_VERSION = 1
+InvestigationRouteVersion = Literal["inv9-routing-v1"]
+InvestigationProposalSchemaVersion = Literal[1]
+
+INVESTIGATION_ROUTE_VERSION: Final[InvestigationRouteVersion] = "inv9-routing-v1"
+INVESTIGATION_PROPOSAL_SCHEMA_VERSION: Final[InvestigationProposalSchemaVersion] = 1
+INVESTIGATION_PROPOSAL_SUMMARY: Final = (
+    "A multi-step investigation is recommended. No investigation has started; a plan must be "
+    "reviewed and approved before any investigation can run."
+)
 
 InvestigationIntentReason = Literal[
     "explicit_investigation",
