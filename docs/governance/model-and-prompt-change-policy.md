@@ -9,12 +9,20 @@ approval and evidence required, how to roll back, and what proves the policy is 
 | Artifact | Where it is recorded | Enforced by |
 |---|---|---|
 | Prompt builders: route classification, hybrid criteria extraction, SQL generation, SQL correction, document answer | `evals/v1/prompt-registry.json` (SHA-256 of each builder's source) | `tests/test_prompt_registry.py` |
+| Investigation prompt modules: INV-7 findings draft and Critic review (`src/orchestration/review_prompts.py`), INV-8 report narrative (`src/orchestration/report_prompt.py`) | same registry, as whole-module targets (SHA-256 of the module's source) | `tests/test_prompt_registry.py` |
 | Approved default model (`GEMINI_MODEL`) | same registry, `models.default_gemini_model` | `tests/test_prompt_registry.py` |
 | Safety and quality behaviour around the model | `evals/v1/` fixtures, thresholds, and baseline | `python -m scripts.run_evaluations` (CI gate) |
 | Provider chain, tier routing, and consent | [ADR 0017](../adr/0017-model-providers-and-fallback.md); consent notice version | Tests plus the consent flow |
 
 A new prompt-building function named `build_*prompt` must be added to the registry; the test fails otherwise.
 Inline prompts inside a larger function are registered by that function's qualified name.
+A module that renders a model prompt (`render_*prompt`) is registered as a whole-module target
+(`package.module`, no `:`), because its instructions, markers, and layout live at module level and a
+function hash alone would be a partial fingerprint. The only exception is the INV-6 planning prompt
+(`src/orchestration/planning_prompt.py`), whose rendered prompts are pinned by
+`tests/test_investigation_planning_prompt.py`; registering it is a separate reviewed change (ADR 0024
+Amendment 6). Adding a registry entry changes the registry file, so a measured baseline's recorded
+`prompt_registry_sha256` then predates it; that field is provenance, not a gate.
 
 ## Procedure for a prompt change
 
