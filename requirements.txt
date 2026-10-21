@@ -5,7 +5,7 @@ python-multipart==0.0.32
 Authlib==1.8.0
 joserfc==1.7.5
 httpx==0.28.1
-sqlcipher3==0.6.2
+sqlcipher3==0.6.4
 pandas==3.0.6
 openpyxl==3.1.5
 xlrd==2.0.2
