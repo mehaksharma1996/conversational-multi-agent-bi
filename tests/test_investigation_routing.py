@@ -5,13 +5,26 @@ from __future__ import annotations
 import ast
 import inspect
 from pathlib import Path
+from unittest.mock import patch
 
+import pandas as pd
 import pytest
 
+import src.orchestration.langgraph_orchestrator as orchestrator_module
+from apps.api.feature_routes import _answer_attributes
+from packages.observability.telemetry import ALLOWED_ATTRIBUTES, sanitize_attributes
+from src.llm.base import LLMResponse
+from src.orchestration.graph_state import InvestigationProposalDiagnostics
 from src.orchestration.investigation_routing import (
+    INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
+    INVESTIGATION_PROPOSAL_SUMMARY,
+    INVESTIGATION_ROUTE_VERSION,
     InvestigationEligibilityDecision,
     evaluate_investigation_eligibility,
 )
+from src.orchestration.langgraph_orchestrator import OrchestratorResult, QuestionOrchestrator
+from src.storage.sqlite_store import SQLiteStore
+from tests.test_utils import isolated_database_path
 
 
 def _evaluate(
@@ -199,3 +212,154 @@ def test_routing_module_has_no_context_or_service_import_channel() -> None:
 
     assert imports <= {"__future__", "dataclasses", "re", "typing", "unicodedata"}
     assert not ({"apps", "packages", "src", "langgraph", "pandas"} & imports)
+
+
+class _ExplodingLLM:
+    configured = True
+    provider = "test"
+    model = "never-called"
+
+    def generate(self, _prompt: str) -> LLMResponse:
+        raise AssertionError("the proposal path must not call a model")
+
+
+class _UnconfiguredExplodingLLM(_ExplodingLLM):
+    configured = False
+
+
+class _CountingSQLLLM:
+    configured = True
+    provider = "test"
+    model = "counting"
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str) -> LLMResponse:
+        self.prompts.append(prompt)
+        text = (
+            '{"route":"sql","confidence":1}'
+            if "Classify a business-intelligence question" in prompt
+            else 'SELECT SUM("revenue") AS "total" FROM "uploaded_data"'
+        )
+        return LLMResponse(text=text, provider=self.provider, model=self.model)
+
+
+def _stored_table():
+    frame = pd.DataFrame({"revenue": [10.0, 20.0], "customer": ["A", "B"]})
+    return SQLiteStore(isolated_database_path("investigation-route")).save_dataframe(frame)
+
+
+def test_proposal_short_circuits_before_graph_model_and_tool_paths() -> None:
+    orchestrator = QuestionOrchestrator(
+        _ExplodingLLM(),
+        stored_table=_stored_table(),
+        investigation_routing_enabled=True,
+    )
+    with (
+        patch.object(
+            orchestrator._graph,
+            "invoke",
+            side_effect=AssertionError("the proposal path must not invoke the v1 graph"),
+        ) as graph_invoke,
+        patch.object(
+            orchestrator,
+            "_sql_service",
+            side_effect=AssertionError("the proposal path must not construct SQL services"),
+        ) as sql_service,
+        patch.object(
+            orchestrator,
+            "_document_service",
+            side_effect=AssertionError("the proposal path must not construct retrieval services"),
+        ) as document_service,
+    ):
+        result = orchestrator.answer("Why did customer churn increase last quarter?")
+
+    assert result == OrchestratorResult(
+        route="investigation",
+        answer=INVESTIGATION_PROPOSAL_SUMMARY,
+        diagnostics=InvestigationProposalDiagnostics(
+            final_route="investigation",
+            investigation_proposal_schema_version=INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
+            investigation_route_version=INVESTIGATION_ROUTE_VERSION,
+            investigation_reason_codes=(
+                "feature_enabled",
+                "authorized_table_present",
+                "metric_change_causal",
+            ),
+        ),
+        investigation_eligibility=result.investigation_eligibility,
+    )
+    assert result.investigation_eligibility is not None
+    assert graph_invoke.call_count == sql_service.call_count == document_service.call_count == 0
+
+
+def test_flag_off_does_not_even_evaluate_investigation_intent() -> None:
+    orchestrator = QuestionOrchestrator(_UnconfiguredExplodingLLM())
+    with patch.object(
+        orchestrator_module,
+        "evaluate_investigation_eligibility",
+        side_effect=AssertionError("the disabled flag must bypass the predicate"),
+    ):
+        result = orchestrator.answer("Investigate why customer churn increased last quarter.")
+
+    assert result.route == "unsupported"
+    assert result.investigation_eligibility is None
+
+
+def test_enabled_but_ineligible_uses_the_unchanged_v1_path() -> None:
+    disabled_llm = _CountingSQLLLM()
+    enabled_llm = _CountingSQLLLM()
+    disabled = QuestionOrchestrator(disabled_llm, stored_table=_stored_table())
+    enabled = QuestionOrchestrator(
+        enabled_llm,
+        stored_table=_stored_table(),
+        investigation_routing_enabled=True,
+    )
+
+    disabled_result = disabled.answer("What is total revenue?")
+    enabled_result = enabled.answer("What is total revenue?")
+
+    assert disabled_result.route == enabled_result.route == "sql"
+    assert disabled_result.answer == enabled_result.answer
+    assert disabled_result.sql == enabled_result.sql
+    assert disabled_result.dataframe is not None and enabled_result.dataframe is not None
+    pd.testing.assert_frame_equal(disabled_result.dataframe, enabled_result.dataframe)
+    assert disabled_llm.prompts == enabled_llm.prompts
+    assert len(enabled_llm.prompts) == 2
+    assert enabled_result.investigation_eligibility is not None
+    assert enabled_result.investigation_eligibility.primary_reason == "intent_not_eligible"
+
+
+def test_investigation_telemetry_is_enabled_only_and_content_free() -> None:
+    flag_off = _answer_attributes(OrchestratorResult(route="unsupported", answer="No answer."))
+    eligible = _evaluate("Why did customer churn increase last quarter?")
+    flag_on = _answer_attributes(
+        OrchestratorResult(
+            route="investigation",
+            answer=INVESTIGATION_PROPOSAL_SUMMARY,
+            investigation_eligibility=eligible,
+        )
+    )
+
+    assert not any(name.startswith("investigation_") for name in flag_off)
+    assert {
+        name: ALLOWED_ATTRIBUTES[name] for name in flag_on if name.startswith("investigation_")
+    } == {
+        "investigation_eligible": "bool",
+        "investigation_primary_reason": "token",
+        "investigation_proposal_generated": "bool",
+        "investigation_route_version": "token",
+    }
+    sanitized, dropped = sanitize_attributes(flag_on)
+    assert dropped == 0
+    assert sanitized["investigation_primary_reason"] == "metric_change_causal"
+
+
+def test_question_orchestrator_does_not_import_execution_capable_investigation_modules() -> None:
+    path = Path(inspect.getfile(orchestrator_module))
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    modules = {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+
+    assert "src.orchestration.investigation_proposal" not in modules
+    assert not any(module.startswith("packages.investigation") for module in modules)

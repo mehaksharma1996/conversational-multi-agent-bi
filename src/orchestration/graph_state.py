@@ -78,6 +78,12 @@ class AnswerDiagnostics:
     llm_output_tokens: int | None = None
     llm_estimated_cost_usd: float | None = None
     llm_fallbacks: int = 0
+
+
+@dataclass(frozen=True)
+class InvestigationProposalDiagnostics(AnswerDiagnostics):
+    """Minimum persisted metadata for reconstructing one read-only INV-9 proposal."""
+
     investigation_proposal_schema_version: InvestigationProposalSchemaVersion | None = None
     investigation_route_version: InvestigationRouteVersion | None = None
     investigation_reason_codes: tuple[InvestigationProposalReason, ...] = ()

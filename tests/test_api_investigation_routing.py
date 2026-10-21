@@ -8,18 +8,23 @@ from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from apps.api.feature_routes import router as feature_router
+from apps.api.main import create_app
 from apps.api.models import InvestigationProposalMessage
 from apps.api.repository import MessageRecord
 from apps.api.serializers import message_response
-from src.orchestration.graph_state import AnswerDiagnostics
+from src.orchestration.graph_state import AnswerDiagnostics, InvestigationProposalDiagnostics
 from src.orchestration.investigation_routing import (
     INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
     INVESTIGATION_PROPOSAL_SUMMARY,
     INVESTIGATION_ROUTE_VERSION,
 )
+from tests.test_api_features import _prepare_tabular_context, _settings
+from tests.test_investigation_routing import _ExplodingLLM
+from tests.test_utils import isolated_directory_path
 
 
 def _message(**updates: object) -> MessageRecord:
@@ -36,7 +41,7 @@ def _message(**updates: object) -> MessageRecord:
         "sources": (),
         "created_at": datetime(2026, 10, 21, tzinfo=UTC),
         "request_id": "req-1",
-        "diagnostics": AnswerDiagnostics(
+        "diagnostics": InvestigationProposalDiagnostics(
             final_route="investigation",
             investigation_proposal_schema_version=INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
             investigation_route_version=INVESTIGATION_ROUTE_VERSION,
@@ -112,9 +117,9 @@ def test_every_message_response_boundary_excludes_unset_proposals() -> None:
         {"answer": "A legacy explanation."},
         {"sql": 'SELECT * FROM "uploaded_data"'},
         {"sources": ("memo.pdf p.1",)},
-        {"diagnostics": AnswerDiagnostics(final_route="investigation")},
+        {"diagnostics": InvestigationProposalDiagnostics(final_route="investigation")},
         {
-            "diagnostics": AnswerDiagnostics(
+            "diagnostics": InvestigationProposalDiagnostics(
                 final_route="investigation",
                 investigation_proposal_schema_version=cast(Any, 999),
                 investigation_route_version=INVESTIGATION_ROUTE_VERSION,
@@ -126,7 +131,7 @@ def test_every_message_response_boundary_excludes_unset_proposals() -> None:
             )
         },
         {
-            "diagnostics": AnswerDiagnostics(
+            "diagnostics": InvestigationProposalDiagnostics(
                 final_route="investigation",
                 investigation_proposal_schema_version=1,
                 investigation_route_version=cast(Any, "unknown"),
@@ -138,7 +143,7 @@ def test_every_message_response_boundary_excludes_unset_proposals() -> None:
             )
         },
         {
-            "diagnostics": AnswerDiagnostics(
+            "diagnostics": InvestigationProposalDiagnostics(
                 final_route="investigation",
                 investigation_proposal_schema_version=1,
                 investigation_route_version=INVESTIGATION_ROUTE_VERSION,
@@ -193,3 +198,38 @@ def test_proposal_contract_rejects_execution_or_authority_fields() -> None:
         InvestigationProposalMessage.model_validate(
             {**proposal.model_dump(), "plan_id": "plan_123", "approved": True}
         )
+
+
+def test_api_passes_the_server_flag_and_returns_the_typed_proposal_without_a_model() -> None:
+    root = isolated_directory_path("api-investigation-route")
+    settings = replace(_settings(root), investigation_routing_enabled=True)
+    app = create_app(settings=settings, llm_client_factory=lambda _settings: _ExplodingLLM())
+    client = TestClient(app)
+    workspace_id = client.post("/api/v1/workspaces").json()["id"]
+    dataset_id, _ = _prepare_tabular_context(client, workspace_id)
+    assert (
+        client.put(
+            f"/api/v1/workspaces/{workspace_id}/consent",
+            json={"accepted": True, "notice_version": "2026-09"},
+        ).status_code
+        == 200
+    )
+    conversation_id = client.post(
+        f"/api/v1/workspaces/{workspace_id}/conversations",
+        json={"dataset_id": dataset_id},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"question": "Why did customer churn increase last quarter?"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["route"] == "investigation"
+    assert body["status"] == "complete"
+    assert body["answer"] == INVESTIGATION_PROPOSAL_SUMMARY
+    assert body["proposal"]["request_reference"] == body["id"]
+    assert body["proposal"]["status"] == "not_started"
+    assert body["proposal"]["approval_required"] is True
+    assert body["sql"] is None and body["rows"] is None and body["sources"] == []

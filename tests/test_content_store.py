@@ -20,7 +20,7 @@ from apps.api.content_store import (
     WorkspaceContentStore,
 )
 from src.memory.session_memory import SessionMemory
-from src.orchestration.graph_state import AnswerDiagnostics
+from src.orchestration.graph_state import AnswerDiagnostics, InvestigationProposalDiagnostics
 
 TENANT = "a" * 32
 WORKSPACE = "ws_" + "1" * 32
@@ -148,7 +148,7 @@ def test_a_message_without_a_result_frame_round_trips(tmp_path: Path) -> None:
 
 def test_versioned_proposal_diagnostics_round_trip_without_reclassification(tmp_path: Path) -> None:
     store = WorkspaceContentStore(tmp_path, None)
-    diagnostics = AnswerDiagnostics(
+    diagnostics = InvestigationProposalDiagnostics(
         final_route="investigation",
         investigation_proposal_schema_version=1,
         investigation_route_version="inv9-routing-v1",

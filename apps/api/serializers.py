@@ -50,6 +50,7 @@ from apps.api.repository import (
     WorkspaceRecord,
 )
 from packages.jobs import JobRecord
+from src.orchestration.graph_state import InvestigationProposalDiagnostics
 from src.orchestration.investigation_routing import (
     INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
     INVESTIGATION_PROPOSAL_SUMMARY,
@@ -341,6 +342,8 @@ def message_response(record: MessageRecord) -> MessageResponse:
 def _investigation_proposal(record: MessageRecord) -> InvestigationProposalMessage | None:
     """Reconstruct only coherent, recorded INV-9 metadata; never reclassify history."""
     diagnostics = record.diagnostics
+    if not isinstance(diagnostics, InvestigationProposalDiagnostics):
+        return None
     reasons = diagnostics.investigation_reason_codes
     if (
         record.route != "investigation"

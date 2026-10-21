@@ -66,6 +66,7 @@ from src.documents.pgvector_store import psycopg_connection_factory
 from src.ingestion.pdf_loader import PDFLoadError
 from src.llm.base import LLMClient, LLMConfigurationError, LLMGenerationError
 from src.memory.session_memory import remember_question
+from src.orchestration.investigation_routing import INVESTIGATION_ROUTE_VERSION
 from src.orchestration.langgraph_orchestrator import OrchestratorResult, QuestionOrchestrator
 from src.reporting.pdf_report import build_report_pdf
 from src.storage.query_executor import QueryTimeoutError, UnsafeQueryError
@@ -486,6 +487,7 @@ def create_message(
         session_memory=conversation.memory,
         debug_log_raw_content=settings.debug_log_raw_content,
         checkpointer=approval_checkpoints.saver,
+        investigation_routing_enabled=settings.investigation_routing_enabled,
     )
     provider_used = bool(getattr(llm_client, "configured", False))
     llm_attributes = {
@@ -949,6 +951,13 @@ def _answer_attributes(result: OrchestratorResult) -> dict[str, object]:
                 if diagnostics.llm_estimated_cost_usd is not None
                 else None
             ),
+        )
+    if result.investigation_eligibility is not None:
+        attributes.update(
+            investigation_eligible=result.investigation_eligibility.eligible,
+            investigation_primary_reason=result.investigation_eligibility.primary_reason,
+            investigation_proposal_generated=result.investigation_eligibility.eligible,
+            investigation_route_version=INVESTIGATION_ROUTE_VERSION,
         )
     return {name: value for name, value in attributes.items() if value is not None}
 

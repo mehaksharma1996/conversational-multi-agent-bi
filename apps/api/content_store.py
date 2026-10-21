@@ -26,7 +26,7 @@ from typing import Any
 import pandas as pd
 
 from src.memory.session_memory import SessionMemory
-from src.orchestration.graph_state import AnswerDiagnostics
+from src.orchestration.graph_state import AnswerDiagnostics, InvestigationProposalDiagnostics
 from src.storage.encrypted_sqlite import connect
 
 try:
@@ -153,7 +153,15 @@ def _memory_from_json(raw: str | None) -> SessionMemory | None:
 
 def _diagnostics_from_json(raw: str) -> AnswerDiagnostics:
     values: dict[str, Any] = json.loads(raw)
-    known = {item.name for item in fields(AnswerDiagnostics)}
+    proposal_keys = {
+        "investigation_proposal_schema_version",
+        "investigation_route_version",
+        "investigation_reason_codes",
+    }
+    diagnostics_type = (
+        InvestigationProposalDiagnostics if proposal_keys & values.keys() else AnswerDiagnostics
+    )
+    known = {item.name for item in fields(diagnostics_type)}
     selected = {key: value for key, value in values.items() if key in known}
     if "criteria_keys" in selected:
         selected["criteria_keys"] = tuple(selected["criteria_keys"])
@@ -161,7 +169,7 @@ def _diagnostics_from_json(raw: str) -> AnswerDiagnostics:
         selected["evidence_statuses"] = tuple(selected["evidence_statuses"])
     if "investigation_reason_codes" in selected:
         selected["investigation_reason_codes"] = tuple(selected["investigation_reason_codes"])
-    return AnswerDiagnostics(**selected)
+    return diagnostics_type(**selected)
 
 
 def _frame_to_json(frame: pd.DataFrame | None) -> str | None:

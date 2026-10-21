@@ -33,10 +33,18 @@ from src.orchestration.graph_state import (
     AnswerDiagnostics,
     CriteriaProvenance,
     GroundingStatus,
+    InvestigationProposalDiagnostics,
     QuestionGraphState,
     RouteName,
 )
 from src.orchestration.guarded_sql import GuardedSQLService
+from src.orchestration.investigation_routing import (
+    INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
+    INVESTIGATION_PROPOSAL_SUMMARY,
+    INVESTIGATION_ROUTE_VERSION,
+    InvestigationEligibilityDecision,
+    evaluate_investigation_eligibility,
+)
 from src.orchestration.policy_grounding import sanitize_policy_predicates
 from src.storage.query_executor import UnsafeQueryError
 from src.storage.sqlite_store import StoredTable
@@ -166,6 +174,8 @@ class OrchestratorResult:
     # Configuration tokens (never content) naming the provider/model that actually answered.
     llm_provider_used: str | None = None
     llm_model_used: str | None = None
+    # Ephemeral, content-free gate outcome for enabled-only telemetry. It is not persisted.
+    investigation_eligibility: InvestigationEligibilityDecision | None = None
 
 
 class QuestionOrchestrator:
@@ -179,12 +189,14 @@ class QuestionOrchestrator:
         session_memory: SessionMemory | None = None,
         debug_log_raw_content: bool = False,
         checkpointer: Any | None = None,
+        investigation_routing_enabled: bool = False,
     ) -> None:
         self.llm_client = llm_client
         self.stored_table = stored_table
         self.document_retriever = document_retriever
         self.session_memory = session_memory
         self.debug_log_raw_content = debug_log_raw_content
+        self.investigation_routing_enabled = investigation_routing_enabled
         self.last_route: RouteName | None = None
         self._structured_repairs = 0
         self._structured_failures = 0
@@ -212,6 +224,28 @@ class QuestionOrchestrator:
         self._route_reconsideration_triggered = False
         self._final_route_confidence = None
         self._deterministic_route_fallback = False
+        investigation_eligibility: InvestigationEligibilityDecision | None = None
+        if self.investigation_routing_enabled:
+            investigation_eligibility = evaluate_investigation_eligibility(
+                question,
+                True,
+                self.stored_table is not None,
+            )
+            if investigation_eligibility.eligible:
+                self.last_route = "investigation"
+                return OrchestratorResult(
+                    route="investigation",
+                    answer=INVESTIGATION_PROPOSAL_SUMMARY,
+                    diagnostics=InvestigationProposalDiagnostics(
+                        final_route="investigation",
+                        investigation_proposal_schema_version=(
+                            INVESTIGATION_PROPOSAL_SCHEMA_VERSION
+                        ),
+                        investigation_route_version=INVESTIGATION_ROUTE_VERSION,
+                        investigation_reason_codes=investigation_eligibility.reason_codes,
+                    ),
+                    investigation_eligibility=investigation_eligibility,
+                )
         initial_state: QuestionGraphState = {
             "question": question,
             "require_sql_approval": require_sql_approval,
@@ -224,7 +258,13 @@ class QuestionOrchestrator:
                 initial_state,
                 {"configurable": {"thread_id": thread_id or uuid4().hex}},
             )
-        return self._result_from_state(final_state, question, started_at, usage)
+        return self._result_from_state(
+            final_state,
+            question,
+            started_at,
+            usage,
+            investigation_eligibility=investigation_eligibility,
+        )
 
     def resume_approval(
         self,
@@ -253,6 +293,7 @@ class QuestionOrchestrator:
         question: str,
         started_at: float,
         usage: QuestionUsage | None = None,
+        investigation_eligibility: InvestigationEligibilityDecision | None = None,
     ) -> OrchestratorResult:
         interrupted = bool(final_state.get("__interrupt__"))
         diagnostics = final_state.get("diagnostics", AnswerDiagnostics())
@@ -284,6 +325,7 @@ class QuestionOrchestrator:
             ),
             llm_provider_used=usage.served_provider if usage is not None else None,
             llm_model_used=usage.served_model if usage is not None else None,
+            investigation_eligibility=investigation_eligibility,
         )
         LOGGER.info(
             "question_answered route=%s elapsed_seconds=%.3f question_length=%d has_sql=%s",
