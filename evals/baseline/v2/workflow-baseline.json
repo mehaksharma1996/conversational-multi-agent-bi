@@ -685,7 +685,7 @@
     "manifest_version": "2026-10-14.1",
     "mode": "scripted-baseline",
     "model": "scripted-retail-demo-v1",
-    "prompt_registry_sha256": "fa1d9f8acb6c643a2c90972b44355cdc2156f64585da914b5929b9ac3eb309bd",
+    "prompt_registry_sha256": "a44fce458d04c65af0693205b4d997bb025e3b09f55b6979822c82b03703b1ad",
     "provider": "scripted-retail-demo",
     "sources": {
       "investigation_cases": {
@@ -702,9 +702,9 @@
   },
   "review": {
     "accepted_changes": [
-      "initial baseline"
+      "provenance.prompt_registry_sha256: \"fa1d9f8acb6c643a2c90972b44355cdc2156f64585da914b5929b9ac3eb309bd\" -> \"a44fce458d04c65af0693205b4d997bb025e3b09f55b6979822c82b03703b1ad\""
     ],
-    "justification": "Initial E1b-2 scripted workflow baseline at manifest 2026-10-14.1: 9/9 measured cases pass, 9 not measured, all five safety invariants pass."
+    "justification": "INV-8 (#141) decision V10: the prompt registry gains whole-module entries for the INV-7 review prompts and the INV-8 narrative prompt, so its file digest (provenance only) changes. No case, coverage, outcome, dimension, metric, or safety result changes; no baseline case exercises these prompts because investigation routing is off (#142)."
   },
   "safety": {
     "dataset_unchanged": {
