@@ -1174,6 +1174,38 @@ export interface components {
              */
             status: "alive" | "ready";
         };
+        /**
+         * InvestigationProposalMessage
+         * @description A read-only recommendation, never an approval or execution handle.
+         */
+        InvestigationProposalMessage: {
+            /**
+             * Approval Required
+             * @constant
+             */
+            approval_required: true;
+            /** Reason Codes */
+            reason_codes: ("feature_enabled" | "authorized_table_present" | "explicit_investigation" | "metric_change_causal" | "multi_part_analysis")[];
+            /** Request Reference */
+            request_reference: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Status
+             * @constant
+             */
+            status: "not_started";
+            /** Summary */
+            summary: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "investigation_proposed";
+        };
         /** JobListResponse */
         JobListResponse: {
             /** Items */
@@ -1271,6 +1303,7 @@ export interface components {
             created_at: string;
             /** Id */
             id: string;
+            proposal?: components["schemas"]["InvestigationProposalMessage"] | null;
             provenance: components["schemas"]["ProvenanceResponse"];
             /** Question */
             question: string;
@@ -1285,7 +1318,7 @@ export interface components {
              * Route
              * @enum {string}
              */
-            route: "memory" | "sql" | "rag" | "hybrid" | "unsupported";
+            route: "memory" | "sql" | "rag" | "hybrid" | "unsupported" | "investigation";
             /** Rows */
             rows: {
                 [key: string]: unknown;
@@ -1321,7 +1354,7 @@ export interface components {
             evidence_statuses: ("VERIFIED_REFERENCE" | "INVALID_REFERENCE" | "QUOTE_MISMATCH" | "MISSING_EVIDENCE" | "UNVERIFIED_CLAIM" | "CONFLICTING_EVIDENCE" | "NOT_EVALUATED")[];
             execution: components["schemas"]["ExecutionSummaryResponse"];
             /** Final Route */
-            final_route: ("memory" | "sql" | "rag" | "hybrid" | "unsupported") | null;
+            final_route: ("memory" | "sql" | "rag" | "hybrid" | "unsupported" | "investigation") | null;
             /** Final Route Confidence */
             final_route_confidence: number | null;
             /**
