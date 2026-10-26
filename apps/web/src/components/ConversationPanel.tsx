@@ -73,7 +73,10 @@ export function ConversationPanel({
   const latest = messages[messages.length - 1];
   let announcement = "";
   if (latest && messages.length > initialCount) {
-    if (latest.status === "pending_approval") announcement = "SQL approval required. Nothing has run yet.";
+    if (latest.proposal?.type === "investigation_proposed") {
+      announcement =
+        "Investigation proposed. No investigation has started. Approval is required before any investigation can run.";
+    } else if (latest.status === "pending_approval") announcement = "SQL approval required. Nothing has run yet.";
     else if (latest.status === "rejected") announcement = "Request not executed. No query result was kept.";
     else announcement = `Answer ready, ${latest.route} route.`;
   }

@@ -568,6 +568,58 @@ deterministic fallback. Details are in `docs/architecture/investigation-workflow
 - Registering the INV-6 planning prompt with a complete provenance fingerprint (module source,
   evaluated instruction text including imported vocabulary, and a rendered sample) is #185.
 
+## Amendment 7: feature-gated investigation proposal routing (INV-9, #142, 2026-10-21)
+
+INV-9 exposes only a deterministic recommendation to investigate. It does not run the INV-4
+proposal graph, create a plan, grant approval, reserve an investigation budget, or execute any
+investigation tool. The server feature flag remains off by default until the later approved
+proposal, approval, execution, report, and UI milestones are complete.
+
+1. **Pre-route gate.** Before the existing v1 model router or graph runs, a pure predicate may
+   inspect exactly three inputs: the trusted current question, the server feature boolean, and
+   whether the already tenant-authorized conversation has a schema-confirmed stored table. A false
+   flag immediately enters the unchanged v1 path. The v1 router prompt, accepted model routes, and
+   graph topology do not gain an investigation edge.
+2. **Trusted readiness.** Table availability comes only from the tenant-checked conversation and
+   resolved dataset record. Resource identifiers or claims in user/document/model text cannot
+   establish readiness. The feature setting comes only from trusted process configuration; no
+   request, client, prompt, or retrieved content can enable it.
+3. **Deterministic intent and precedence.** Finite reviewed rules identify an explicit analytical
+   investigation, a causal/driver question tied to a metric change, or a genuinely multi-part
+   business analysis. Positive cues are extracted only from unquoted, non-negated text. Quoted
+   commands, negated requests, and general educational discussion do not trigger the route.
+   Educational negatives suppress weak matches but do not veto an independently qualifying
+   multi-part business request. Ambiguity remains on v1. Fixed reason codes make the decision
+   inspectable without recording content.
+4. **Typed, non-executable message.** The existing chat response may add an optional schema-v1
+   `investigation_proposed` object. The enclosing message is successfully created (`complete`),
+   while the nested investigation status is `not_started` and approval is required. The existing
+   answer field carries reviewed fallback text for older clients. The route enum expands
+   additively, but the object exposes no plan, approval, authority, job, gateway, capability, or
+   execution handle. Its only reference is the enclosing message ID.
+5. **Historical reconstruction.** Persistence keeps only minimum content-free, versioned proposal
+   diagnostics and the originally recorded reason codes. A typed proposal is reconstructed only
+   when those fields form one coherent validated record; route alone is insufficient. History is
+   never reclassified and never consults the current flag. Malformed or legacy records degrade to
+   the ordinary legacy message and cannot become authority.
+6. **Isolation and cost.** A proposal performs no model, planning, SQL, retrieval, Supervisor,
+   budget, checkpoint, job, or investigation-gateway call. Document passages, snippets, SQL
+   results, prior messages, and model output are not predicate inputs, so they cannot enable,
+   suppress, or rewrite the route.
+7. **Compatibility and presentation.** When the flag is off, the response JSON shape, v1 routing,
+   model-call count, prompt fingerprints, and workflow baselines stay unchanged. The React client
+   renders a proposal as read-only status with no start/approve control; compatibility and
+   accessibility are tested. The message API remains synchronous JSON.
+8. **Observability and evaluation.** Investigation-specific telemetry is emitted only while the
+   feature is enabled and uses allowlisted booleans and fixed tokens. It contains no question,
+   resource name, document text, SQL, prompt, or identifier. Feature-on routing gets a separate
+   deterministic acceptance suite; existing measured cases and baselines are not rewritten.
+
+**Deferred and prohibited here.** Plan creation and human approval are INV-10; durable
+investigation/API/report lifecycle is INV-11; approval, progress, evidence, and report UI are
+UI-6b/UI-6c; default activation is DEP-1. INV-9 creates no bridge that can treat a routing message
+as any of those later capabilities.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

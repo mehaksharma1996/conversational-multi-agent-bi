@@ -122,6 +122,23 @@ def test_debug_log_raw_content_reads_true(monkeypatch) -> None:
     assert get_settings().debug_log_raw_content is True
 
 
+@pytest.mark.parametrize("value", [None, "", "false", "0", "no", "off", "malformed"])
+def test_investigation_routing_is_fail_closed(monkeypatch, value: str | None) -> None:
+    if value is None:
+        monkeypatch.delenv("INVESTIGATION_ROUTING_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("INVESTIGATION_ROUTING_ENABLED", value)
+
+    assert get_settings().investigation_routing_enabled is False
+
+
+@pytest.mark.parametrize("value", ["true", "1", "yes", " TRUE "])
+def test_investigation_routing_requires_an_explicit_true_value(monkeypatch, value: str) -> None:
+    monkeypatch.setenv("INVESTIGATION_ROUTING_ENABLED", value)
+
+    assert get_settings().investigation_routing_enabled is True
+
+
 def test_otlp_trace_export_is_off_by_default_and_reads_an_explicit_endpoint(monkeypatch) -> None:
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
     assert get_settings().otlp_traces_endpoint is None

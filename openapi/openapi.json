@@ -1353,6 +1353,65 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InvestigationProposalMessage": {
+        "additionalProperties": false,
+        "description": "A read-only recommendation, never an approval or execution handle.",
+        "properties": {
+          "approval_required": {
+            "const": true,
+            "title": "Approval Required",
+            "type": "boolean"
+          },
+          "reason_codes": {
+            "items": {
+              "enum": [
+                "feature_enabled",
+                "authorized_table_present",
+                "explicit_investigation",
+                "metric_change_causal",
+                "multi_part_analysis"
+              ],
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "request_reference": {
+            "title": "Request Reference",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "const": "not_started",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "type": {
+            "const": "investigation_proposed",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "schema_version",
+          "summary",
+          "request_reference",
+          "reason_codes",
+          "status",
+          "approval_required"
+        ],
+        "title": "InvestigationProposalMessage",
+        "type": "object"
+      },
       "JobListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1619,6 +1678,16 @@
             "title": "Id",
             "type": "string"
           },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationProposalMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provenance": {
             "$ref": "#/components/schemas/ProvenanceResponse"
           },
@@ -1641,7 +1710,8 @@
               "sql",
               "rag",
               "hybrid",
-              "unsupported"
+              "unsupported",
+              "investigation"
             ],
             "title": "Route",
             "type": "string"
@@ -1757,7 +1827,8 @@
                   "sql",
                   "rag",
                   "hybrid",
-                  "unsupported"
+                  "unsupported",
+                  "investigation"
                 ],
                 "type": "string"
               },

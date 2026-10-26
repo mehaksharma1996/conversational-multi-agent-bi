@@ -20,7 +20,7 @@ from apps.api.content_store import (
     WorkspaceContentStore,
 )
 from src.memory.session_memory import SessionMemory
-from src.orchestration.graph_state import AnswerDiagnostics
+from src.orchestration.graph_state import AnswerDiagnostics, InvestigationProposalDiagnostics
 
 TENANT = "a" * 32
 WORKSPACE = "ws_" + "1" * 32
@@ -144,6 +144,29 @@ def test_a_message_without_a_result_frame_round_trips(tmp_path: Path) -> None:
     (message,) = store.load(TENANT, WORKSPACE).messages
 
     assert message.dataframe is None and message.route == "rag"
+
+
+def test_versioned_proposal_diagnostics_round_trip_without_reclassification(tmp_path: Path) -> None:
+    store = WorkspaceContentStore(tmp_path, None)
+    diagnostics = InvestigationProposalDiagnostics(
+        final_route="investigation",
+        investigation_proposal_schema_version=1,
+        investigation_route_version="inv9-routing-v1",
+        investigation_reason_codes=(
+            "feature_enabled",
+            "authorized_table_present",
+            "metric_change_causal",
+            "multi_part_analysis",
+        ),
+    )
+    store.save_message(
+        WORKSPACE,
+        _message(route="investigation", dataframe=None, diagnostics=diagnostics),
+    )
+
+    (message,) = store.load(TENANT, WORKSPACE).messages
+
+    assert message.diagnostics == diagnostics
 
 
 def test_updating_a_conversation_and_deleting_messages_removes_their_exports(

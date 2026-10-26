@@ -90,6 +90,56 @@ export const messageFixture = {
   created_at: "2026-09-29T12:00:06Z",
 } satisfies Message;
 
+export const investigationProposalMessageFixture = {
+  ...messageFixture,
+  id: "message-investigation-1",
+  question: "Why did customer churn increase, and which segments contributed most?",
+  answer:
+    "A multi-step investigation is recommended. No investigation has started; a plan must be reviewed and approved before any investigation can run.",
+  route: "investigation",
+  sql: null,
+  rows: null,
+  sources: [],
+  proposal: {
+    type: "investigation_proposed",
+    schema_version: 1,
+    summary:
+      "A multi-step investigation is recommended. No investigation has started; a plan must be reviewed and approved before any investigation can run.",
+    request_reference: "message-investigation-1",
+    reason_codes: [
+      "feature_enabled",
+      "authorized_table_present",
+      "metric_change_causal",
+      "multi_part_analysis",
+    ],
+    status: "not_started",
+    approval_required: true,
+  },
+  provenance: {
+    ...messageFixture.provenance,
+    grounding_status: "not_applicable",
+    initial_model_route: null,
+    initial_route_confidence: null,
+    final_route: "investigation",
+    final_route_confidence: null,
+    source_count: 0,
+    citation_count: 0,
+    evidence_statuses: [],
+    criteria_provenance: "not_applicable",
+    execution: {
+      sql_row_count: 0,
+      sql_execution_ms: 0,
+      sql_correction_attempted: false,
+      retrieval_candidates: 0,
+      retrieval_accepted: 0,
+      llm_calls: 0,
+      llm_fallbacks: 0,
+      structured_output_repairs: 0,
+      structured_output_failures: 0,
+    },
+  },
+} satisfies Message;
+
 export const uploadFixture = {
   id: "upload-1",
   workspace_id: workspaceFixture.id,

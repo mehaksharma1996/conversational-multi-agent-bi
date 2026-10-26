@@ -107,6 +107,7 @@ class Settings:
     rate_limit_analyses: int = 60
     rate_limit_messages: int = 120
     embedding_cache_max_entries: int = 10_000
+    investigation_routing_enabled: bool = False
 
     @property
     def oidc_login_configured(self) -> bool:
@@ -470,6 +471,7 @@ def get_settings() -> Settings:
         rate_limit_analyses=_positive_int("RATE_LIMIT_ANALYSES", 60),
         rate_limit_messages=_positive_int("RATE_LIMIT_MESSAGES", 120),
         embedding_cache_max_entries=_positive_int("EMBEDDING_CACHE_MAX_ENTRIES", 10_000),
+        investigation_routing_enabled=_flag("INVESTIGATION_ROUTING_ENABLED"),
     )
     settings.validate_identity_configuration()
     settings.validate_llm_pricing()

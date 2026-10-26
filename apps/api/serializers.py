@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -23,6 +23,7 @@ from apps.api.models import (
     ExecutionSummaryResponse,
     ExportResponse,
     FieldMappingResponse,
+    InvestigationProposalMessage,
     JobResponse,
     MessageListResponse,
     MessageResponse,
@@ -49,6 +50,14 @@ from apps.api.repository import (
     WorkspaceRecord,
 )
 from packages.jobs import JobRecord
+from src.orchestration.graph_state import InvestigationProposalDiagnostics
+from src.orchestration.investigation_routing import (
+    INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
+    INVESTIGATION_PROPOSAL_SUMMARY,
+    INVESTIGATION_ROUTE_VERSION,
+    InvestigationEligibilityDecision,
+    InvestigationEligibilityReason,
+)
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
 
@@ -274,7 +283,7 @@ def conversation_response(record: ConversationRecord) -> ConversationResponse:
 
 
 def message_response(record: MessageRecord) -> MessageResponse:
-    return MessageResponse(
+    response = MessageResponse(
         id=record.id,
         conversation_id=record.conversation_id,
         role="assistant",
@@ -326,6 +335,47 @@ def message_response(record: MessageRecord) -> MessageResponse:
         ),
         request_id=record.request_id,
         created_at=record.created_at,
+    )
+    proposal = _investigation_proposal(record)
+    return response.model_copy(update={"proposal": proposal}) if proposal is not None else response
+
+
+def _investigation_proposal(record: MessageRecord) -> InvestigationProposalMessage | None:
+    """Reconstruct only coherent, recorded INV-9 metadata; never reclassify history."""
+    diagnostics = record.diagnostics
+    if not isinstance(diagnostics, InvestigationProposalDiagnostics):
+        return None
+    reasons = diagnostics.investigation_reason_codes
+    if (
+        record.route != "investigation"
+        or record.status != "complete"
+        or record.answer != INVESTIGATION_PROPOSAL_SUMMARY
+        or record.sql is not None
+        or record.dataframe is not None
+        or record.sources
+        or diagnostics.final_route != "investigation"
+        or diagnostics.investigation_proposal_schema_version
+        != INVESTIGATION_PROPOSAL_SCHEMA_VERSION
+        or diagnostics.investigation_route_version != INVESTIGATION_ROUTE_VERSION
+        or not reasons
+    ):
+        return None
+    try:
+        decision = InvestigationEligibilityDecision(
+            eligible=True,
+            primary_reason=cast(InvestigationEligibilityReason, reasons[2]),
+            reason_codes=reasons,
+        )
+    except (IndexError, ValueError):
+        return None
+    return InvestigationProposalMessage(
+        type="investigation_proposed",
+        schema_version=INVESTIGATION_PROPOSAL_SCHEMA_VERSION,
+        summary=INVESTIGATION_PROPOSAL_SUMMARY,
+        request_reference=record.id,
+        reason_codes=list(decision.reason_codes),
+        status="not_started",
+        approval_required=True,
     )
 
 

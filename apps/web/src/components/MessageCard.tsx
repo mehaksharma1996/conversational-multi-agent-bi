@@ -23,6 +23,17 @@ const STATUS_TEXT: Partial<Record<Message["status"], string>> = {
   rejected: "Not executed",
 };
 
+type InvestigationProposal = NonNullable<Message["proposal"]>;
+type InvestigationReason = InvestigationProposal["reason_codes"][number];
+
+const INVESTIGATION_REASON_TEXT: Record<InvestigationReason, string> = {
+  feature_enabled: "Server-side investigation routing is enabled.",
+  authorized_table_present: "An authorized, schema-confirmed table is attached.",
+  explicit_investigation: "The request explicitly asks for a business-data investigation.",
+  metric_change_causal: "The request asks about causes or drivers of a metric change.",
+  multi_part_analysis: "The request combines multiple analytical dimensions.",
+};
+
 function sourceElementId(messageId: string, sourceNumber: number): string {
   return `source-${messageId}-${sourceNumber}`;
 }
@@ -96,7 +107,34 @@ export function MessageCard({
           ) : null}
         </div>
 
-        {message.status === "pending_approval" ? (
+        {message.proposal ? (
+          <section
+            className="investigation-proposal"
+            aria-labelledby={`investigation-proposal-${message.id}`}
+          >
+            <p className="eyebrow">Investigation recommendation</p>
+            <h3 id={`investigation-proposal-${message.id}`}>Multi-step investigation proposed</h3>
+            <p>{message.proposal.summary}</p>
+            <dl className="proposal-facts">
+              <div>
+                <dt>Investigation status</dt>
+                <dd>Not started</dd>
+              </div>
+              <div>
+                <dt>Approval</dt>
+                <dd>Required before any investigation can run</dd>
+              </div>
+            </dl>
+            <details>
+              <summary>Why this was proposed</summary>
+              <ul className="proposal-reasons">
+                {message.proposal.reason_codes.map((reason) => (
+                  <li key={reason}>{INVESTIGATION_REASON_TEXT[reason]}</li>
+                ))}
+              </ul>
+            </details>
+          </section>
+        ) : message.status === "pending_approval" ? (
           <p className="answer-text">
             Review the proposed SQL before it can access the uploaded table.
           </p>
@@ -142,7 +180,7 @@ export function MessageCard({
           <p className="answer-text">{withCitationLinks(message.answer, message.id, known)}</p>
         )}
 
-        <AnswerProvenance message={message} />
+        {message.proposal ? null : <AnswerProvenance message={message} />}
 
         {message.sql ? (
           <div className="sql-section">

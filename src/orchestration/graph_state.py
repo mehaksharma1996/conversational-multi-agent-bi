@@ -6,9 +6,14 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 from src.agents.rag_agent import EvidenceStatus
+from src.orchestration.investigation_routing import (
+    InvestigationProposalReason,
+    InvestigationProposalSchemaVersion,
+    InvestigationRouteVersion,
+)
 from src.orchestration.policy_grounding import PolicySQLStatus
 
-RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported"]
+RouteName = Literal["memory", "sql", "rag", "hybrid", "unsupported", "investigation"]
 AnswerStatus = Literal["complete", "pending_approval", "rejected"]
 GroundingStatus = Literal["not_applicable", "checked_no_issues", "uncited", "warnings"]
 CriteriaProvenance = Literal[
@@ -73,6 +78,15 @@ class AnswerDiagnostics:
     llm_output_tokens: int | None = None
     llm_estimated_cost_usd: float | None = None
     llm_fallbacks: int = 0
+
+
+@dataclass(frozen=True)
+class InvestigationProposalDiagnostics(AnswerDiagnostics):
+    """Minimum persisted metadata for reconstructing one read-only INV-9 proposal."""
+
+    investigation_proposal_schema_version: InvestigationProposalSchemaVersion | None = None
+    investigation_route_version: InvestigationRouteVersion | None = None
+    investigation_reason_codes: tuple[InvestigationProposalReason, ...] = ()
 
 
 class QuestionGraphState(TypedDict, total=False):
