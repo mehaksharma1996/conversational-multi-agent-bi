@@ -10,10 +10,15 @@ document steps through `GuardedSQLService` (`src/orchestration/guarded_sql.py`) 
 updates (`packages/investigation/state.py`), the gateway refusal and authority vocabulary
 (`refusals.py`, `gateway.py`), and strict process-local checkpoints
 (`src/orchestration/investigation_checkpoint.py`). S5 adds the tool gateway's guarded attempts and
-document research (`src/orchestration/tool_gateway.py`). SQL handles (S6) and bypass enforcement
-(S7) are not built yet, and nothing below runs in a route or graph yet. INV-4 (#137) adds the
-proposal phase and INV-5 (#138) sequential execution of an approved plan (see "Execution phase
-(INV-5)"); routing stays off (#142).
+document research (`src/orchestration/tool_gateway.py`), with later INV-3 stages enforcing SQL
+handles and graph boundaries. INV-4 through INV-8 implement the isolated proposal, sequential
+execution, hypothesis, critique, and verified-report components described below.
+
+INV-9 (#142) exposes only a feature-gated, deterministic recommendation at the question API. It
+does not connect the question route to any of those investigation components. An eligible request
+receives an `investigation_proposed` chat message stating that nothing has started and that approval
+is required. Supervisor planning, approval binding, durable lifecycle records, jobs, and execution
+remain later milestones.
 
 These services are not access controls. The API authorizes the caller, enforces consent, and
 resolves the tenant's table and documents before building them. For investigations, the INV-3 tool
@@ -26,22 +31,32 @@ assertion error (see the #134 brief).
 ## Topology
 
 ```text
-Question graph (existing routes unchanged)
-route ─┬─ memory | sql | rag | hybrid | unsupported
-       └─ investigation (feature flag, off by default)
-            PROPOSAL PHASE — planning budget, no tools
-            intake (schema, document titles, consent, resources)
-            → supervisor_plan → validate_plan (≤1 repair) → cost_estimate
-            → proposal shown; execution waits for explicit approval
+Question endpoint
+  → INV-9 deterministic gate (server flag + authorized ready table + current question only)
+      ├─ miss → unchanged v1 graph: memory | sql | rag | hybrid | unsupported
+      └─ hit  → investigation_proposed (not_started, approval required; no model or tools)
 
-Approved plan → background job → EXECUTION SUBGRAPH — execution budget
-   dispatch (sequential; only tasks whose dependencies are complete)
-     → sql_analyst | document_research      (through the tool gateway)
-       [batched SQL approval interrupt when required]
-   → collect → business_investigator: hypotheses → hypothesis tests → verdicts
-   → critic → supervisor_replan (≤2 rounds; follow-ups re-validated) → dispatch …
-   → compose_narrative (≤1 bounded call) → finish → compose_report → verify_report → terminal
+Isolated investigation components (not reachable from the INV-9 message)
+  proposal graph: intake → supervisor_plan → validate_plan → cost_estimate
+  execution graph: dispatch → specialists → verdicts → critique/replan
+                   → compose_report → verify_report → terminal
+
+Future INV-10/INV-11 work must add approval binding and lifecycle APIs before those isolated
+components can be reached from the product route.
 ```
+
+### INV-9 trust boundary
+
+- The process environment is the only feature-flag authority; request bodies, headers, query
+  parameters, documents, and model output cannot enable it.
+- Table readiness comes only from the tenant- and workspace-checked conversation dataset. Text
+  claiming a dataset or table exists is ignored.
+- The current question is normalized and matched by finite reviewed rules. Quoted or negated
+  directives and educational explanations do not supply intent; ambiguous requests stay on v1.
+- Proposal reconstruction requires coherent fixed-code diagnostics. History never reruns routing
+  and never consults the current feature flag.
+- The proposal creates no `InvestigationScope`, plan, authority, approval, budget, checkpoint,
+  job, or executable identifier. Its request reference is only the enclosing chat-message ID.
 
 ## Roles
 

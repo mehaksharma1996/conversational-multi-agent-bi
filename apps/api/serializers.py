@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -56,6 +56,7 @@ from src.orchestration.investigation_routing import (
     INVESTIGATION_PROPOSAL_SUMMARY,
     INVESTIGATION_ROUTE_VERSION,
     InvestigationEligibilityDecision,
+    InvestigationEligibilityReason,
 )
 from src.profiling.data_profiler import DataProfile
 from src.profiling.schema_mapper import SchemaMapping
@@ -362,7 +363,7 @@ def _investigation_proposal(record: MessageRecord) -> InvestigationProposalMessa
     try:
         decision = InvestigationEligibilityDecision(
             eligible=True,
-            primary_reason=reasons[2],
+            primary_reason=cast(InvestigationEligibilityReason, reasons[2]),
             reason_codes=reasons,
         )
     except (IndexError, ValueError):

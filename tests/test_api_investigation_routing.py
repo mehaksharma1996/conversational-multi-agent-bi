@@ -22,13 +22,19 @@ from src.orchestration.investigation_routing import (
     INVESTIGATION_PROPOSAL_SUMMARY,
     INVESTIGATION_ROUTE_VERSION,
 )
-from tests.test_api_features import _prepare_tabular_context, _settings
-from tests.test_investigation_routing import _ExplodingLLM
+from tests.test_api_features import (
+    FakeEmbedder,
+    FakeLLM,
+    _pdf_payload,
+    _prepare_tabular_context,
+    _settings,
+)
+from tests.test_investigation_routing import _ExplodingLLM, _UnconfiguredExplodingLLM
 from tests.test_utils import isolated_directory_path
 
 
-def _message(**updates: object) -> MessageRecord:
-    values: dict[str, object] = {
+def _message(**updates: Any) -> MessageRecord:
+    values: dict[str, Any] = {
         "id": "msg_" + "1" * 32,
         "conversation_id": "conv_" + "2" * 32,
         "workspace_id": "ws_" + "3" * 32,
@@ -157,8 +163,9 @@ def test_route_or_malformed_metadata_alone_never_reconstructs_a_proposal(change)
 
 
 def test_recorded_reason_order_is_preserved_without_reclassification() -> None:
+    stored_diagnostics = cast(InvestigationProposalDiagnostics, _message().diagnostics)
     diagnostics = replace(
-        _message().diagnostics,
+        stored_diagnostics,
         investigation_reason_codes=(
             "feature_enabled",
             "authorized_table_present",
@@ -233,3 +240,108 @@ def test_api_passes_the_server_flag_and_returns_the_typed_proposal_without_a_mod
     assert body["proposal"]["status"] == "not_started"
     assert body["proposal"]["approval_required"] is True
     assert body["sql"] is None and body["rows"] is None and body["sources"] == []
+
+
+def test_flag_off_preserves_the_normal_message_shape_for_eligible_wording() -> None:
+    root = isolated_directory_path("api-investigation-disabled")
+    app = create_app(settings=_settings(root), llm_client_factory=lambda _settings: FakeLLM())
+    client = TestClient(app)
+    workspace_id = client.post("/api/v1/workspaces").json()["id"]
+    dataset_id, _ = _prepare_tabular_context(client, workspace_id)
+    client.put(
+        f"/api/v1/workspaces/{workspace_id}/consent",
+        json={"accepted": True, "notice_version": "2026-09"},
+    )
+    conversation_id = client.post(
+        f"/api/v1/workspaces/{workspace_id}/conversations",
+        json={"dataset_id": dataset_id},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"question": "Why did customer churn increase last quarter?"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["route"] == "sql"
+    assert "proposal" not in body
+    assert set(body) == {
+        "id",
+        "conversation_id",
+        "role",
+        "status",
+        "question",
+        "answer",
+        "route",
+        "sql",
+        "rows",
+        "sources",
+        "provenance",
+        "request_id",
+        "created_at",
+    }
+
+
+def test_enabled_route_without_an_attached_table_stays_on_v1() -> None:
+    root = isolated_directory_path("api-investigation-no-table")
+    settings = replace(_settings(root), investigation_routing_enabled=True)
+    app = create_app(
+        settings=settings,
+        embedder_factory=lambda _model: FakeEmbedder(),
+        llm_client_factory=lambda _settings: FakeLLM(),
+    )
+    client = TestClient(app)
+    workspace_id = client.post("/api/v1/workspaces").json()["id"]
+    documents = client.post(
+        f"/api/v1/workspaces/{workspace_id}/document-collections",
+        files=[("files", ("policy.pdf", _pdf_payload(), "application/pdf"))],
+    )
+    assert documents.status_code == 201
+    client.put(
+        f"/api/v1/workspaces/{workspace_id}/consent",
+        json={"accepted": True, "notice_version": "2026-09"},
+    )
+    conversation_id = client.post(
+        f"/api/v1/workspaces/{workspace_id}/conversations",
+        json={"document_collection_id": documents.json()["id"]},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"question": "Why did customer churn increase last quarter?"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["route"] == "rag"
+    assert "proposal" not in body
+
+
+def test_client_cannot_override_the_server_feature_flag() -> None:
+    root = isolated_directory_path("api-investigation-client-override")
+    app = create_app(
+        settings=_settings(root),
+        llm_client_factory=lambda _settings: _UnconfiguredExplodingLLM(),
+    )
+    client = TestClient(app)
+    workspace_id = client.post("/api/v1/workspaces").json()["id"]
+    dataset_id, _ = _prepare_tabular_context(client, workspace_id)
+    client.put(
+        f"/api/v1/workspaces/{workspace_id}/consent",
+        json={"accepted": True, "notice_version": "2026-09"},
+    )
+    conversation_id = client.post(
+        f"/api/v1/workspaces/{workspace_id}/conversations",
+        json={"dataset_id": dataset_id},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={
+            "question": "Why did customer churn increase last quarter?",
+            "investigation_routing_enabled": True,
+        },
+    )
+
+    assert response.status_code == 422

@@ -4,6 +4,26 @@ The orchestrator chooses one route per question. When a model is configured it c
 question first; the deterministic router in `route_question` is the fallback when the model is
 unavailable, invalid, low-confidence (below 0.55), or proposes a route whose inputs do not exist.
 
+## Feature-gated investigation proposal pre-route
+
+INV-9 adds a server-controlled pre-route check before memory lookup, model classification, and the
+v1 question graph. It is disabled by default. When disabled, the predicate does not run and the
+existing graph, model-call count, response shape, and route decisions are unchanged.
+
+When enabled, the pure predicate accepts exactly three inputs: the current bounded question, the
+server feature boolean, and whether the tenant-resolved conversation has a schema-confirmed stored
+table. It does not accept history, retrieved text, SQL data, model output, identifiers, or client
+configuration. A match returns a read-only `investigation_proposed` message with route
+`investigation`; it does not call a model, SQL, retrieval, the Supervisor, or the investigation
+graph. A miss continues into the unchanged v1 route below.
+
+`investigation` is therefore an additive response label, not a sixth value understood by the model
+router and not a graph edge. The proposal has status `not_started`, says approval is required, and
+contains no plan, approval token, job identifier, or execution operation. Fixed, versioned reason
+codes are persisted only so message history can reconstruct a coherent proposal without rerunning
+the predicate or consulting the current flag. Malformed historical metadata degrades to the safe
+legacy answer without a typed proposal.
+
 | Route | Meaning |
 |---|---|
 | `sql` | Answerable entirely from the uploaded table; any filter or threshold is in the question or is an existing column |
@@ -11,6 +31,9 @@ unavailable, invalid, low-confidence (below 0.55), or proposes a route whose inp
 | `hybrid` | A rule, threshold, definition, or criterion stated in the documents must be applied to select, count, aggregate, or interpret table rows |
 | `memory` | About prior analysis, charts, reports, or generated SQL |
 | `unsupported` | Neither the table nor the documents can supply the answer |
+
+The table describes only the v1 graph. `investigation` never enters its classifier, availability
+checks, consistency reconsideration, or edges.
 
 Route prompt v2 (registry id `route-classification`) states these definitions, decision rules
 (a similar-sounding column does not define a documented rule; mentioning "policy" alone does not
@@ -44,6 +67,11 @@ prompt content is recorded. If a later safety check changes the delivered route 
 hybrid predicate mismatch falls back to documents), the final route reflects the delivered result
 and its model-confidence field is cleared rather than attaching the hybrid decision's confidence to
 the document-only fallback.
+
+When the investigation feature is enabled, telemetry may additionally record only the allowlisted
+eligibility boolean, fixed primary-reason token, proposal-generated boolean, and route-version
+token. No investigation-specific telemetry is emitted while the flag is off, and question or
+proposal content is never included.
 
 ## Known limits
 
