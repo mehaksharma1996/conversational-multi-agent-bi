@@ -1,5 +1,6 @@
 # Fully resolved Python 3.14 environment verified on 2026-09-29; Streamlit moved to
-# requirements-streamlit.lock and Pillow raised to 13.0.0 on 2026-10-20.
+# requirements-streamlit.lock and Pillow raised to 13.0.0 on 2026-10-20. Security
+# fixes for filelock, OpenTelemetry, pypdf, and setuptools applied on 2026-10-26.
 # Regenerate after intentional dependency upgrades.
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.4
@@ -26,7 +27,7 @@ distro==1.9.0
 durationpy==0.11
 et_xmlfile==2.0.0
 fastapi==0.142.2
-filelock==4.0.4
+filelock==4.2.1
 flatbuffers==25.12.19
 frozenlist==1.8.0
 fsspec==2026.9.0
@@ -78,13 +79,13 @@ numpy==2.5.3
 oauthlib==4.0.0
 onnxruntime==1.30.0
 openpyxl==3.1.5
-opentelemetry-api==1.45.0
-opentelemetry-exporter-otlp-common==0.66b0
-opentelemetry-exporter-otlp-proto-common==1.45.0
-opentelemetry-exporter-otlp-proto-grpc==1.45.0
-opentelemetry-proto==1.45.0
-opentelemetry-sdk==1.45.0
-opentelemetry-semantic-conventions==0.66b0
+opentelemetry-api==1.45.1
+opentelemetry-exporter-otlp-common==0.66b1
+opentelemetry-exporter-otlp-proto-common==1.45.1
+opentelemetry-exporter-otlp-proto-grpc==1.45.1
+opentelemetry-proto==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-semantic-conventions==0.66b1
 orjson==3.12.0
 ormsgpack==1.12.2
 overrides==7.7.0
@@ -106,7 +107,7 @@ pydantic-settings==2.15.0
 pydantic_core==2.46.5
 Pygments==2.21.0
 PyJWT==2.15.1
-pypdf==6.19.0
+pypdf==6.21.2
 PyPika==0.51.1
 pyproject_hooks==1.3.3
 pytest==9.1.1
@@ -129,7 +130,7 @@ safetensors==0.8.0
 scikit-learn==1.9.1
 scipy==1.18.1
 sentence-transformers==6.1.0
-setuptools==84.0.0
+setuptools==84.1.0
 shellingham==1.5.4
 simplejson==4.1.2
 six==1.17.0
