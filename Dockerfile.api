@@ -15,6 +15,14 @@
 
 FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS python-base
 
+# The pinned upstream image predates Debian's CVE-2026-84782 fix. Keep the
+# security update reproducible until a reviewed base digest includes this revision.
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+        libssl3=3.0.22-1~deb12u2 \
+        openssl=3.0.22-1~deb12u2 \
+    && rm -rf /var/lib/apt/lists/*
+
 # ---------------------------------------------------------------------------------
 FROM python-base AS builder
 
