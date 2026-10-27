@@ -92,7 +92,7 @@ def _decision(
         SQLItemDecision(
             task_id=item.task_id,
             sql_fingerprint=item.sql_fingerprint,
-            decision=choice,  # type: ignore[arg-type]
+            decision=choice,
             edited_sql=edited,
         )
         for item in wave.items
@@ -494,7 +494,7 @@ def test_a_late_sql_result_after_cancellation_is_discarded() -> None:
     executor = Executor()
     e = execution(plan=plan, executor=executor)
     assert e.approvals is not None
-    executor.during = lambda: e.approvals.service.cancel(_scope())  # type: ignore[union-attr]
+    executor.during = lambda: e.approvals.service.cancel(_scope())
     result = e.run.run()
     view = result.state
     assert result.status is S.CANCELLED and view is not None and view.evidence == {}
