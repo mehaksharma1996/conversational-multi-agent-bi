@@ -530,21 +530,26 @@ def test_live_authority_is_rechecked_before_execution(
     assert h.ledger.usage().sql_executions == 0
 
 
-def test_sql_that_needs_approval_is_refused_until_inv10_and_never_reaches_the_model() -> None:
+def test_sql_that_needs_approval_is_prepared_and_guarded_but_never_executes_unbound() -> None:
+    # INV-10: the statement is generated and guarded so a person can review it; without a bound
+    # approval of exactly that statement it never reaches the executor.
     h = _harness(authority=exact_authority(sql_approval_required=True))
-    result = h.prepare(h.begin())
-    _refused(h, result, RefusalCode.SQL_APPROVAL_REQUIRED, calls=0)
+    handle = h.handle()
+    assert h.gateway._handles[handle.handle_id].approval_required is True
+    executed = h.executor.calls
+    _refused(h, h.execute(handle), RefusalCode.SQL_APPROVAL_REQUIRED, calls=h.service_calls())
+    assert h.executor.calls == executed == []
     task = restore_state(h.state).tasks["trend"]
     assert task.status == "refused" and h.gateway.closed is None  # task-level: others continue
 
 
-def test_a_handle_bound_to_an_approval_requirement_never_executes() -> None:
+def test_a_handle_whose_approval_requirement_was_altered_is_stale() -> None:
     h = _harness()
     handle = h.handle()
     prepared = h.gateway._handles[handle.handle_id]
     h.gateway._handles[handle.handle_id] = tool_gateway.replace(prepared, approval_required=True)
     calls = h.service_calls()
-    _refused(h, h.execute(handle), RefusalCode.SQL_APPROVAL_REQUIRED, calls=calls)
+    _refused(h, h.execute(handle), RefusalCode.HANDLE_STALE, calls=calls)
 
 
 def test_cancellation_before_execution_never_runs_or_charges_it() -> None:

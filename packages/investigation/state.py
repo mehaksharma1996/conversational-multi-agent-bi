@@ -348,6 +348,9 @@ GatewayTool = Literal[
     "open_follow_up_round",
     # INV-8: the owner-only, bounded narrative call for the verified report.
     "compose_narrative",
+    # INV-10: the owner-only binding or rejection of a human SQL-wave decision.
+    "bind_sql_approval",
+    "reject_sql",
 ]
 DecisionResult = Literal["succeeded", "refused", "failed", "cancelled"]
 
@@ -581,9 +584,8 @@ class CritiqueRecord(_State):
 class FollowUpApproval(_State):
     """The trusted authorization of one follow-up round (INV-7 decision C3).
 
-    Bound to the exact task set (``follow_up_digest``) and round. Production code never
-    constructs one: it is copied from the trusted ``FollowUpAuthorizer`` port, and production has
-    none until INV-10 (#143).
+    Bound to the exact task set (``follow_up_digest``) and round. It is copied from the trusted
+    ``FollowUpAuthorizer`` port; in production only the approval service constructs one (INV-10).
     """
 
     follow_up_digest: Digest

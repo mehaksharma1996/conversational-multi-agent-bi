@@ -55,9 +55,27 @@ consumes the handle on first presentation, then re-checks cancellation, binding,
 attempt, expiry, approval, live authority, the tenant's table, the read-only guard, the
 fingerprint, and policy, and reserves the execution before the executor runs. An agent can never
 supply SQL, a correction counter, or an error text: ``prepare_correction`` uses the gateway's own
-record of a failed execution, and the gateway counts the one correction a task may use. SQL that
-needs approval is refused (``sql_approval_required``) until INV-10 provides an approval binding.
+record of a failed execution, and the gateway counts the one correction a task may use.
 SQL text, rows, and database errors never leave the process.
+
+**INV-10 (#143): SQL approval.** When the authority requires SQL approval, ``prepare_sql`` and
+``prepare_correction`` also compile the statement against the table's schema (unknown tables and
+columns fail the attempt as ``sql_generation``) before issuing a handle bound to the approval
+requirement. Such a handle executes only after a person approved exactly its statement:
+
+- ``parked_sql(task_ids)`` (owner-only, in process) lists each task's open, unbound handle as a
+  content-free ``SQLWaveItem`` and, separately, its SQL for the approver;
+- ``bind_sql_approval(state, BindSQLApproval)`` verifies the trusted ``SQLWaveDecision`` against its
+  ``SQLWaveRequest`` (exact cover, digest, scope, plan, epoch, window), then that the item names
+  this handle, statement (fingerprint), task, and attempt, that the handle is open and unexpired,
+  authority (live check last), and the table identity. ``approve`` binds the handle; ``edit``
+  revokes it and re-validates the edited SQL in full (one statement, read-only guard, schema
+  compile, policy), then issues a new handle bound to the new fingerprint. Each item binds once;
+- ``reject_sql(state, RejectSQL)`` makes the same checks and ends the task ``refused``
+  (``sql_approval_rejected``); nothing is executed.
+
+``execute_sql`` runs an approval-requiring handle only with a binding of its exact fingerprint;
+an unbound one is refused ``sql_approval_required``.
 
 Refusals follow ``packages.investigation.refusals``: ``request`` refusals record a decision and
 leave the gateway open; ``task`` refusals end the task; ``investigation`` refusals close the gateway
@@ -158,6 +176,13 @@ import sqlparse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from sqlparse import tokens as sql_tokens
 
+from packages.investigation.approval import (
+    SQLItemDecision,
+    SQLWaveDecision,
+    SQLWaveItem,
+    SQLWaveRequest,
+    wave_decision_violation,
+)
 from packages.investigation.budget import (
     BudgetClosedError,
     BudgetExhaustedError,
@@ -399,6 +424,26 @@ class OpenFollowUpRound(_Request):
     approval: FollowUpApproval
 
 
+class BindSQLApproval(_Request):
+    """Owner-only (INV-10): bind a person's approval (or edit) of one parked statement."""
+
+    task_id: TaskId
+    role: AgentRole
+    handle: SQLHandle
+    wave: SQLWaveRequest
+    decision: SQLWaveDecision
+
+
+class RejectSQL(_Request):
+    """Owner-only (INV-10): end a task whose parked statement a person rejected."""
+
+    task_id: TaskId
+    role: AgentRole
+    handle: SQLHandle
+    wave: SQLWaveRequest
+    decision: SQLWaveDecision
+
+
 class ComposeNarrative(_Request):
     """Owner-only (INV-8): the bounded report narrative call. Names no task."""
 
@@ -419,6 +464,8 @@ _TaskRequest = (
     | ReviewFindings
     | OpenFollowUpRound
     | ComposeNarrative
+    | BindSQLApproval
+    | RejectSQL
 )
 
 # INV-8: whether a narrative call could be admitted now (``narrative_readiness``).
@@ -522,6 +569,8 @@ class _PreparedSQL:
     corrections_used: int
     approval_required: bool
     expires_at: datetime
+    # INV-10: the wave whose decision approved exactly ``fingerprint``, once bound.
+    approved_wave: str | None = None
 
 
 @dataclass(frozen=True)
@@ -856,6 +905,7 @@ class InvestigationToolGateway:
         self._failures: dict[str, tuple[int, str]] = {}
         self._typed: dict[str, TypedEvidencePayload] = {}  # built with each evidence record
         self._owner_closed: ExecutionCloseReason | None = None
+        self._bound_items: set[tuple[str, str]] = set()  # INV-10: (wave, task) decided once
         if type(numeric_fields) is not frozenset or not all(
             type(name) is str for name in numeric_fields
         ):
@@ -957,6 +1007,61 @@ class InvestigationToolGateway:
         return self._operate(
             "open_follow_up_round", OpenFollowUpRound, state, request, self._open_round
         )
+
+    # --- owner-only SQL approval operations (INV-10) ------------------------------------------
+
+    def parked_sql(
+        self, task_ids: Iterable[str]
+    ) -> tuple[tuple[SQLWaveItem, ...], dict[str, str], datetime] | None:
+        """Each task's open handle that awaits approval, its SQL, and the earliest handle expiry.
+
+        In process only, for the trusted owner's approval request. ``None`` when the gateway is
+        closed or busy, or a task has no single open, unbound, approval-requiring handle.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            if self._closure() is not None:
+                return None
+            items: list[SQLWaveItem] = []
+            statements: dict[str, str] = {}
+            expiry: datetime | None = None
+            for task_id in task_ids:
+                parked = [
+                    prepared
+                    for handle_id, prepared in self._handles.items()
+                    if prepared.handle.task_id == task_id
+                    and self._handle_state[handle_id] == "open"
+                    and prepared.approval_required
+                    and prepared.approved_wave is None
+                ]
+                if len(parked) != 1:
+                    return None
+                prepared = parked[0]
+                items.append(
+                    SQLWaveItem(
+                        task_id=task_id,
+                        attempt=prepared.attempt,
+                        handle_id=prepared.handle.handle_id,
+                        sql_fingerprint=prepared.fingerprint,
+                        policy_status=prepared.policy_status,
+                    )
+                )
+                statements[task_id] = prepared.sql
+                expiry = prepared.expires_at if expiry is None else min(expiry, prepared.expires_at)
+            if not items or expiry is None:
+                return None
+            return tuple(items), statements, expiry
+        finally:
+            self._lock.release()
+
+    def bind_sql_approval(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """Bind a person's approval or edit of one parked statement; an edit is re-validated."""
+        return self._operate("bind_sql_approval", BindSQLApproval, state, request, self._bind_sql)
+
+    def reject_sql(self, state: Mapping[str, Any], request: object) -> GatewayResult:
+        """End a task whose parked statement a person rejected; nothing executes."""
+        return self._operate("reject_sql", RejectSQL, state, request, self._reject_sql)
 
     # --- owner-only report operations (INV-8) --------------------------------------------------
 
@@ -1584,8 +1689,6 @@ class InvestigationToolGateway:
         task, record = self._admitted(call)
         self._require_attempt(call, record, request.attempt)
         question = _sql_question(task, call.view.plan)
-        if self._authority.sql_approval_required:
-            raise _Refused(RefusalCode.SQL_APPROVAL_REQUIRED)  # no approval binding until INV-10
         adapter, model_request = self._model_admission()
         self._check_authority()
         scope, table = self._resolve_table(call)
@@ -1615,8 +1718,6 @@ class InvestigationToolGateway:
         if pending is None or pending.attempt != record.attempts:
             raise _Refused(RefusalCode.ATTEMPT_MISMATCH)  # nothing the gateway saw fail
         question = _sql_question(task, call.view.plan)
-        if self._authority.sql_approval_required:
-            raise _Refused(RefusalCode.SQL_APPROVAL_REQUIRED)
         adapter, model_request = self._model_admission()
         self._check_authority()
         scope, table = self._resolve_table(call)
@@ -1699,6 +1800,12 @@ class InvestigationToolGateway:
         status = self._policy_status(scope, task, validated, question)
         if status not in EXECUTABLE_POLICY_STATUSES:
             return self._failed(call, task, record, "policy_refused")
+        if self._authority.sql_approval_required:
+            # INV-10: a person is asked to approve only SQL that compiles against this table.
+            try:
+                check_identifiers(table, validated)
+            except Exception:
+                return self._failed(call, task, record, "sql_generation")
         try:
             now = self._clock.now()
             expires_at = min(now + SQL_HANDLE_TTL, self._authority.approval.deadline)
@@ -1754,8 +1861,10 @@ class InvestigationToolGateway:
             or prepared.epoch != self._authority.epoch
         ):
             raise _Refused(RefusalCode.HANDLE_STALE)
-        if prepared.approval_required or self._authority.sql_approval_required:
-            raise _Refused(RefusalCode.SQL_APPROVAL_REQUIRED)
+        if prepared.approval_required is not self._authority.sql_approval_required:
+            raise _Refused(RefusalCode.HANDLE_STALE)
+        if prepared.approval_required and prepared.approved_wave is None:
+            raise _Refused(RefusalCode.SQL_APPROVAL_REQUIRED)  # INV-10: never without a binding
         self._check_authority()
         scope, table = self._resolve_table(call)
         if _table_identity(table) != prepared.table_identity:
@@ -1806,6 +1915,111 @@ class InvestigationToolGateway:
             self._failures[call.task_id] = (record.attempts, "sql_generation")
             return self._result(call, "failed", category="sql_generation")
         return self._failed(call, task, record, "sql_generation")
+
+    def _decided_item(
+        self, call: _Call, request: BindSQLApproval | RejectSQL
+    ) -> tuple[PlanTask, TaskRecord, _PreparedSQL, SQLItemDecision]:
+        """Verify a wave decision for this task's parked handle; see the module docstring."""
+        task, record = self._admitted(call)
+        if record.status != "running":
+            raise _Refused(RefusalCode.TASK_NOT_RUNNING)
+        presented = request.handle
+        prepared = self._handles.get(presented.handle_id)
+        if (
+            prepared is None
+            or prepared.handle != presented
+            or presented.task_id != call.task_id
+            or prepared.role is not call.role
+        ):
+            raise _Refused(RefusalCode.HANDLE_UNKNOWN)
+        handle_state = self._handle_state[presented.handle_id]
+        if handle_state == "spent":
+            raise _Refused(RefusalCode.HANDLE_REPLAYED)
+        if handle_state == "revoked":
+            raise _Refused(RefusalCode.HANDLE_STALE)
+        wave, decision = request.wave, request.decision
+        if (
+            type(wave) is not SQLWaveRequest
+            or type(decision) is not SQLWaveDecision
+            or wave_decision_violation(decision, wave) is not None
+            or wave.scope != call.view.scope
+            or wave.plan_digest != self._authority.approval.plan_digest
+            or wave.authority_epoch != self._authority.epoch
+        ):
+            raise _Refused(RefusalCode.APPROVAL_MISMATCH)
+        if (wave.wave_id, call.task_id) in self._bound_items or prepared.approved_wave is not None:
+            raise _Refused(RefusalCode.HANDLE_REPLAYED)
+        asked = next((item for item in wave.items if item.task_id == call.task_id), None)
+        decided = decision.item(call.task_id)
+        if (
+            asked is None
+            or decided is None
+            or not prepared.approval_required
+            or asked.handle_id != presented.handle_id
+            or asked.sql_fingerprint != prepared.fingerprint
+            or decided.sql_fingerprint != prepared.fingerprint
+            or asked.attempt != prepared.attempt
+            or prepared.attempt != record.attempts
+        ):
+            raise _Refused(RefusalCode.APPROVAL_MISMATCH)
+        try:
+            expired = self._clock.now() >= prepared.expires_at
+        except Exception:
+            raise _Refused(RefusalCode.AUTHORITY_UNAVAILABLE) from None
+        if expired or prepared.epoch != self._authority.epoch or prepared.scope != call.view.scope:
+            raise _Refused(RefusalCode.HANDLE_STALE)
+        self._check_authority()
+        return task, record, prepared, decided
+
+    def _bind_sql(self, call: _Call, request: BindSQLApproval) -> GatewayResult:
+        task, record, prepared, decided = self._decided_item(call, request)
+        if decided.decision == "reject":
+            raise _Refused(RefusalCode.APPROVAL_MISMATCH)  # a rejection never binds
+        scope, table = self._resolve_table(call)
+        if _table_identity(table) != prepared.table_identity:
+            raise _Refused(RefusalCode.HANDLE_STALE)
+        self._bound_items.add((request.wave.wave_id, call.task_id))
+        handle_id = prepared.handle.handle_id
+        if decided.decision == "approve":
+            self._handles[handle_id] = replace(prepared, approved_wave=request.wave.wave_id)
+            return replace(self._result(call, "succeeded"), handle=prepared.handle)
+        # An edit: the old statement can never run; the new one passes every guard again.
+        self._handle_state[handle_id] = "revoked"
+        edited = decided.edited_sql
+        assert edited is not None  # an edit carries SQL (``SQLItemDecision``)
+        service = GuardedSQLService(table, _NoModel(), executor=_refusing_executor)
+        try:
+            validated = service.validate(sole_statement(edited))
+            check_identifiers(table, validated)
+        except Exception:
+            return self._failed(call, task, record, "unsafe_query", final=True)
+        question = _sql_question(task, call.view.plan)
+        status = self._policy_status(scope, task, validated, question)
+        if status not in EXECUTABLE_POLICY_STATUSES:
+            return self._failed(call, task, record, "policy_refused", final=True)
+        try:
+            expires_at = min(self._clock.now() + SQL_HANDLE_TTL, self._authority.approval.deadline)
+        except Exception:
+            raise _Refused(RefusalCode.AUTHORITY_UNAVAILABLE) from None
+        handle = SQLHandle(task_id=call.task_id, handle_id=self._nonce())
+        self._handles[handle.handle_id] = replace(
+            prepared,
+            handle=handle,
+            sql=validated,
+            fingerprint=self._fingerprint(validated),
+            policy_status=status,
+            expires_at=expires_at,
+            approved_wave=request.wave.wave_id,
+        )
+        self._handle_state[handle.handle_id] = "open"
+        return replace(self._result(call, "succeeded"), handle=handle)
+
+    def _reject_sql(self, call: _Call, request: RejectSQL) -> GatewayResult:
+        _, _, _, decided = self._decided_item(call, request)
+        if decided.decision != "reject":
+            raise _Refused(RefusalCode.APPROVAL_MISMATCH)
+        self._bound_items.add((request.wave.wave_id, call.task_id))
+        raise _Refused(RefusalCode.SQL_APPROVAL_REJECTED)  # ends the task; revokes its handles
 
     def _query_evidence(
         self,

@@ -193,20 +193,17 @@ def test_zero_succeeded_tasks_fail_the_run() -> None:
     assert view is not None and not any(r.status == "succeeded" for r in view.tasks.values())
 
 
-def test_sql_needing_approval_is_refused_and_never_awaits_sql_approval() -> None:
+def test_sql_needing_approval_pauses_before_any_execution() -> None:
+    # INV-10 replaces INV-5's refusal: the SQL is prepared and guarded, then the run pauses for a
+    # person's decision on its wave. Nothing executes before that decision.
     plan = churn_plan()
     e = execution(authority_value=exact_authority(plan=plan, sql_approval_required=True))
     result = e.run.run()
     view = result.state
-    assert view is not None
-    assert result.status is S.COMPLETED_PARTIAL
-    assert view.tasks["trend"].status == "refused"
-    assert view.tasks["segments"].status == "skipped"
-    refused = [d for d in view.decisions if d.refusal_code is RefusalCode.SQL_APPROVAL_REQUIRED]
-    assert [d.tool for d in refused] == ["prepare_sql"]
-    assert e.executor.calls == [] and e.llm.sql_prompts == []
-    statuses = {dict(s.values).get("status") for s in e.run.graph.get_state_history(e.run.config)}
-    assert "awaiting_sql_approval" not in statuses
+    assert view is not None and result.status is S.AWAITING_SQL_APPROVAL
+    assert result.sql_wave is not None and [i.task_id for i in result.sql_wave.items] == ["trend"]
+    assert view.tasks["trend"].status == "running" and e.executor.calls == []
+    assert view.terminal is None
 
 
 def test_a_known_retryable_failure_is_retried_once() -> None:
@@ -487,9 +484,24 @@ def test_an_unexpected_production_client_fails_closed() -> None:
 
 # --- INV-5 grants nothing -------------------------------------------------------------------------
 
-_DEFINING = {"packages/investigation/state.py", "packages/investigation/gateway.py"}
+_DEFINING = {
+    "packages/investigation/state.py",
+    "packages/investigation/gateway.py",
+    "packages/investigation/approval.py",
+}
 # INV-7: a follow-up approval comes only from the trusted authorizer port (decision C3).
-_GRANTS = {"PlanApprovalRecord", "InvestigationAuthority", "FollowUpApproval"}
+# INV-10: plan grants and SQL-wave decisions come only from the trusted approval service.
+_GRANTS = {
+    "PlanApprovalRecord",
+    "InvestigationAuthority",
+    "FollowUpApproval",
+    "PlanApprovalGrant",
+    "SQLWaveDecision",
+}
+# INV-10: the one trusted approval service, and exactly what it may construct (never an
+# authority, and never a decision that SQL needs no approval).
+_APPROVAL_SERVICE = "src/orchestration/investigation_approval.py"
+_SERVICE_GRANTS = {"PlanApprovalRecord", "FollowUpApproval", "PlanApprovalGrant", "SQLWaveDecision"}
 
 
 def _grant_constructions(source: str) -> list[str]:
@@ -517,8 +529,15 @@ def test_no_production_module_grants_approval_or_authority() -> None:
             if relative in _DEFINING:
                 continue
             found = _grant_constructions(path.read_text(encoding="utf-8"))
+            if relative == _APPROVAL_SERVICE:
+                found = [item for item in found if item not in _SERVICE_GRANTS]
             offenders += [f"{relative}: {item}" for item in found]
     assert offenders == []
+
+
+def test_the_approval_service_constructs_each_grant_it_is_allowed() -> None:
+    source = (ROOT / _APPROVAL_SERVICE).read_text(encoding="utf-8")
+    assert set(_grant_constructions(source)) == _SERVICE_GRANTS
 
 
 def test_the_grant_checker_detects_each_construction() -> None:
