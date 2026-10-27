@@ -37,6 +37,8 @@ class RefusalCode(StrEnum):
     # task: the task ends without running
     RESOURCE_ABSENT = "resource_absent"
     SQL_APPROVAL_REQUIRED = "sql_approval_required"
+    # INV-10: a person rejected this task's prepared SQL in its approval wave.
+    SQL_APPROVAL_REJECTED = "sql_approval_rejected"
     CORRECTION_LIMIT = "correction_limit"
     # INV-7: a follow-up task whose round approval is absent, unbound, or expired.
     FOLLOW_UP_NOT_AUTHORIZED = "follow_up_not_authorized"
@@ -72,7 +74,13 @@ class RefusalCode(StrEnum):
 C = RefusalCode
 _REQUEST = frozenset({C.INVALID_REQUEST, C.DEPENDENCY_INCOMPLETE})
 _TASK = frozenset(
-    {C.RESOURCE_ABSENT, C.SQL_APPROVAL_REQUIRED, C.CORRECTION_LIMIT, C.FOLLOW_UP_NOT_AUTHORIZED}
+    {
+        C.RESOURCE_ABSENT,
+        C.SQL_APPROVAL_REQUIRED,
+        C.SQL_APPROVAL_REJECTED,
+        C.CORRECTION_LIMIT,
+        C.FOLLOW_UP_NOT_AUTHORIZED,
+    }
 )
 
 SEVERITY: dict[RefusalCode, RefusalSeverity] = {
@@ -91,6 +99,7 @@ _SPECIFIC_CATEGORIES: dict[RefusalCode, str] = {
     C.DEPENDENCY_INCOMPLETE: "dependency_failed",
     C.RESOURCE_ABSENT: "resource_unavailable",
     C.RESOURCE_RESOLUTION_FAILED: "resource_unavailable",
+    C.SQL_APPROVAL_REJECTED: "approval_rejected",
     C.CANCELLED: "cancelled",
     C.BUDGET_EXHAUSTED: "budget_exhausted",
     C.BUDGET_CLOSED: "budget_exhausted",

@@ -51,6 +51,15 @@ AUDIT_ACTIONS: frozenset[str] = frozenset(
         "agent.route_executed",
         "agent.sql_approved",
         "agent.sql_rejected",
+        # INV-10 (#143): the investigation lifecycle. ``reconciled`` is emitted only by INV-11's
+        # restart reconciliation.
+        "agent.investigation_proposed",
+        "agent.investigation_approved",
+        "agent.investigation_rejected",
+        "agent.investigation_cancelled",
+        "agent.investigation_completed",
+        "agent.investigation_reconciled",
+        "agent.task_executed",
         "report.generated",
         "report.downloaded",
         "export.created",
@@ -114,6 +123,17 @@ AUDIT_ATTRIBUTES: dict[str, str] = {
     "policy_issue_count": "int",
     "include_charts": "bool",
     "anomaly_features_count": "int",
+    # INV-10: investigation lifecycle counts and fixed status tokens; never plans or SQL.
+    "investigation_status": "token",
+    "plan_version": "int",
+    "task_count": "int",
+    "task_kind": "token",
+    "attempts": "int",
+    "wave_size": "int",
+    "approved_count": "int",
+    "rejected_count": "int",
+    "edited_count": "int",
+    "follow_up_rounds": "int",
     "dropped_attributes": "int",
 }
 

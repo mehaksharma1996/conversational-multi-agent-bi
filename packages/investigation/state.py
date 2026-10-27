@@ -348,6 +348,9 @@ GatewayTool = Literal[
     "open_follow_up_round",
     # INV-8: the owner-only, bounded narrative call for the verified report.
     "compose_narrative",
+    # INV-10: the owner-only binding or rejection of a human SQL-wave decision.
+    "bind_sql_approval",
+    "reject_sql",
 ]
 DecisionResult = Literal["succeeded", "refused", "failed", "cancelled"]
 

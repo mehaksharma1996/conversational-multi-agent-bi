@@ -310,6 +310,8 @@ def test_the_checkpoint_schema_changes_only_by_approved_additions() -> None:
         "review_findings",  # INV-7: the Critic's gap review (owner-only)
         "open_follow_up_round",  # INV-7: an approved round's opening (owner-only)
         "compose_narrative",  # INV-8: the bounded report narrative call (owner-only)
+        "bind_sql_approval",  # INV-10: a person's SQL-wave approval bound (owner-only)
+        "reject_sql",  # INV-10: a person's SQL-wave rejection applied (owner-only)
     }
     assert set(typing.get_args(state.EvidenceRecord.model_fields["kind"].annotation)) == {
         "query",
