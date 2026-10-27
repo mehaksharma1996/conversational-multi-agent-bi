@@ -494,14 +494,22 @@ class InvestigationRuntime:
         if result.status is S.AWAITING_SQL_APPROVAL:
             self._advance(investigation_id, tenant, S.AWAITING_SQL_APPROVAL)
             return
-        record = self._end(
+        if result.report is not None:
+            # Store the report before publishing the terminal status, so a client that sees a
+            # terminal status always sees its report too.
+            try:
+                record = self._records.get(investigation_id, tenant)
+            except LookupError:
+                return  # the workspace was deleted underneath the run
+            if not record.terminal:
+                evidence = {
+                    key: value.model_dump(mode="json") for key, value in result.payloads.items()
+                }
+                self._records.save_report(
+                    record, result.report.model_dump_json(), json.dumps(evidence, sort_keys=True)
+                )
+        self._end(
             investigation_id, tenant, result.status, category=result.category, explanation=None
-        )
-        if record is None or result.report is None:
-            return
-        evidence = {key: value.model_dump(mode="json") for key, value in result.payloads.items()}
-        self._records.save_report(
-            record, result.report.model_dump_json(), json.dumps(evidence, sort_keys=True)
         )
 
     # --- decisions -----------------------------------------------------------------------------

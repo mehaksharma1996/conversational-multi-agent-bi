@@ -404,3 +404,26 @@ def test_a_proposal_is_decidable_as_soon_as_it_reads_awaiting_plan_approval() ->
         body = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
         assert seen == ["planning"]  # registered before the status was published
         assert _approve(client, body).status_code == 200
+
+
+def test_a_terminal_status_is_published_only_after_its_report_is_stored() -> None:
+    deployment = Deployment("inv11_report_order")
+    with TestClient(deployment.app()) as client:
+        records = client.app.state.investigation_records
+        seen: list[str] = []
+        save = records.save_report
+
+        def spy(record: Any, *args: Any) -> Any:
+            seen.append(records.get(record.id, record.tenant_id).status.value)
+            return save(record, *args)
+
+        records.save_report = spy
+        _, conversation_id, message_id = _proposal(client)
+        investigation_id = _create(client, conversation_id, message_id).json()["id"]
+        body = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
+        _approve(client, body)
+        _until(client, investigation_id, _status("awaiting_sql_approval", "failed"))
+        _approve_wave(client, investigation_id)
+        done = _until(client, investigation_id, _status("completed", "completed_partial", "failed"))
+        assert done["status"] == "completed" and done["report"] is not None
+        assert seen and all(status not in {"completed", "cancelled"} for status in seen)
