@@ -566,8 +566,8 @@ def test_v1_routes_and_inv9_never_reach_the_approval_service() -> None:
         for path in (ROOT / top).rglob("*.py")
         if service in _imported_modules(path)
     )
-    # Only the trusted execution owner uses it; INV-11 adds the API adapter.
-    assert users == ["src/orchestration/investigation_execution.py"]
+    # The trusted execution owner and INV-11's trusted API adapter only.
+    assert users == ["apps/api/investigations.py", "src/orchestration/investigation_execution.py"]
 
 
 def test_the_service_needs_a_trusted_audit_recorder() -> None:

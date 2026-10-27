@@ -18,7 +18,9 @@ from apps.api.content_store import WorkspaceContentStore
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
+from apps.api.investigation_routes import router as investigation_router
 from apps.api.investigation_store import InvestigationRecordStore
+from apps.api.investigations import InvestigationAdapters, InvestigationRuntime
 from apps.api.job_routes import router as job_router
 from apps.api.metadata_store import MetadataError, MetadataStore
 from apps.api.models import ErrorResponse, HealthResponse
@@ -68,6 +70,7 @@ def create_app(
     job_executor: InProcessJobExecutor | None = None,
     trace_manager: TraceManager | None = None,
     reranker: Reranker | None = None,
+    investigation_adapters: InvestigationAdapters | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
@@ -168,6 +171,16 @@ def create_app(
         metadata=application.state.repository.metadata_store,
         encryption_key=application.state.repository.encryption_key,
     )
+    # Trusted provider configuration comes only from this factory's caller (tests inject scripted
+    # adapters); production fails closed until a reviewed bounded adapter exists.
+    application.state.investigations = InvestigationRuntime(
+        enabled=active_settings.investigation_routing_enabled,
+        repository=application.state.repository,
+        records=application.state.investigation_records,
+        executor=application.state.job_executor,
+        recorder=observability.recorder,
+        adapters=investigation_adapters,
+    )
     application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(
         observability,
         application.state.approval_checkpoints,
@@ -175,6 +188,7 @@ def create_app(
         application.state.embedding_cache,
         application.state.job_executor,
         application.state.investigation_records,
+        application.state.investigations,
     )
     application.state.tabular_service = TabularApplicationService()
     active_embedder_factory = embedder_factory or SentenceTransformerEmbedder
@@ -277,6 +291,7 @@ def create_app(
     application.include_router(router)
     application.include_router(feature_router)
     application.include_router(job_router)
+    application.include_router(investigation_router)
     return application
 
 
@@ -504,6 +519,7 @@ def _workspace_lifecycle_listener(
     embedding_cache: EmbeddingVectorCache,
     job_executor: InProcessJobExecutor,
     investigation_records: InvestigationRecordStore,
+    investigations: InvestigationRuntime,
 ) -> Callable[[str, WorkspaceRecord, str], None]:
     """Audit workspace lifecycle from the stored (server-side) record's tenant."""
 
@@ -513,6 +529,7 @@ def _workspace_lifecycle_listener(
             rate_limiter.delete_workspace(workspace.tenant_id, workspace.id)
             embedding_cache.delete_workspace(workspace.tenant_id, workspace.id)
             job_executor.purge_workspace(workspace.tenant_id, workspace.id)
+            investigations.delete_workspace(workspace.tenant_id, workspace.id)
             investigation_records.delete_workspace(workspace.tenant_id, workspace.id)
         observability.telemetry.emit(
             "workspace.lifecycle",

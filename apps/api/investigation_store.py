@@ -268,6 +268,21 @@ class InvestigationRecordStore:
             self._keys[(tenant_id, hashed)] = record.id
             return record, True
 
+    def replay(
+        self, tenant_id: str, idempotency_key: str, conversation_id: str, message_id: str
+    ) -> InvestigationRecord | None:
+        """The record an earlier request with this key created, or ``None``; a different
+        request with the same key is ``idempotency_key_reused``."""
+        hashed = key_hash(idempotency_key)
+        with self._lock:
+            existing_id = self._keys.get((tenant_id, hashed))
+            existing = None if existing_id is None else self._records.get(existing_id)
+            if existing is None:
+                return None
+            if existing.request_fingerprint != request_fingerprint(conversation_id, message_id):
+                raise InvestigationConflictError("idempotency_key_reused")
+            return existing
+
     def get(self, investigation_id: str, tenant_id: str) -> InvestigationRecord:
         with self._lock:
             record = self._records.get(investigation_id)
