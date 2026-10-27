@@ -119,7 +119,7 @@ def _proposal(client: TestClient) -> tuple[str, str, str]:
     )
     assert message.status_code == 201 and message.json()["route"] == "investigation"
     # The scripted execution provider is a hosted recipient; consent must name it.
-    repository = client.app.state.repository  # type: ignore[attr-defined]
+    repository = client.app.state.repository
     record = repository._workspaces[workspace_id]
     repository._workspaces[workspace_id] = replace(
         record,
@@ -314,7 +314,7 @@ def test_a_viewer_cannot_create_decide_or_cancel() -> None:
     with TestClient(app) as client:
         _, conversation_id, message_id = _proposal(client)
         investigation_id = _create(client, conversation_id, message_id).json()["id"]
-        tenant = client.app.state.investigation_records.records()[0].tenant_id  # type: ignore[attr-defined]
+        tenant = client.app.state.investigation_records.records()[0].tenant_id
         _as(app, tenant, roles=frozenset({"viewer"}))
         assert _create(client, conversation_id, message_id, key="v").status_code == 403
         assert client.post(f"/api/v1/investigations/{investigation_id}/cancel").status_code == 403
@@ -384,3 +384,23 @@ def test_unknown_investigations_are_404(path: str) -> None:
     deployment = Deployment("inv11_unknown")
     with TestClient(deployment.app()) as client:
         assert client.get(f"/api/v1/investigations/inv_missing{path}").status_code == 404
+
+
+def test_a_proposal_is_decidable_as_soon_as_it_reads_awaiting_plan_approval() -> None:
+    deployment = Deployment("inv11_publish_order")
+    app = deployment.app()
+    with TestClient(app) as client:
+        runtime = client.app.state.investigations
+        seen: list[str] = []
+        register = runtime.approvals.register_proposal
+
+        def spy(run: Any, **kwargs: Any) -> Any:
+            seen.extend(record.status.value for record in runtime.records.records())
+            return register(run, **kwargs)
+
+        runtime.approvals.register_proposal = spy
+        _, conversation_id, message_id = _proposal(client)
+        investigation_id = _create(client, conversation_id, message_id).json()["id"]
+        body = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
+        assert seen == ["planning"]  # registered before the status was published
+        assert _approve(client, body).status_code == 200

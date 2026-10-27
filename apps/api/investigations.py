@@ -412,10 +412,9 @@ class InvestigationRuntime:
             self._end(investigation_id, tenant, result.status, explanation=result.record.code)
             return
         plan = result.proposal.plan
-        digest = plan_digest(plan)
-        record = self._records.update(
-            investigation_id, tenant, status=S.AWAITING_PLAN_APPROVAL, plan_digest=digest
-        )
+        # Register with the approval service before the record says ``awaiting_plan_approval``,
+        # so a client that sees that status can always decide it.
+        record = self._records.update(investigation_id, tenant, plan_digest=plan_digest(plan))
         self._records.save_plan(record, plan.model_dump_json())
         with self._lock:
             live.proposal = run
@@ -430,6 +429,10 @@ class InvestigationRuntime:
             return
         with self._lock:
             live.registered = True
+        try:
+            self._records.update(investigation_id, tenant, status=S.AWAITING_PLAN_APPROVAL)
+        except InvestigationConflictError:
+            self.approvals.cancel(live.scope)  # cancelled meanwhile: the proposal goes too
 
     def _execute(self, ctx: JobContext, investigation_id: str) -> None:
         live = self._live[investigation_id]
