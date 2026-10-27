@@ -13,12 +13,12 @@ DIGEST = "d" * 64
 
 
 def _records(client: TestClient) -> InvestigationRecordStore:
-    store: InvestigationRecordStore = client.app.state.investigation_records  # type: ignore[attr-defined]
+    store: InvestigationRecordStore = client.app.state.investigation_records
     return store
 
 
 def _tenant(client: TestClient, workspace_id: str) -> str:
-    workspaces = client.app.state.repository._workspaces  # type: ignore[attr-defined]
+    workspaces = client.app.state.repository._workspaces
     return str(workspaces[workspace_id].tenant_id)
 
 
