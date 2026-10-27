@@ -584,9 +584,8 @@ class CritiqueRecord(_State):
 class FollowUpApproval(_State):
     """The trusted authorization of one follow-up round (INV-7 decision C3).
 
-    Bound to the exact task set (``follow_up_digest``) and round. Production code never
-    constructs one: it is copied from the trusted ``FollowUpAuthorizer`` port, and production has
-    none until INV-10 (#143).
+    Bound to the exact task set (``follow_up_digest``) and round. It is copied from the trusted
+    ``FollowUpAuthorizer`` port; in production only the approval service constructs one (INV-10).
     """
 
     follow_up_digest: Digest

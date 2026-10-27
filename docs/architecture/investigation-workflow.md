@@ -345,7 +345,7 @@ counter, or an error text (`extra="forbid"`, strict).
   admitted task: a `sql_analysis` objective and fields, or the method and fields of a
   non-document `hypothesis_test`. Any other task kind is `tool_not_permitted`. The gateway then
   runs the S5 pre-flight and model path:
-  1. it refuses `sql_approval_required` if the authority needs approval;
+  1. (until INV-10 it refused `sql_approval_required` here; see "SQL-wave approval" below);
   2. it admits the bounded adapter (`metering_unbounded` otherwise) and re-checks live authority;
   3. it resolves the tenant's table through the trusted `TableResolver`;
   4. it reserves the worst case of one logical call, and makes one bounded call through
@@ -373,7 +373,8 @@ Before the executor runs, `execute_sql` checks, in order:
 | Handle revoked (task refused or gateway closed) | `handle_stale` |
 | Task no longer running, or on another attempt | `handle_stale` |
 | Handle expired; scope, plan digest, or epoch changed | `handle_stale` |
-| Approval required | `sql_approval_required` |
+| Approval required by the authority but the handle's requirement differs | `handle_stale` |
+| Approval required and no bound approval of this fingerprint (INV-10) | `sql_approval_required` |
 | Live authority, then the tenant's table re-resolved | as in S5 |
 | Table identity changed | `handle_stale` |
 | Read-only guard re-applied; fingerprint and policy status recomputed | `handle_stale` |
@@ -436,8 +437,8 @@ the task fails with `policy_refused`. Document-derived criteria are deferred to 
 in which tasks cite evidence (INV-6 or INV-7, INV-5 decision R4); INV-5 plans cite no evidence. With
 criteria, only `structurally_verified` SQL gets a handle.
 
-Approval: no INV-10 approval binding exists yet, so any SQL that needs approval is refused before a
-model call, and a handle bound to an approval requirement never executes.
+Approval: see "Plan and SQL-wave approval (INV-10)" below. A handle bound to an approval
+requirement executes only after a verified wave decision for its exact fingerprint.
 
 SQL text, result rows, row values, and database error text never enter state, decisions, or
 results. Decisions carry fixed codes and categories only. Fingerprints are keyed and per-gateway:
@@ -629,8 +630,8 @@ exactly, from the band counts (`standardized_rate_difference`), and becomes an a
 test of its hypothesis. A round is admitted only after validation, the round and cumulative attempt
 limits, and an approval for exactly its task set (`follow_up_digest`) inside the plan approval's
 window. The gateway re-verifies the approval when it opens the round and on every operation on a
-follow-up task (`follow_up_not_authorized`, task severity). Production has no authorizer, so it
-admits nothing until INV-10.
+follow-up task (`follow_up_not_authorized`, task severity). In production the authorizer is the
+INV-10 approval service: only rounds the plan approver delegated, each once, for its exact task set.
 
 **Failures.** A malformed draft or review is `invalid` and never retried; a provider failure or a
 prompt over the input cap is `unavailable` (the latter is never sent and charges nothing). The
@@ -717,3 +718,82 @@ Each cites its trigger. With none, the report says so (`no_eligible_recommendati
 - The report itself is returned in process (`ExecutionResult.report`), and only when its digest
   equals the recorded one.
 - `STATE_VERSION` stays 1.
+
+## Plan and SQL-wave approval (INV-10, #143)
+
+Design and decisions D1 to D10: `docs/agents/briefs/143-inv10-approval-audit.md`; ADR 0024
+Amendment 8.
+
+**Who may construct authority.** `InvestigationApprovalService`
+(`src/orchestration/investigation_approval.py`) is the only production constructor of
+`PlanApprovalGrant`, `PlanApprovalRecord`, `FollowUpApproval`, and `SQLWaveDecision`
+(a structural test). Clients submit only `PlanDecisionRequest` and `SQLWaveDecisionRequest`
+(`packages/investigation/approval.py`), which carry identifiers, digests, the epoch, and choices,
+never an approver, a time, or a permission. The approver is a trusted `ApproverIdentity`.
+
+**Plan lifecycle (service record).**
+
+| From | Operation | To | Audit |
+|---|---|---|---|
+| (proposal thread `awaiting_plan_approval`) | `register_proposal` | `awaiting_plan_approval` | `agent.investigation_proposed` |
+| `awaiting_plan_approval` | `decide_plan(approve)` | `queued` | `agent.investigation_approved` |
+| `awaiting_plan_approval` | `decide_plan(reject)` | `plan_rejected` | `agent.investigation_rejected` |
+| `awaiting_plan_approval` | deadline reached | `expired` | `agent.investigation_completed` |
+| any live | `cancel` | `cancelled` | `agent.investigation_cancelled` |
+| not started | `revoke` | `failed` | `agent.investigation_completed` |
+| `queued` | `consume_grant` (the run starts) | `running` | none |
+| `running` / `awaiting_sql_approval` | the run ends | terminal | `agent.task_executed` per started task, then completed or cancelled |
+
+`decide_plan` checks, in order: exact request and approver types; a registered proposal for exactly
+that tenant, workspace, and investigation; the approver's tenant; still pending (an expired one
+moves to `expired`); the exact plan digest and epoch; the proposal thread still validating with that
+digest; `analysis:run`; consent for the planning authority's recipients; and the live authority,
+last. The grant's deadline is the earlier of `approved_at + 24h` and the workspace's expiry, and
+equality with any deadline is expired. One lock serialises decisions with `cancel` and `revoke`.
+
+**Execution handoff.** `InvestigationExecutionRun` requires the service and the grant instance it
+issued: the authority's approval must equal the grant's window, and its scope and epoch the
+grant's; the grant is consumed once. The run's cancellation token and live check are the service's
+wrappers, so a service cancel or revoke stops the run and discards a late result.
+
+**SQL waves.** With `sql_approval_required`:
+
+1. `prepare_sql` generates SQL through the guarded path, requires exactly one read-only statement,
+   compiles it against the table's schema, applies policy, fingerprints it (keyed HMAC), and issues
+   a handle bound to scope, plan digest, epoch, task, attempt, role, table identity, and policy
+   status. The SQL Analyst's task is then *parked*.
+2. The dispatch policy keeps at most one active task. When nothing else can proceed, it returns
+   `request_sql_approval`: every parked, unapproved statement forms one wave (the ready frontier).
+3. The owner registers the wave with the service (content-free `SQLWaveItem`s; SQL for the approver
+   only through `pending_sql_wave`, in process), `await_sql` moves to `awaiting_sql_approval`, and
+   `sql_decision` interrupts with `{kind, wave_id, sequence}` only. The ledger's wall clock pauses.
+4. `decide_sql_wave` requires a decision for every item, in order, echoing each fingerprint and the
+   wave digest, before the wave's deadline (the earliest handle expiry, capped by the plan
+   approval), by an approver of the tenant with `analysis:run` and valid live authority.
+5. `resume` reads the outcome from the service: decided resumes `running`, and each item is bound
+   (`bind_sql_approval`: approve, or edit re-validated in full with a new fingerprint and handle)
+   or rejected (`reject_sql`: `refused`, `approval_rejected`) through the gateway; cancelled or
+   withdrawn ends `cancelled`; expired ends `expired` through the `expire` step (no report).
+
+A correction or retry produces new SQL, which joins the next wave. Without SQL approval nothing is
+parked and execution is unchanged.
+
+| Gateway check (bind or reject) | Refusal |
+|---|---|
+| Task not admitted, wrong role, not running | as for every operation |
+| Handle unknown, altered, foreign | `handle_unknown` |
+| Handle spent, or this wave item already decided | `handle_replayed` |
+| Handle revoked, expired, other epoch or scope; table identity changed | `handle_stale` |
+| Decision does not decide exactly this wave (cover, order, digest, scope, plan, epoch, window), or the item names another handle, statement, or attempt | `approval_mismatch` |
+| Live authority | as in S5 |
+
+**Audit.** Events carry the tenant and the investigation ID from the trusted scope and allowlisted
+counts and tokens only (`plan_version`, `task_count`, `follow_up_rounds`, `investigation_status`,
+`task_kind`, `outcome`, `attempts`, `error_category`, `wave_size`, `approved_count`,
+`edited_count`, `rejected_count`, `sql_edited`, `reason`). Wave decisions reuse
+`agent.sql_approved`/`agent.sql_rejected` with `route=investigation`. Refused operations emit
+nothing. `agent.investigation_reconciled` is reserved for INV-11.
+
+**Limits.** The service, its registry, grants, and waves are process-local: durable records,
+idempotency across processes, HTTP endpoints, and restart reconciliation are INV-11 (#144). A
+revocation that the service did not see is detected only at the gateway's pre-flight live check.

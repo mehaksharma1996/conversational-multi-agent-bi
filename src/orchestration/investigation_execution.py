@@ -92,8 +92,9 @@ a v2 run reviews each round (at most two critic rounds, two follow-up rounds):
    next round is reviewed when they end.
 
 Review stops when a critique admits nothing, after critique 1's round, or when the critic-round
-budget is spent; a critique never retries a task. With no authorizer (production until INV-10),
-no follow-up is ever admitted. The final verdicts then cover every admitted follow-up.
+budget is spent; a critique never retries a task. Without a follow-up delegation in the plan
+approval (INV-10), no follow-up is ever admitted. The final verdicts then cover every admitted
+follow-up.
 
 **Verified report (INV-8, #141).** Every run that reaches ``finish`` ends with a verified report:
 

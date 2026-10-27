@@ -6,9 +6,11 @@ period, and claim, adds the finding's stratification, and gets a fixed ID and su
 The result is validated (``validate_follow_up_round``) and must then be approved, for exactly this
 task set, by the trusted ``FollowUpAuthorizer`` before anything is admitted.
 
-``FollowUpAuthorizer`` is a port only. Production has no implementation until INV-10 (#143)
-provides the human approval flow, so production admits no follow-up and reports
-``follow_up_not_authorized``. Only tests construct ``FollowUpApproval`` values.
+``FollowUpAuthorizer`` is a port. Its production implementation (INV-10, #143) is the trusted
+approval service's (``src/orchestration/investigation_approval.py``): it authorizes only rounds the
+plan approver delegated, each once, for its exact task set, inside the plan approval's window.
+Without a delegation, production admits no follow-up and reports ``follow_up_not_authorized``.
+Outside tests, only that service constructs ``FollowUpApproval`` values.
 """
 
 from __future__ import annotations
@@ -127,7 +129,7 @@ class FollowUpAuthorizer(Protocol):
     """The trusted approval port for one follow-up round (decision C3).
 
     Returns the approval for exactly ``request`` (its digest and round), or ``None`` when the
-    round is not approved. Production has no implementation until INV-10 (#143).
+    round is not approved. The production implementation is the approval service's (INV-10).
     """
 
     def authorize(self, request: FollowUpApprovalRequest) -> FollowUpApproval | None: ...

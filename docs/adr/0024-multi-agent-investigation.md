@@ -620,6 +620,47 @@ investigation/API/report lifecycle is INV-11; approval, progress, evidence, and 
 UI-6b/UI-6c; default activation is DEP-1. INV-9 creates no bridge that can treat a routing message
 as any of those later capabilities.
 
+## Amendment 8: plan approval, SQL-wave approval, and audit (INV-10, #143, 2026-10-27)
+
+INV-10 makes decisions 3, 10, and 13 concrete in process. Routing stays off by default (#142), and
+production model execution stays fail-closed without a reviewed bounded adapter. Details are in
+`docs/architecture/investigation-workflow.md` and
+`docs/agents/briefs/143-inv10-approval-audit.md` (D1 to D10).
+
+1. **One trusted approval service (D1).** `InvestigationApprovalService` is the only production
+   constructor of plan grants, `PlanApprovalRecord`, `FollowUpApproval`, and SQL-wave decisions.
+   Clients submit typed, versioned requests that name no approver, time, or permission. The INV-9
+   `investigation_proposed` message is never accepted as approval.
+2. **Plan approval (D2, D4).** A grant binds the scope, plan digest, authority epoch, approver, and
+   a window ending at the earlier of 24 hours after approval and workspace expiry; equality with a
+   deadline is expired. Rejection is `plan_rejected`, expiry `expired`; neither grants anything.
+   Cancellation and revocation win over a concurrent approval. A conversation holds at most one
+   live investigation, so it never has two pending approvals.
+3. **Mandatory grant (D3).** Execution starts only with the service-issued grant instance, whose
+   window, scope, and epoch equal the authority's, consumed once. Amendment 3's process-local
+   replay registry stays.
+4. **SQL waves (D5, D6, D7).** SQL that needs approval is prepared, guarded, schema-compiled,
+   policy-checked, and fingerprinted, then parked. One approval is requested for every parked
+   statement when nothing else can proceed (the ready frontier). The graph pauses with a LangGraph
+   interrupt carrying only the wave's identity; resume reads the decision from the service and
+   the gateway re-verifies each item. Edits are re-validated in full and re-fingerprinted;
+   rejections end tasks `refused` and skip their dependents; expiry ends `expired`; cancellation
+   ends `cancelled`. Nothing executes without a bound approval of its exact fingerprint. This
+   replaces Amendment 1 item 7's interim refusal.
+5. **Budget across pauses (D8).** The execution ledger is never reset; its wall clock is paused
+   only while a person decides a wave.
+6. **Follow-ups (D9).** The plan approver may delegate up to two follow-up rounds; the service then
+   authorizes each round once for its exact task set. No agent authorizes itself.
+7. **Audit (D10).** `agent.investigation_{proposed,approved,rejected,cancelled,completed}` and
+   `agent.task_executed` are emitted when the operation happens, content-free and bound to the
+   trusted scope. `agent.investigation_reconciled` is vocabulary only (INV-11).
+
+**Known limitations and deferred work.** Everything above is process-local: durable investigation
+records, durable idempotency, approval and cancellation endpoints, background jobs, and restart
+reconciliation (with its audit event) are INV-11 (#144). `expired` runs have no report, because it
+is not a report status. A wave's handles keep their 10-minute TTL, so a slow approval expires the
+wave. Approval UI is UI-6b/UI-6c.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,
