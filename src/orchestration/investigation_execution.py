@@ -2,8 +2,30 @@
 
 ``InvestigationExecutionRun`` turns an **approved** proposal into sequential, gateway-mediated
 execution. It is the only code that establishes the proposal-to-execution handoff, and it grants
-nothing itself: no INV-5 module constructs a ``PlanApprovalRecord`` or an
-``InvestigationAuthority``, or decides that SQL needs no approval.
+nothing itself: it constructs no ``PlanApprovalRecord``, ``InvestigationAuthority``, follow-up
+approval, or SQL decision, and never decides that SQL needs no approval.
+
+**Plan approval (INV-10, #143).** The run requires the trusted ``InvestigationApprovalService`` and
+a ``PlanApprovalGrant`` that service issued and still holds (the very instance). The authority's
+approval must equal the grant's window, and its scope and epoch the grant's; the grant is consumed
+once. The run's cancellation token and live check are the service's wrappers, so a cancellation
+or revocation there stops the run and discards a late result. Without an explicit authorizer, the
+service's follow-up authorizer (only rounds the plan approver delegated) is used. The run reports
+its terminal status to the service, which records the audit events.
+
+**SQL-wave approval (INV-10).** With ``sql_approval_required``, a SQL task's prepared statement is
+*parked* (``running``, holding a handle, executing nothing). When the dispatch policy finds nothing
+else to do it asks for one approval of every parked statement (the wave): the owner registers the
+wave with the service (content-free items; the SQL stays in process), ``await_sql`` moves the
+lifecycle to ``awaiting_sql_approval``, and ``sql_decision`` pauses the graph with a LangGraph
+``interrupt`` whose value names only the wave. The ledger's wall clock is paused while a person
+decides and resumed after; the ledger is never reset. ``resume`` never trusts a resume value: it
+reads the decision from the service and re-validates it against the wave. A decided wave resumes
+``running``; then each item is bound (``approve``, or an ``edit`` re-validated in full with a new
+fingerprint) or rejected (the task ends ``refused``, and its dependents are skipped) through the
+gateway, one per step, and approved statements execute. A cancelled or revoked investigation ends
+``cancelled``; a wave past its deadline ends ``expired`` (no report: ``expired`` is not a report
+status). Nothing executes in either case.
 
 **Handoff (decision R1: re-seed, not a shared saver).** The owner reads the proposal thread only
 through ``load_investigation_state`` and refuses unless all of these hold:
@@ -17,8 +39,8 @@ through ``load_investigation_state`` and refuses unless all of these hold:
 - this approval has not started an execution in this process before.
 
 The last check is a process-local registry keyed by scope, plan digest, and approval time. Nothing
-durable prevents re-execution in another process or after a restart, and the approval record names
-no approver: durable idempotency, approver identity, and audit belong to #143/#144.
+durable prevents re-execution in another process or after a restart: durable idempotency belongs to
+INV-11 (#144). The grant (INV-10) names the approver.
 
 **Execution graph.** A new strict thread, ``<tenant>:<workspace>:<investigation>:execution``, built
 through ``InvestigationGraphBuilder`` with the dispatcher bound to the owner's execution ledger:
@@ -101,13 +123,22 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command, interrupt
 
+from packages.investigation.approval import (
+    ApprovalRefused,
+    PlanApprovalGrant,
+    SQLItemDecision,
+    SQLWaveDecision,
+    SQLWaveRequest,
+    wave_decision_violation,
+)
 from packages.investigation.budget import EXECUTION_LIMITS, BudgetLedger, BudgetLimits, Clock
 from packages.investigation.contracts import AgentRole, InvestigationPlan, TaskKind
 from packages.investigation.critique import (
@@ -205,10 +236,12 @@ from src.investigation.document_researcher import DocumentResearcher
 from src.investigation.sql_analyst import SQLAnalyst
 from src.investigation.supervisor import FollowUpPlanner
 from src.orchestration.guarded_sql import SQLExecutor
+from src.orchestration.investigation_approval import InvestigationApprovalService
 from src.orchestration.investigation_checkpoint import load_investigation_state
 from src.orchestration.investigation_graph import InvestigationGraphBuilder
 from src.orchestration.investigation_proposal import InvestigationProposalRun
 from src.orchestration.tool_gateway import (
+    BindSQLApproval,
     ComposeNarrative,
     DeriveEvidence,
     DocumentResolver,
@@ -219,6 +252,7 @@ from src.orchestration.tool_gateway import (
     InvestigationToolGateway,
     OpenFollowUpRound,
     PolicyCriteriaSource,
+    RejectSQL,
     ReviewFindings,
     SkipTask,
     TableResolver,
@@ -237,6 +271,9 @@ REVIEW_STEPS_PER_ROUND = 8
 FOLLOW_UP_STEPS = OPERATIONS_PER_ATTEMPT + 2
 # INV-8: the narrative step, ``compose_report``, and ``verify_report``.
 REPORT_STEPS = 3
+# INV-10, per wave a statement can join: the request, ``await_sql``, ``sql_decision``,
+# ``resume_sql``, and the item's binding. A statement and its one correction may each need one.
+WAVE_STEPS = 5
 
 # Which specialist runs each executable task kind, and the role it must be assigned to (R7).
 _SPECIALISTS: dict[TaskKind, tuple[AgentRole, type[SQLAnalyst] | type[DocumentResearcher]]] = {
@@ -274,7 +311,13 @@ class ApprovedPlanHandoff:
             raise ExecutionRunError("handoff_untrusted")
 
 
-def _verify_handoff(proposal: object, authority: object, clock: WallClock) -> ApprovedPlanHandoff:
+def _verify_handoff(
+    proposal: object,
+    authority: object,
+    clock: WallClock,
+    approvals: object,
+    grant: PlanApprovalGrant,
+) -> ApprovedPlanHandoff:
     # Exact types: a subclass could change how the proposal is read or what it authorizes.
     if not isinstance(proposal, InvestigationProposalRun) or (
         type(proposal) is not InvestigationProposalRun
@@ -311,6 +354,20 @@ def _verify_handoff(proposal: object, authority: object, clock: WallClock) -> Ap
         route = _route_task(task)
         if route is None or task.assignee is not route[0]:
             raise ExecutionRunError("plan_not_executable")
+    # INV-10: the authority must carry exactly the trusted service's grant.
+    if type(approvals) is not InvestigationApprovalService:
+        raise ExecutionRunError("approvals_untrusted")
+    try:
+        record = approvals.plan_approval_record(grant)
+    except ApprovalRefused as refused:
+        raise ExecutionRunError(refused.code) from None
+    if (
+        authority.approval != record
+        or authority.scope != grant.scope
+        or authority.epoch != grant.authority_epoch
+        or grant.plan_digest != plan_digest(view.plan)
+    ):
+        raise ExecutionRunError("grant_mismatch")
     return ApprovedPlanHandoff(
         scope=view.scope, plan=view.plan, authority=authority, key=_HANDOFF_KEY
     )
@@ -346,16 +403,18 @@ def _claim(handoff: ApprovedPlanHandoff) -> None:
         _STARTED.add(key)
 
 
-def step_bound(plan: InvestigationPlan) -> int:
+def step_bound(plan: InvestigationPlan, *, sql_approval: bool = False) -> int:
     """The LangGraph recursion limit for executing ``plan``; reaching it is a defect."""
-    per_task = sum(task.max_attempts * OPERATIONS_PER_ATTEMPT + 1 for task in plan.tasks)
+    per_attempt = OPERATIONS_PER_ATTEMPT + (2 * WAVE_STEPS if sql_approval else 0)
+    per_task = sum(task.max_attempts * per_attempt + 1 for task in plan.tasks)
     # INV-6: one derivation per hypothesis test, the readiness no-op, and the ``investigate`` step.
     tests = sum(task.kind is TaskKind.HYPOTHESIS_TEST for task in plan.tasks)
     hypotheses = tests + 2 if isinstance(plan, InvestigationPlanV2) else 0
     # INV-7: every critic round and every follow-up a v2 run may admit, at their worst case.
+    follow_up_steps = FOLLOW_UP_STEPS + (2 * WAVE_STEPS if sql_approval else 0)
     review = (
         MAX_CRITIC_ROUNDS * REVIEW_STEPS_PER_ROUND
-        + MAX_FOLLOW_UP_ROUNDS * MAX_FOLLOW_UPS_IN_ROUND * FOLLOW_UP_STEPS
+        + MAX_FOLLOW_UP_ROUNDS * MAX_FOLLOW_UPS_IN_ROUND * follow_up_steps
         if isinstance(plan, InvestigationPlanV2)
         else 0
     )
@@ -378,6 +437,36 @@ class ExecutionResult:
     state: InvestigationStateView | None
     payloads: Mapping[str, QueryEvidencePayload | DocumentEvidencePayload]
     report: VerifiedReport | None = None
+    # INV-10: the content-free wave awaiting a person's decision while ``awaiting_sql_approval``.
+    sql_wave: SQLWaveRequest | None = None
+
+
+class _PausableClock:
+    """The execution ledger's monotonic clock, paused while a person decides a SQL wave.
+
+    Readings never go backwards: a paused clock repeats its reading at the pause, and after the
+    resume the paused interval is excluded. Only the trusted owner pauses it, and only between an
+    approval interrupt and its resume; the ledger itself is never reset.
+    """
+
+    def __init__(self, inner: Clock) -> None:
+        self._inner = inner
+        self._excluded = 0.0
+        self._paused_at: float | None = None
+
+    def __call__(self) -> float:
+        if self._paused_at is not None:
+            return self._paused_at - self._excluded
+        return self._inner() - self._excluded
+
+    def pause(self) -> None:
+        if self._paused_at is None:
+            self._paused_at = self._inner()
+
+    def resume(self) -> None:
+        if self._paused_at is not None:
+            self._excluded += max(0.0, self._inner() - self._paused_at)
+            self._paused_at = None
 
 
 # --- the owner ------------------------------------------------------------------------------------
@@ -391,6 +480,8 @@ class InvestigationExecutionRun:
         *,
         proposal: InvestigationProposalRun,
         authority: InvestigationAuthority,
+        approvals: InvestigationApprovalService,
+        grant: PlanApprovalGrant,
         live: AuthorityCheck,
         clock: WallClock,
         cancellation: CancellationToken,
@@ -411,9 +502,19 @@ class InvestigationExecutionRun:
             check_execution_limits(limits)
         except ValueError:
             raise ExecutionRunError("limits_exceeded") from None
-        handoff = _verify_handoff(proposal, authority, clock)
+        handoff = _verify_handoff(proposal, authority, clock, approvals, grant)
+        try:
+            approvals.consume_grant(grant)  # once: a second run of this grant is refused
+        except ApprovalRefused as refused:
+            raise ExecutionRunError(refused.code) from None
         _claim(handoff)
         self._handoff = handoff
+        self._approvals = approvals
+        self._grant = grant
+        live = approvals.run_live(grant, live)
+        cancellation = approvals.run_cancellation(grant, cancellation)
+        if follow_up_authorizer is None:
+            follow_up_authorizer = approvals.follow_up_authorizer(grant)
         # INV-7: the confirmed schema the plan was proposed against (names and types only).
         schema = proposal.schema_fields
         self._schema = SchemaContext.of(name for name, _ in schema)
@@ -424,8 +525,10 @@ class InvestigationExecutionRun:
         self._authorizer = follow_up_authorizer
         self._cancellation = cancellation
         self._limits = limits
-        # The execution ledger is the owner's own, never the planning ledger.
-        self._ledger = BudgetLedger(limits, clock=ledger_clock)
+        # The execution ledger is the owner's own, never the planning ledger. Its clock pauses
+        # only while a person decides a SQL wave (INV-10).
+        self._ledger_clock = _PausableClock(ledger_clock)
+        self._ledger = BudgetLedger(limits, clock=self._ledger_clock)
         self._gateway = InvestigationToolGateway(
             authority=authority,
             live=live,
@@ -448,8 +551,19 @@ class InvestigationExecutionRun:
         thread = f"{scope.tenant_id}:{scope.workspace_id}:{scope.investigation_id}:execution"
         self._config: dict[str, Any] = {
             "configurable": {"thread_id": thread},
-            "recursion_limit": step_bound(handoff.plan),
+            "recursion_limit": step_bound(
+                handoff.plan, sql_approval=authority.sql_approval_required
+            ),
         }
+        # INV-10: SQL-wave approval state, all in process.
+        self._sql_approval = authority.sql_approval_required
+        self._wave: SQLWaveRequest | None = None
+        self._await_ready = False
+        self._resume_ready = False
+        self._decisions: list[tuple[SQLItemDecision, SQLWaveDecision]] = []
+        self._approved_handles: set[str] = set()
+        self._expired = False
+        self._terminal_recorded = False
         self._specialists: dict[str, SQLAnalyst | DocumentResearcher] = {}
         for task in handoff.plan.tasks:
             route = _route_task(task)
@@ -500,6 +614,13 @@ class InvestigationExecutionRun:
         builder.add_step("investigate", "investigator", self._investigate)
         builder.add_step("critique", "critic", self._critique)
         builder.add_step("replan", "supervisor", self._replan)
+        # INV-10: the SQL-wave pause (running -> awaiting_sql_approval -> running).
+        builder.add_step("await_sql", "lifecycle", self._await_sql)
+        builder.add_step("sql_decision", "dispatcher", self._sql_decision)
+        builder.add_step("resume_sql", "lifecycle", _status(InvestigationStatus.RUNNING))
+        # A wave past its deadline: awaiting_sql_approval -> expired. There is no report
+        # (``expired`` is not a report status), so it never passes ``finish``.
+        builder.add_step("expire", "lifecycle", _status(InvestigationStatus.EXPIRED))
         builder.add_step("finish", "lifecycle", self._finish)
         builder.add_step("compose_report", "reporter", self._compose_report)
         builder.add_step("verify_report", "report_verifier", self._verify_report)
@@ -524,12 +645,21 @@ class InvestigationExecutionRun:
                 "investigate": "investigate",
                 "critique": "critique",
                 "replan": "replan",
+                "await_sql": "await_sql",
                 "finish": "finish",
             },
         )
         builder.add_edge("investigate", "dispatch")
         builder.add_edge("critique", "dispatch")
         builder.add_edge("replan", "dispatch")
+        builder.add_edge("await_sql", "sql_decision")
+        builder.add_conditional_edges(
+            "sql_decision",
+            self._after_decision,
+            {"resume_sql": "resume_sql", "finish": "finish", "expire": "expire"},
+        )
+        builder.add_edge("resume_sql", "dispatch")
+        builder.add_edge("expire", "terminal")
         builder.add_edge("finish", "compose_report")
         builder.add_edge("compose_report", "verify_report")
         builder.add_edge("verify_report", "terminal")
@@ -552,25 +682,67 @@ class InvestigationExecutionRun:
         return self._ledger
 
     def run(self) -> ExecutionResult:
-        """Execute once. A defect closes the gateway and reports ``failed`` in process."""
+        """Execute once. A defect closes the gateway and reports ``failed`` in process.
+
+        With SQL approval, the result may be ``awaiting_sql_approval`` with its ``sql_wave``;
+        ``resume`` continues once the service holds the wave's outcome.
+        """
         if self._used:
             raise ExecutionRunError("execution_run_used")
         self._used = True
+        return self._invoke({})
+
+    def resume(self) -> ExecutionResult:
+        """Continue a run paused for SQL approval, once the service holds the wave's outcome.
+
+        The resume value carries nothing the owner trusts: the decision is read from the service.
+        """
+        wave = self._wave
+        if not self._used or wave is None or not self._paused():
+            raise ExecutionRunError("sql_approval_not_pending")
         try:
-            self._graph.invoke({}, self._config)
+            state = self._approvals.sql_wave_state(self._grant, wave.wave_id)
+        except ApprovalRefused as refused:
+            raise ExecutionRunError(refused.code) from None
+        if state == "pending" and not self._cancel_requested():
+            raise ExecutionRunError("sql_approval_pending")
+        return self._invoke(Command(resume={"wave_id": wave.wave_id}))
+
+    def _paused(self) -> bool:
+        try:
+            view = self.state()
+        except Exception:
+            return False
+        return view.status is InvestigationStatus.AWAITING_SQL_APPROVAL and view.terminal is None
+
+    def _invoke(self, payload: Any) -> ExecutionResult:
+        try:
+            self._graph.invoke(payload, self._config)
         except (Exception, GraphRecursionError):
             self._gateway.close("shutdown")
+            self._record_terminal(InvestigationStatus.FAILED, None)
             return ExecutionResult(
                 status=InvestigationStatus.FAILED, category="internal", state=None, payloads={}
             )
         except BaseException:
             self._gateway.close("shutdown")
+            self._record_terminal(InvestigationStatus.FAILED, None)
             raise
         view = self.state()
         terminal = view.terminal
+        if terminal is None and view.status is InvestigationStatus.AWAITING_SQL_APPROVAL:
+            return ExecutionResult(
+                status=InvestigationStatus.AWAITING_SQL_APPROVAL,
+                category=None,
+                state=view,
+                payloads=self._gateway.evidence_payloads(view),
+                sql_wave=self._wave,
+            )
         if terminal is None:
             self._gateway.close("shutdown")
+            self._record_terminal(InvestigationStatus.FAILED, None)
             raise ExecutionRunError("execution_run_failed")
+        self._record_terminal(terminal.status, view)
         record = view.report_record
         report = self._report
         if (
@@ -591,6 +763,15 @@ class InvestigationExecutionRun:
     def state(self) -> InvestigationStateView:
         """Read the execution thread back through the strict, guarded loader."""
         return load_investigation_state(self._graph, self._config)
+
+    def _record_terminal(
+        self, status: InvestigationStatus, view: InvestigationStateView | None
+    ) -> None:
+        """Report the terminal status to the approval service once (its audit events)."""
+        if self._terminal_recorded:
+            return
+        self._terminal_recorded = True
+        self._approvals.record_terminal(self._grant, status, view)
 
     # --- seeding steps (trusted wiring; each proposal is checked by ``owned_update``) ----------
 
@@ -620,6 +801,8 @@ class InvestigationExecutionRun:
     def _route(self, _state: Mapping[str, Any]) -> str:
         if self._final_ready:
             return "finish"
+        if self._await_ready:
+            return "await_sql"
         if self._critique_ready or self._replan_ready:
             if self._cancel_requested():
                 # Cancelled during review or replanning: write nothing; dispatch stops the run.
@@ -653,7 +836,12 @@ class InvestigationExecutionRun:
             return self._snapshot()
         if self._register_next:  # bookkeeping, even when cancelled: every task is recorded
             return self._register_follow_ups()  # admitted by ``replan``: register before dispatch
+        if self._decisions and not cancelled:
+            return self._apply_decision(view, state)  # INV-10: one wave item per step
+        self._decisions = []
         action = next_action(view, self._signals(view, cancelled), limits=self._limits)
+        if action.kind is ActionKind.REQUEST_SQL_APPROVAL:
+            return self._request_wave(view)
         if action.kind is ActionKind.STOP:
             assert action.status is not None
             return self._stop(view, action.status, owner_cancel=action.refusal is None)
@@ -852,19 +1040,20 @@ class InvestigationExecutionRun:
     ) -> FollowUpApproval | None:
         """The trusted approval of exactly this round's task set, or ``None`` (fail closed)."""
         if self._authorizer is None:
-            return None  # production until INV-10 (#143)
+            return None  # unreachable: the approval service supplies one (INV-10)
         request = FollowUpApprovalRequest.of(
             self._handoff.scope, plan_digest(plan), round_index, tasks
         )
         try:
-            approval = self._authorizer.authorize(request)
+            approval: object = self._authorizer.authorize(request)
             now = self._clock.now()
         except Exception:
             return None
         plan_approval = self._handoff.authority.approval
+        if not isinstance(approval, FollowUpApproval) or type(approval) is not FollowUpApproval:
+            return None
         if (
-            type(approval) is not FollowUpApproval
-            or approval.round != round_index
+            approval.round != round_index
             or approval.follow_up_digest != request.follow_up_digest
             or not (
                 plan_approval.approved_at
@@ -1056,13 +1245,145 @@ class InvestigationExecutionRun:
         self._report = outcome.report
         return {"report_record": outcome.record.model_dump(mode="json")}
 
+    # --- SQL-wave approval (INV-10) ------------------------------------------------------------
+
+    def _parked(self, view: InvestigationStateView) -> tuple[str, ...]:
+        """Running SQL tasks whose prepared statement awaits or holds approval, in plan order."""
+        if not self._sql_approval:
+            return ()
+        parked: list[str] = []
+        for task_id, record in view.tasks.items():
+            specialist = self._specialists.get(task_id)
+            if (
+                record.status == "running"
+                and isinstance(specialist, SQLAnalyst)
+                and specialist.phase == "execute"
+                and specialist.handle is not None
+            ):
+                parked.append(task_id)
+        order = (
+            [task.id for task in (*view.plan.tasks, *view.admitted_follow_ups)] if view.plan else []
+        )
+        return tuple(task_id for task_id in order if task_id in parked)
+
+    def _approved(self, parked: tuple[str, ...]) -> tuple[str, ...]:
+        approved: list[str] = []
+        for task_id in parked:
+            specialist = self._specialists[task_id]
+            assert isinstance(specialist, SQLAnalyst) and specialist.handle is not None
+            if specialist.handle.handle_id in self._approved_handles:
+                approved.append(task_id)
+        return tuple(approved)
+
+    def _request_wave(self, view: InvestigationStateView) -> dict[str, Any]:
+        """Register one wave of every unapproved parked statement; then pause for a decision."""
+        parked = self._parked(view)
+        approved = set(self._approved(parked))
+        waiting = [task_id for task_id in parked if task_id not in approved]
+        found = self._gateway.parked_sql(waiting)
+        if found is None:
+            return self._defective(view)
+        items, statements, deadline = found
+        try:
+            self._wave = self._approvals.request_sql_wave(
+                self._grant, items, statements, deadline=deadline
+            )
+        except ApprovalRefused:
+            return self._defective(view)  # fail closed: no approval, no execution
+        self._await_ready = True
+        return self._snapshot()
+
+    def _await_sql(self, _state: Any) -> dict[str, Any]:
+        """Move to ``awaiting_sql_approval`` and stop charging wall-clock time to the ledger."""
+        self._await_ready = False
+        self._ledger_clock.pause()
+        return {"status": InvestigationStatus.AWAITING_SQL_APPROVAL.value}
+
+    def _sql_decision(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Pause until resumed; then act on the service's outcome for the wave, never the resume
+        value. Steps before the interrupt must stay side-effect free: LangGraph re-runs the node."""
+        wave = self._wave
+        assert wave is not None
+        interrupt({"kind": "sql_approval", "wave_id": wave.wave_id, "sequence": wave.sequence})
+        self._ledger_clock.resume()
+        view = restore_state(state)
+        try:
+            outcome, decision = self._approvals.close_sql_wave(self._grant, wave.wave_id)
+        except ApprovalRefused:
+            return self._defective(view)
+        if self._cancel_requested() or outcome == "withdrawn":
+            return self._stop(view, InvestigationStatus.CANCELLED, owner_cancel=True)
+        if outcome == "expired":
+            self._expired = True
+            self._gateway.close("shutdown")
+            return self._close_out(view, "cancelled")
+        if (
+            outcome != "decided"
+            or type(decision) is not SQLWaveDecision
+            or wave_decision_violation(decision, wave) is not None
+        ):
+            return self._defective(view)  # a pending or malformed decision never resumes
+        self._decisions = [(item, decision) for item in decision.items]
+        self._resume_ready = True
+        return self._snapshot()
+
+    def _after_decision(self, _state: Mapping[str, Any]) -> str:
+        if self._expired and not self._defect:
+            return "expire"
+        if self._final_ready or not self._resume_ready:
+            return "finish"
+        self._resume_ready = False
+        return "resume_sql"
+
+    def _apply_decision(
+        self, view: InvestigationStateView, state: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Bind or reject one decided item through the gateway, which re-verifies all of it."""
+        item, decision = self._decisions.pop(0)
+        wave = self._wave
+        specialist = self._specialists.get(item.task_id)
+        if (
+            wave is None
+            or not isinstance(specialist, SQLAnalyst)
+            or specialist.handle is None
+            or specialist.phase != "execute"
+        ):
+            return self._defective(view)
+        task = view.admitted_task(item.task_id)
+        assert task is not None
+        fields = {
+            "task_id": item.task_id,
+            "role": task.assignee,
+            "handle": specialist.handle,
+            "wave": wave,
+            "decision": decision,
+        }
+        if item.decision == "reject":
+            result = self._gateway.reject_sql(state, RejectSQL(**fields))
+            specialist.after_prepare(replace(result, handle=None))
+        else:
+            result = self._gateway.bind_sql_approval(state, BindSQLApproval(**fields))
+            specialist.after_prepare(result)  # the bound handle, a new one for an edit, or none
+            if result.refusal is None and result.handle is not None:
+                self._approved_handles.add(result.handle.handle_id)
+        if self._gateway.closed is not None:
+            self._decisions = []  # a closing refusal: no later item is applied
+        return self._apply(view, result)
+
     def _signals(self, view: InvestigationStateView, cancelled: bool) -> DispatchSignals:
-        running = [task_id for task_id, record in view.tasks.items() if record.status == "running"]
+        parked = self._parked(view)
+        running = [
+            task_id
+            for task_id, record in view.tasks.items()
+            if record.status == "running" and task_id not in parked
+        ]
         specialist = self._specialists.get(running[0]) if len(running) == 1 else None
         return DispatchSignals(
             cancelled=cancelled,
             documents_available=bool(self._documents_available),
             specialist_has_next=specialist is not None and specialist.has_next,
+            parked=parked,
+            approved=self._approved(parked),
         )
 
     def _operate(self, action: DispatchAction, state: Mapping[str, Any]) -> GatewayResult:

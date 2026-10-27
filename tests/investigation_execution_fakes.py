@@ -6,20 +6,29 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
 
+from packages.governance.audit import AuditRecorder, InMemoryAuditSink
 from packages.investigation import EXECUTION_LIMITS, BudgetLimits, InvestigationPlan
+from packages.investigation.approval import (
+    ApprovalRefused,
+    ApproverIdentity,
+    PlanApprovalGrant,
+    PlanDecisionRequest,
+)
 from src.agents.sql_agent import execute_sql
 from src.llm.base import LLMResponse
 from src.orchestration import investigation_execution
+from src.orchestration.investigation_approval import InvestigationApprovalService
 from src.orchestration.investigation_execution import InvestigationExecutionRun
 from src.orchestration.investigation_proposal import InvestigationProposalRun
 from src.orchestration.review_prompts import CRITIC_MARKER, FINDINGS_MARKER
 from src.storage.query_executor import QueryTimeoutError
 from src.storage.sqlite_store import StoredTable
-from tests.investigation_fixtures import LiveAuthority, churn_plan
+from tests.investigation_fixtures import APPROVED_AT, SCOPE, LiveAuthority, churn_plan
 from tests.investigation_planning_fakes import Cancellation as PlanningCancellation
 from tests.investigation_planning_fakes import FakeClock as PlanningClock
 from tests.investigation_planning_fakes import LiveAuthority as PlanningLive
@@ -157,6 +166,59 @@ def proposed(plan: InvestigationPlan | None = None) -> InvestigationProposalRun:
     return run
 
 
+APPROVER = ApproverIdentity(
+    tenant_id=SCOPE["tenant_id"],
+    subject_id="analyst_1",
+    capabilities=frozenset({"analysis:run", "workspace:read"}),
+)
+CONVERSATION = "conv_1"
+
+
+class ServiceClock:
+    """The approval service's wall clock: fixed at ``at`` until it follows another clock."""
+
+    def __init__(self, at: datetime | str = APPROVED_AT) -> None:
+        self.at = datetime.fromisoformat(at) if isinstance(at, str) else at
+        self.follow: Any = None
+
+    def now(self) -> datetime:
+        return self.follow.now() if self.follow is not None else self.at
+
+
+@dataclass
+class Approvals:
+    service: InvestigationApprovalService
+    grant: PlanApprovalGrant
+    sink: InMemoryAuditSink
+    clock: ServiceClock
+    live: LiveAuthority
+
+
+def approve(
+    proposal: InvestigationProposalRun, *, follow_up_rounds: int = 0, epoch: int | None = None
+) -> Approvals:
+    """Register ``proposal`` with a fresh trusted service and approve it at ``APPROVED_AT``.
+
+    The grant's window then equals the fixture authority's approval (``exact_authority``).
+    """
+    sink = InMemoryAuditSink()
+    clock, live = ServiceClock(), LiveAuthority()
+    service = InvestigationApprovalService(clock=clock, live=live, audit=AuditRecorder(sink))
+    pending = service.register_proposal(proposal, conversation_id=CONVERSATION)
+    request = PlanDecisionRequest(
+        decision="approve",
+        tenant_id=pending.scope.tenant_id,
+        workspace_id=pending.scope.workspace_id,
+        investigation_id=pending.scope.investigation_id,
+        plan_digest=pending.plan_digest,
+        authority_epoch=pending.authority_epoch if epoch is None else epoch,
+        follow_up_rounds=follow_up_rounds,
+    )
+    grant = service.decide_plan(request, APPROVER, consent=proposal.planning_authority.consent)
+    assert grant is not None
+    return Approvals(service=service, grant=grant, sink=sink, clock=clock, live=live)
+
+
 @dataclass
 class Execution:
     run: InvestigationExecutionRun
@@ -168,6 +230,7 @@ class Execution:
     live: LiveAuthority
     clock: Clock
     cancellation: Any
+    approvals: Approvals | None = None
 
 
 _DEFAULT: Any = object()
@@ -188,8 +251,16 @@ def execution(
     authorizer: Any = None,
     max_input: int = MAX_INPUT,
     narrative: bool = True,
+    approvals: Approvals | None = None,
+    follow_up_rounds: int = 0,
 ) -> Execution:
     plan = plan or churn_plan()
+    proposal = proposal or proposed(plan)
+    if approvals is None and type(proposal) is InvestigationProposalRun:
+        try:
+            approvals = approve(proposal, follow_up_rounds=follow_up_rounds)
+        except ApprovalRefused:
+            approvals = None  # a proposal that cannot be approved: the handoff must refuse it
     spy = SpyRetriever() if retriever is _DEFAULT else retriever
     resolver = SpyResolver(spy)
     tables = TableResolverSpy(_table() if table is _DEFAULT else table)
@@ -197,9 +268,13 @@ def execution(
     llm = RoutedAdapter(script=[GOOD_SQL]) if llm is _DEFAULT else llm
     live, clock = LiveAuthority(), Clock()
     cancellation = cancellation if cancellation is not None else Flag()
+    if approvals is not None:
+        approvals.clock.follow = clock  # after approval, the service reads the run's clock
     run = InvestigationExecutionRun(
-        proposal=proposal or proposed(plan),
+        proposal=proposal,
         authority=authority_value or exact_authority(plan=plan),
+        approvals=approvals.service if approvals is not None else None,  # type: ignore[arg-type]
+        grant=approvals.grant if approvals is not None else None,  # type: ignore[arg-type]
         live=live,
         clock=clock,
         cancellation=cancellation,
@@ -223,6 +298,7 @@ def execution(
         live=live,
         clock=clock,
         cancellation=cancellation,
+        approvals=approvals,
     )
 
 

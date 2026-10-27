@@ -11,14 +11,23 @@ calls no gateway, service, provider, executor, or retriever, and holds none.
    gateway and ledger) stops dispatch with its ``LIFECYCLE_TARGET``. Otherwise owner-observed
    cancellation stops it as ``cancelled``. Deadlines need no separate check: an expired approval
    or an exhausted wall clock is refused by the gateway on the next call and recorded as such.
-2. **The running task.** At most one task is ever ``running``. While its specialist has another
-   operation, it continues; once an attempt ended in a failure, it is retried only if
-   ``retry_eligible`` allows it, and otherwise finished.
-3. **Skips.** With no document index, each pending document task is skipped
+2. **The active task.** At most one task is ever *active*: ``running`` and not parked. While its
+   specialist has another operation, it continues; once an attempt ended in a failure, it is
+   retried only if ``retry_eligible`` allows it, and otherwise finished.
+3. **Approved statements (INV-10).** A parked task whose statement a person approved continues
+   (it executes), first in plan order.
+4. **Skips.** With no document index, each pending document task is skipped
    (``resource_unavailable``). A pending task with a dependency that ended without succeeding is
    skipped (``dependency_failed``); repeated calls make this transitive.
-4. **Start.** The first pending task, in plan order, whose dependencies all succeeded.
-5. **Finish.** No task pending or running: the run ends with ``final_status``.
+5. **Start.** The first pending task, in plan order, whose dependencies all succeeded.
+6. **Request SQL approval (INV-10).** Nothing else can proceed while unapproved statements are
+   parked: request one approval for all of them. That set is the wave (the ready frontier).
+7. **Finish.** No task pending or running: the run ends with ``final_status``.
+
+**Parked tasks (INV-10, #143).** When SQL needs approval, a SQL task whose statement was prepared
+and guarded stays ``running`` but is *parked* (``DispatchSignals.parked``) until its wave is
+decided; it holds a gateway handle and runs nothing. Without SQL approval nothing is ever parked,
+and the order above is exactly INV-5's.
 
 A failure never satisfies a dependency: only ``succeeded`` does. State that breaks an invariant
 raises a content-free ``DispatchError``; the owner treats that as a defect and fails the run.
@@ -70,6 +79,7 @@ DispatchErrorCode = Literal[
     "dependency_deadlock",
     "tasks_open",
     "limits_exceeded",
+    "parked_not_running",
 ]
 
 
@@ -100,6 +110,16 @@ class DispatchSignals(_Policy):
     cancelled: Flag = False
     documents_available: Flag = True
     specialist_has_next: Flag = False
+    # INV-10: running tasks whose prepared statement awaits (or holds) a person's approval, and
+    # the subset whose statement is approved and ready to execute.
+    parked: tuple[TaskId, ...] = ()
+    approved: tuple[TaskId, ...] = ()
+
+    @model_validator(mode="after")
+    def _approved_are_parked(self) -> DispatchSignals:
+        if not set(self.approved) <= set(self.parked) or len(set(self.parked)) != len(self.parked):
+            raise ValueError("approved tasks are parked tasks, each named once")
+        return self
 
 
 class ActionKind(StrEnum):
@@ -110,6 +130,8 @@ class ActionKind(StrEnum):
     SKIP_TASK = "skip_task"
     START_TASK = "start_task"
     FINISH_RUN = "finish_run"
+    # INV-10: ask a person to approve every parked statement (one wave). Names no task.
+    REQUEST_SQL_APPROVAL = "request_sql_approval"
 
 
 _TASK_ACTIONS = frozenset(
@@ -267,7 +289,12 @@ def next_action(
         raise DispatchError("not_running")
     order = ordered_tasks(view)
     records = _records(view)
-    running = [task for task in order if records[task.id].status == "running"]
+    parked = set(signals.parked)
+    if any(task_id not in records or records[task_id].status != "running" for task_id in parked):
+        raise DispatchError("parked_not_running")
+    running = [
+        task for task in order if records[task.id].status == "running" and task.id not in parked
+    ]
     if len(running) > 1:
         raise DispatchError("concurrent_running")
     if running:
@@ -282,6 +309,9 @@ def next_action(
         return _task_action(ActionKind.FINISH_TASK, task)
     if signals.specialist_has_next:
         raise DispatchError("no_running_task")
+    for task in order:
+        if task.id in signals.approved:
+            return _task_action(ActionKind.CONTINUE_TASK, task)
     pending = [task for task in order if records[task.id].status == "pending"]
     if not signals.documents_available:
         for task in pending:
@@ -293,6 +323,8 @@ def next_action(
     task_ready = ready_task(view)
     if task_ready is not None:
         return _task_action(ActionKind.START_TASK, task_ready)
+    if parked:
+        return DispatchAction(kind=ActionKind.REQUEST_SQL_APPROVAL)
     if pending:
         raise DispatchError("dependency_deadlock")
     return DispatchAction(
