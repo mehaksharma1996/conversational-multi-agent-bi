@@ -108,6 +108,7 @@ class InvestigationProposalRun:
         if type(context) is not PlanningContext:
             raise TypeError("A proposal run is bound to a trusted PlanningContext.")
         self._context = context
+        self._authority = authority
         self._gateway = InvestigationPlanningGateway(
             authority=authority,
             context=context,
@@ -145,6 +146,12 @@ class InvestigationProposalRun:
     @property
     def config(self) -> dict[str, Any]:
         return {"configurable": dict(self._config["configurable"])}
+
+    @property
+    def planning_authority(self) -> PlanningAuthority:
+        """The trusted planning authority this proposal was made under (INV-10: the approval
+        service binds its epoch and consent recipients). It grants no execution permission."""
+        return self._authority
 
     @property
     def schema_fields(self) -> tuple[tuple[str, str], ...]:
