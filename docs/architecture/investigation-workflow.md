@@ -797,3 +797,30 @@ nothing. `agent.investigation_reconciled` is reserved for INV-11.
 **Limits.** The service, its registry, grants, and waves are process-local: durable records,
 idempotency across processes, HTTP endpoints, and restart reconciliation are INV-11 (#144). A
 revocation that the service did not see is detected only at the gateway's pre-flight live check.
+
+## Investigations API, jobs, and reconciliation (INV-11, #144)
+
+Design E1 to E9: `docs/agents/briefs/144-inv11-investigation-api.md`; ADR 0024 Amendment 9.
+
+| Endpoint | Capability | Result |
+|---|---|---|
+| `POST /api/v1/conversations/{id}/investigations` (`Idempotency-Key`) | `analysis:run` | 202; `planning` job submitted |
+| `GET /api/v1/investigations/{id}` | `workspace:read` | status, plan, pending wave identity (no SQL), explanation, report |
+| `POST /api/v1/investigations/{id}/plan-decision` | `analysis:run` | approve (execution job) or reject |
+| `POST /api/v1/investigations/{id}/cancel` | `analysis:run` | 202; further work stops |
+| `GET /api/v1/investigations/{id}/sql-wave` | `analysis:run` | the pending wave with each statement |
+| `POST /api/v1/investigations/{id}/sql-wave` | `analysis:run` | 202; resume job submitted |
+
+Refusals use fixed codes: `investigations_disabled`, `source_message_invalid`,
+`conversation_busy`, `idempotency_key_reused`, `question_too_long`, `job_queue_full`,
+`investigation_not_pending`, `sql_wave_not_pending`, and the INV-10 approval codes.
+
+**Storage.** `investigations` (metadata migration 4) holds IDs, status, the plan digest, fixed
+explanation and terminal codes, the report SHA-256, and the hashed idempotency key and request
+fingerprint. The workspace's `investigations.db` (SQLCipher with `APP_ENCRYPTION_KEY`) holds the
+plan, the verified report, and the typed evidence payloads. Workspace deletion removes both.
+
+**Restart.** `_start` loads records after `repository.recover()` and moves every non-terminal one
+to `interrupted` (`interrupted_by_restart`), with one `agent.investigation_reconciled` event each
+(`service.started` reports `investigations_interrupted`). Decisions on an interrupted record are
+refused; creation with the same key replays it.
