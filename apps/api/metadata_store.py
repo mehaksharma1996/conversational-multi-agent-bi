@@ -160,6 +160,32 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX document_collections_workspace ON document_collections (workspace_id)",
         ),
     ),
+    Migration(
+        4,
+        "investigation records (content-free; plans and reports live in the workspace)",
+        (
+            """
+            CREATE TABLE investigations (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+                tenant_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                plan_digest TEXT,
+                explanation_code TEXT,
+                terminal_category TEXT,
+                report_sha256 TEXT,
+                key_hash TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, key_hash)
+            )
+            """,
+            "CREATE INDEX investigations_workspace ON investigations (workspace_id)",
+        ),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -241,6 +267,26 @@ class StoredDocumentCollection:
     chunk_count: int
     index_backend: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredInvestigation:
+    """An investigation's content-free record (INV-11): identifiers, codes, digests, times."""
+
+    id: str
+    workspace_id: str
+    tenant_id: str
+    conversation_id: str
+    message_id: str
+    status: str
+    plan_digest: str | None
+    explanation_code: str | None
+    terminal_category: str | None
+    report_sha256: str | None
+    key_hash: str
+    request_fingerprint: str
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -721,6 +767,68 @@ class MetadataStore:
     def delete_document_collection(self, collection_id: str) -> None:
         with self._transaction() as connection:
             connection.execute("DELETE FROM document_collections WHERE id = ?", (collection_id,))
+
+    def save_investigation(self, record: StoredInvestigation) -> None:
+        """Insert or update one investigation record (INV-11)."""
+        with self._transaction() as connection:
+            connection.execute(
+                "INSERT INTO investigations (id, workspace_id, tenant_id, conversation_id, "
+                "message_id, status, plan_digest, explanation_code, terminal_category, "
+                "report_sha256, key_hash, request_fingerprint, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (id) DO UPDATE SET status = excluded.status, "
+                "plan_digest = excluded.plan_digest, explanation_code = excluded.explanation_code, "
+                "terminal_category = excluded.terminal_category, "
+                "report_sha256 = excluded.report_sha256, updated_at = excluded.updated_at",
+                (
+                    record.id,
+                    record.workspace_id,
+                    record.tenant_id,
+                    record.conversation_id,
+                    record.message_id,
+                    record.status,
+                    record.plan_digest,
+                    record.explanation_code,
+                    record.terminal_category,
+                    record.report_sha256,
+                    record.key_hash,
+                    record.request_fingerprint,
+                    _iso(record.created_at),
+                    _iso(record.updated_at),
+                ),
+            )
+
+    def delete_investigation(self, investigation_id: str) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM investigations WHERE id = ?", (investigation_id,))
+
+    def load_investigations(self) -> list[StoredInvestigation]:
+        with self._use() as connection:
+            rows = connection.execute(
+                "SELECT id, workspace_id, tenant_id, conversation_id, message_id, status, "
+                "plan_digest, explanation_code, terminal_category, report_sha256, key_hash, "
+                "request_fingerprint, created_at, updated_at "
+                "FROM investigations ORDER BY created_at, id"
+            ).fetchall()
+        return [
+            StoredInvestigation(
+                id=row[0],
+                workspace_id=row[1],
+                tenant_id=row[2],
+                conversation_id=row[3],
+                message_id=row[4],
+                status=row[5],
+                plan_digest=row[6],
+                explanation_code=row[7],
+                terminal_category=row[8],
+                report_sha256=row[9],
+                key_hash=row[10],
+                request_fingerprint=row[11],
+                created_at=_parse(row[12]),
+                updated_at=_parse(row[13]),
+            )
+            for row in rows
+        ]
 
     def load_document_collections(self) -> list[StoredDocumentCollection]:
         with self._use() as connection:
