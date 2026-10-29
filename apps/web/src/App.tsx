@@ -47,25 +47,13 @@ import {
   DEMO_POLICY_FILENAME,
   fetchDemoFile,
 } from "./demo/retailDemo";
+import { useOperations } from "./operations/useOperations";
 import { useWorkflowDrafts } from "./workspace/drafts";
 import {
   recoverWorkspace,
   writeWorkspaceHint,
   type RecoveredWorkspace,
 } from "./workspace/recovery";
-
-type Task =
-  | "workspace"
-  | "upload"
-  | "dataset"
-  | "schema"
-  | "analysis"
-  | "documents"
-  | "consent"
-  | "conversation"
-  | "download"
-  | "reset"
-  | null;
 
 type Recovery =
   | { kind: "restored"; createdAt: string; hasData: boolean; messageCount: number }
@@ -90,7 +78,8 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
   const [contamination, setContamination] = useState(0.05);
-  const [task, setTask] = useState<Task>(null);
+  const { begin, mutationBusy, readBusy, isActive } = useOperations();
+  const busy = mutationBusy || readBusy;
   const [error, setError] = useState<ApiClientError | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   const [startFailed, setStartFailed] = useState(false);
@@ -144,34 +133,37 @@ export default function App() {
   // Rediscover the caller's own workspace before creating one, so a reload does not strand work.
   // Only a definite "none" creates a new workspace; any other failure is shown, not papered over.
   const initializeWorkspace = useCallback(async () => {
-    setTask("workspace");
+    const operation = begin("workspace");
+    if (!operation) return;
+    let outcome: "succeeded" | "failed" = "failed";
     setError(null);
     setStartFailed(false);
     try {
-      const outcome = await recoverWorkspace();
-      if (outcome.kind === "restored") {
-        applyRecovered(outcome.recovered);
-        writeWorkspaceHint(outcome.recovered.workspace.id);
-        const { dataset: restoredDataset, documents: restoredDocuments } = outcome.recovered;
+      const recovered = await recoverWorkspace();
+      if (recovered.kind === "restored") {
+        applyRecovered(recovered.recovered);
+        writeWorkspaceHint(recovered.recovered.workspace.id);
+        const { dataset: restoredDataset, documents: restoredDocuments } = recovered.recovered;
         setRecovery({
           kind: "restored",
-          createdAt: outcome.recovered.workspace.created_at,
+          createdAt: recovered.recovered.workspace.created_at,
           hasData: restoredDataset !== null || restoredDocuments !== null,
-          messageCount: outcome.recovered.messages.length,
+          messageCount: recovered.recovered.messages.length,
         });
       } else {
         const created = await createWorkspace(workspaceKey.current);
         setWorkspace(created);
         writeWorkspaceHint(created.id);
-        setRecovery(outcome.hintWasStale ? { kind: "expired" } : null);
+        setRecovery(recovered.hintWasStale ? { kind: "expired" } : null);
       }
+      outcome = "succeeded";
     } catch (caught) {
       setStartFailed(true);
       setError(normalizeError(caught));
     } finally {
-      setTask(null);
+      operation.finish(outcome);
     }
-  }, [applyRecovered]);
+  }, [applyRecovered, begin]);
 
   useEffect(() => {
     if (workspaceStarted.current) return;
@@ -189,7 +181,8 @@ export default function App() {
   const handleUpload = async (file: File): Promise<boolean> => {
     if (!workspace) return false;
     navigate("data");
-    setTask("upload");
+    const operation = begin("upload");
+    if (!operation) return false;
     setError(null);
     setDataset(null);
     setAnalysis(null);
@@ -207,18 +200,19 @@ export default function App() {
         setDataset(profiled);
         setSelectedFeatures(profiled.recommended_anomaly_features);
       }
+      operation.finish("succeeded");
       return true;
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
       return false;
-    } finally {
-      setTask(null);
     }
   };
 
   const handleSheet = async (sheet: string) => {
     if (!uploadId) return;
-    setTask("dataset");
+    const operation = begin("dataset");
+    if (!operation) return;
     setError(null);
     try {
       const profiled = await createDataset(uploadId, sheet);
@@ -227,32 +221,34 @@ export default function App() {
       setSheets([]);
       updateDraft("sheet", "");
       clearConversation();
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleSchema = async (mapping: SchemaMappingUpdate) => {
     if (!dataset) return;
-    setTask("schema");
+    const operation = begin("schema");
+    if (!operation) return;
     setError(null);
     try {
       setDataset(await confirmSchema(dataset.id, mapping));
       updateDraft("schema", null);
       clearConversation();
       navigate("analysis");
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleAnalysis = async () => {
     if (!dataset) return;
-    setTask("analysis");
+    const operation = begin("analysis");
+    if (!operation) return;
     navigate("analysis");
     setError(null);
     try {
@@ -262,27 +258,28 @@ export default function App() {
       });
       setAnalysis(result);
       clearConversation();
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleDocuments = async (files: File[]): Promise<boolean> => {
     if (!workspace) return false;
     navigate("documents");
-    setTask("documents");
+    const operation = begin("documents");
+    if (!operation) return false;
     setError(null);
     try {
       setDocuments(await uploadDocuments(workspace.id, files));
       clearConversation();
+      operation.finish("succeeded");
       return true;
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
       return false;
-    } finally {
-      setTask(null);
     }
   };
 
@@ -316,15 +313,16 @@ export default function App() {
 
   const handleConsent = async () => {
     if (!workspace) return;
-    setTask("consent");
+    const operation = begin("consent");
+    if (!operation) return;
     setError(null);
     try {
       await acceptConsent(workspace.id);
       setWorkspace({ ...workspace, consent_accepted: true });
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
@@ -332,9 +330,10 @@ export default function App() {
     question: string,
     requireSqlApproval: boolean,
   ): Promise<boolean> => {
-    if (!workspace || task !== null) return false;
+    if (!workspace) return false;
+    const operation = begin("conversation");
+    if (!operation) return false;
     navigate("ask");
-    setTask("conversation");
     setError(null);
     try {
       const activeConversation = conversation ?? await createConversation(
@@ -349,12 +348,12 @@ export default function App() {
         requireSqlApproval,
       );
       setMessages((current) => [...current, message]);
+      operation.finish("succeeded");
       return true;
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
       return false;
-    } finally {
-      setTask(null);
     }
   };
 
@@ -374,8 +373,8 @@ export default function App() {
     decision: "approve" | "reject",
     sql?: string,
   ) => {
-    if (task !== null) return;
-    setTask("conversation");
+    const operation = begin("approval");
+    if (!operation) return;
     setError(null);
     try {
       const resolved = await decideSqlApproval(message.id, decision, sql ?? null);
@@ -385,11 +384,11 @@ export default function App() {
       updateDraft("approvals", (current) =>
         Object.fromEntries(Object.entries(current).filter(([id]) => id !== message.id)),
       );
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
       await resyncMessages();
-    } finally {
-      setTask(null);
     }
   };
 
@@ -406,48 +405,52 @@ export default function App() {
 
   const handleReportDownload = async (format: "markdown" | "pdf") => {
     if (!analysis) return;
-    setTask("download");
+    const operation = begin("download");
+    if (!operation) return;
     setError(null);
     try {
       const report = await createReport(analysis.id, format === "pdf");
       const blob = await downloadReport(report.id, format);
       saveBlob(blob, format === "pdf" ? "business-intelligence-report.pdf" : "business-intelligence-report.md");
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleResultExport = async (message: Message, format: "csv" | "xlsx") => {
-    setTask("download");
+    const operation = begin("download");
+    if (!operation) return;
     setError(null);
     try {
       const resultExport = await createResultExport(message.id, format);
       saveBlob(await downloadResultExport(resultExport.id), resultExport.filename);
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleWorkspaceExport = async () => {
     if (!workspace) return;
-    setTask("download");
+    const operation = begin("export");
+    if (!operation) return;
     setError(null);
     try {
       saveBlob(await downloadWorkspaceExport(workspace.id), `workspace-${workspace.id}.zip`);
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleReset = async () => {
     if (!workspace || !window.confirm("Delete this local workspace and all derived data?")) return;
-    setTask("reset");
+    const operation = begin("reset");
+    if (!operation) return;
     setError(null);
     try {
       await deleteWorkspace(workspace.id);
@@ -465,18 +468,19 @@ export default function App() {
       writeWorkspaceHint(null);
       workspaceKey.current = crypto.randomUUID();
       navigate("overview");
+      // Finish first: the new workspace is a separate operation in the same lane.
+      operation.finish("succeeded");
       await initializeWorkspace();
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const numericColumns = dataset?.profile.numeric_columns ?? [];
   const workspaceStatus = workspace
     ? "Local workspace ready"
-    : task === "workspace"
+    : isActive("workspace")
       ? "Restoring or starting workspace…"
       : "Workspace unavailable";
   const datasetLabel = dataset
@@ -499,7 +503,7 @@ export default function App() {
             <button
               className="button button--link"
               type="button"
-              disabled={task !== null}
+              disabled={busy}
               onClick={() => void initializeWorkspace()}
             >
               Retry workspace
@@ -543,9 +547,9 @@ export default function App() {
       documentLabel={documentLabel}
       analysisLabel={analysisLabel}
       messageLabel={conversationLabel(conversationCounts)}
-      actionsDisabled={!workspace || task !== null}
-      exportBusy={task === "download"}
-      resetBusy={task === "reset"}
+      actionsDisabled={!workspace || busy}
+      exportBusy={isActive("export")}
+      resetBusy={isActive("reset")}
       onExport={() => void handleWorkspaceExport()}
       onReset={() => void handleReset()}
       retentionNotice={
@@ -577,8 +581,8 @@ export default function App() {
           <ProductOverview />
           <DemoGuide
             workspaceReady={workspace !== null}
-            busy={task !== null}
-            loading={task === "upload" || task === "dataset" || task === "documents"}
+            busy={busy}
+            loading={isActive("upload") || isActive("dataset") || isActive("documents")}
             dataLoaded={dataset?.filename === DEMO_DATA_FILENAME}
             dataConfirmed={dataset?.filename === DEMO_DATA_FILENAME && dataset.status === "ready"}
             policyLoaded={documents?.filenames.includes(DEMO_POLICY_FILENAME) ?? false}
@@ -592,8 +596,8 @@ export default function App() {
       {activeSection === "data" ? (
         <div className="section-stack" id="data-workspace">
           <UploadStep
-            disabled={!workspace || task !== null}
-            busy={task === "upload" || task === "dataset"}
+            disabled={!workspace || busy}
+            busy={isActive("upload") || isActive("dataset")}
             sheets={sheets}
             file={drafts.datasetFile}
             sheet={drafts.sheet}
@@ -606,7 +610,7 @@ export default function App() {
           {dataset?.status === "review_required" ? (
             <SchemaReview
               dataset={dataset}
-              busy={task !== null}
+              busy={busy}
               draft={drafts.schema?.datasetId === dataset.id ? drafts.schema.mapping : null}
               onDraftChange={(mapping) => updateDraft("schema", { datasetId: dataset.id, mapping })}
               onConfirm={handleSchema}
@@ -645,7 +649,7 @@ export default function App() {
                     <input
                       type="checkbox"
                       checked={selectedFeatures.includes(column)}
-                      disabled={task !== null}
+                      disabled={busy}
                       onChange={(event) =>
                         setSelectedFeatures((current) =>
                           event.target.checked
@@ -669,17 +673,17 @@ export default function App() {
                   max="0.5"
                   step="0.01"
                   value={contamination}
-                  disabled={task !== null}
+                  disabled={busy}
                   onChange={(event) => setContamination(Number(event.target.value))}
                 />
               </div>
               <button
                 className="button button--primary"
                 type="button"
-                disabled={task !== null}
+                disabled={busy}
                 onClick={() => void handleAnalysis()}
               >
-                {task === "analysis"
+                {isActive("analysis")
                   ? "Running analysis…"
                   : analysis
                     ? "Run analysis again"
@@ -691,7 +695,7 @@ export default function App() {
           {analysis ? (
             <AnalysisDashboard
               analysis={analysis}
-              downloadBusy={task !== null}
+              downloadBusy={busy}
               onDownloadReport={handleReportDownload}
             />
           ) : null}
@@ -709,8 +713,8 @@ export default function App() {
       {activeSection === "documents" ? (
         <div className="section-stack" id="documents-workspace">
           <DocumentUpload
-            disabled={!workspace || task !== null}
-            busy={task === "documents"}
+            disabled={!workspace || busy}
+            busy={isActive("documents")}
             collection={documents}
             files={drafts.documentFiles}
             onFilesChange={(files) => updateDraft("documentFiles", files)}
@@ -725,7 +729,8 @@ export default function App() {
             <ConversationPanel
               workspace={workspace}
               messages={messages}
-              busy={task !== null}
+              busy={busy}
+              asking={isActive("conversation")}
               hasContext={dataset?.status === "ready" || documents !== null}
               demo={{
                 dataReady:

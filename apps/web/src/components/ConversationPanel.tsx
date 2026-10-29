@@ -17,6 +17,8 @@ interface ConversationPanelProps {
   workspace: Workspace;
   messages: Message[];
   busy: boolean;
+  /** Whether a question is being answered; defaults to `busy`. */
+  asking?: boolean;
   hasContext: boolean;
   demo?: DemoContext;
   /** Composer and approval drafts held by the parent, so they survive the section being unmounted. */
@@ -49,6 +51,7 @@ export function ConversationPanel({
   workspace,
   messages,
   busy,
+  asking = busy,
   hasContext,
   demo,
   question,
@@ -241,7 +244,7 @@ export function ConversationPanel({
           disabled={composerDisabled || !question.trim()}
           onClick={submit}
         >
-          {busy ? "Analyzing question…" : "Ask workbench"}
+          {asking ? "Analyzing question…" : "Ask workbench"}
         </button>
       </div>
     </section>

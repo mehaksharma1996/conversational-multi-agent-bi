@@ -34,9 +34,12 @@ persistent live region.
 - One `task: Task | null` value covers ten operations: `workspace`, `upload`, `dataset`,
   `schema`, `analysis`, `documents`, `consent`, `conversation`, `download`, `reset`.
 - Every handler runs `setTask(x)`, then `await`, then `setTask(null)` in `finally`.
-- `handleQuestion` and `handleApproval` refuse to start while `task !== null`. **The download and
-  export handlers do not**, so they can start while another operation runs and clear its busy
-  state when they finish (F1).
+- `handleQuestion` and `handleApproval` refuse to start while `task !== null`; the download and
+  export handlers have no guard of their own.
+- Today this is safe only because every control is disabled while any task runs, and React
+  re-renders between discrete clicks (verified: rapid double clicks start one request even on the
+  old code). The single value can't represent two overlapping operations, which UI-6b's jobs and
+  the read lane need (F1, latent).
 
 **Every product operation is one synchronous HTTP request**
 - That covers upload, profiling, schema confirmation, analysis, document indexing, questions,
@@ -96,7 +99,7 @@ persistent live region.
 
 | ID | Failure the user sees | Fix |
 |---|---|---|
-| F1 | A download finishing re-enables controls while a question or upload is still running | Per-operation records; no shared `finally` |
+| F1 (latent) | One `task` value can't represent overlapping operations; any future overlap (a job and a download) would let the first to finish clear the other's busy state | Per-operation records; no shared `finally` |
 | F2 | A failed upload blanks the dataset, analysis, and conversation that the server still has | Keep prior state until success (D4) |
 | F3 | Uploading documents silently deletes the previous collection | Confirmation dialog naming what is lost (D5) |
 | F4 | Pending SQL approvals vanish on re-analysis or schema confirmation, without warning | The confirmation lists pending approvals that will be abandoned |
@@ -190,8 +193,9 @@ Slices, each committed separately and each keeping `check_all --full` green:
    useOperations.ts`, and `operations/model.test.ts` covering transitions, lane exclusivity, the
    ID-scoped finish, and illegal transitions as no-ops.
 2. **S2: App migration.** Replace `task` with operations in `App.tsx` and pass per-lane busy flags
-   to components. Add an F1 regression test in Vitest: a download finishing while a question runs
-   keeps Ask disabled.
+   to components. Add Vitest guards: rapid double clicks start one question and one report, and a
+   running question keeps the composer locked. These also pass on the old code (F1 is latent); the
+   overlap cases are covered by S1's reducer tests.
 3. **S3: feedback.** Add `OperationAnnouncer` in `WorkbenchShell`, the progress and busy styling,
    and reduced motion. Add Vitest tests for announcements and `aria-busy`.
 4. **S4: safe replacement.** Add `components/ConfirmDialog.tsx` with focus and Escape tests, and
