@@ -95,8 +95,8 @@ test("real local-only stack: tabular analysis, memory, reports, and reset", asyn
   await page.getByRole("button", { name: "Download PDF report" }).click();
   expect((await pdfDownload).suggestedFilename()).toBe("business-intelligence-report.pdf");
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Reset workspace" }).click();
+  await page.getByRole("dialog", { name: "Delete this workspace?" }).getByRole("button", { name: "Delete workspace" }).click();
   await expect(page.getByRole("heading", { name: "Confirm the canonical schema" })).toHaveCount(0);
   await expect(page.getByText("Local workspace ready")).toBeVisible();
 });
@@ -184,7 +184,7 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
   await page.getByRole("button", { name: "Download Markdown report" }).click();
   expect((await reportDownload).suggestedFilename()).toBe("business-intelligence-report.md");
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Reset workspace" }).click();
+  await page.getByRole("dialog", { name: "Delete this workspace?" }).getByRole("button", { name: "Delete workspace" }).click();
   await expect(page.getByText("Local workspace ready")).toBeVisible();
 });

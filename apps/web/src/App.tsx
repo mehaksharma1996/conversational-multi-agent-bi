@@ -15,6 +15,9 @@ import {
   downloadReport,
   downloadResultExport,
   downloadWorkspaceExport,
+  getDataset,
+  getDocumentCollection,
+  getWorkspaceOverview,
   listMessages,
   listWorkbookSheets,
   runAnalysis,
@@ -29,6 +32,7 @@ import {
   type Workspace,
 } from "./api/client";
 import { AnalysisDashboard } from "./components/AnalysisDashboard";
+import { ConfirmDialog, type ConfirmationRequest } from "./components/ConfirmDialog";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { DemoGuide } from "./components/DemoGuide";
 import { DocumentUpload } from "./components/DocumentUpload";
@@ -62,6 +66,13 @@ type Recovery =
   | { kind: "expired" }
   | null;
 
+/** A failed replacement whose outcome the server has not yet confirmed. */
+type Unconfirmed = { kind: "dataset" | "documents" } | null;
+
+function plural(count: number, one: string, many = `${one}s`): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
 function normalizeError(error: unknown): ApiClientError {
   if (error instanceof ApiClientError) return error;
   return new ApiClientError("Something unexpected happened. Try again.");
@@ -86,10 +97,19 @@ export default function App() {
     if (text) setAnnouncement((current) => ({ text, sequence: (current?.sequence ?? 0) + 1 }));
   }, []);
   const { begin, mutationBusy, readBusy, isActive } = useOperations({ onEvent: announce });
-  const busy = mutationBusy || readBusy;
   const [error, setError] = useState<ApiClientError | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   const [startFailed, setStartFailed] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState<Unconfirmed>(null);
+  const [confirmation, setConfirmation] = useState<
+    { request: ConfirmationRequest; resolve: (confirmed: boolean) => void } | null
+  >(null);
+  // Bumped whenever the workspace is replaced, so a response that belongs to an earlier workspace is
+  // dropped instead of repopulating the new one.
+  const epoch = useRef(0);
+  // Until a failed replacement's outcome is confirmed, nothing else may change the workspace.
+  const busy = mutationBusy || readBusy || unconfirmed !== null;
   const [activeSection, setActiveSection] = useState<WorkbenchSection>(
     () => sectionForHash(window.location.hash) ?? "overview",
   );
@@ -122,6 +142,7 @@ export default function App() {
   }, []);
 
   const applyRecovered = useCallback((recovered: RecoveredWorkspace) => {
+    epoch.current += 1;
     setWorkspace(recovered.workspace);
     setDataset(recovered.dataset);
     setUploadId(recovered.dataset?.upload_id ?? null);
@@ -159,6 +180,7 @@ export default function App() {
         });
       } else {
         const created = await createWorkspace(workspaceKey.current);
+        epoch.current += 1;
         setWorkspace(created);
         writeWorkspaceHint(created.id);
         setRecovery(recovered.hintWasStale ? { kind: "expired" } : null);
@@ -185,33 +207,159 @@ export default function App() {
     updateDraft("approvals", {});
   };
 
-  const handleUpload = async (file: File): Promise<boolean> => {
-    if (!workspace) return false;
-    navigate("data");
+  const confirm = (request: ConfirmationRequest) =>
+    new Promise<boolean>((resolve) => setConfirmation({ request, resolve }));
+
+  const pendingApprovals = messages.filter((message) => message.status === "pending_approval").length;
+
+  // Clearing the conversation here only stops showing it: pending SQL is never run, approved, or
+  // cancelled from the browser, and the server keeps the request unanswered.
+  const conversationConsequences = (): string[] => {
+    const consequences: string[] = [];
+    if (messages.length > 0) {
+      consequences.push(
+        `The current conversation (${plural(messages.length, "message")}) is cleared from the workbench.`,
+      );
+    }
+    if (pendingApprovals > 0) {
+      consequences.push(
+        `${plural(pendingApprovals, "SQL request")} waiting for your approval will no longer be shown. ` +
+          "They are not run, approved, or cancelled; they stay unanswered on the server.",
+      );
+    }
+    return consequences;
+  };
+
+  const datasetReplacement = (): string[] | null => {
+    if (!dataset) return null;
+    return [
+      `The workbench switches to the new file once it has been profiled. ${dataset.filename} stays in the workspace until it expires but is no longer used.`,
+      ...(analysis ? ["The current analysis results are cleared."] : []),
+      ...conversationConsequences(),
+      "If the upload fails, the current data and results are kept.",
+    ];
+  };
+
+  const documentReplacement = (): string[] | null => {
+    if (!documents) return null;
+    return [
+      `The server deletes the current ${plural(documents.document_count, "indexed document")} (${documents.filenames.join(", ")}) once the new ones are indexed. This cannot be undone.`,
+      ...conversationConsequences(),
+      "If indexing fails, the current documents are kept.",
+    ];
+  };
+
+  // A failed replacement may still have completed on the server (for example after a client
+  // timeout), so its outcome is read back from the server instead of assumed.
+  const reconcileReplacement = async (
+    kind: "dataset" | "documents",
+    owner: Workspace,
+    from: number,
+    previous: { datasetId: string | null; documentsId: string | null; datasetName: string | null },
+  ) => {
+    try {
+      const overview = await getWorkspaceOverview(owner.id);
+      if (from !== epoch.current) return;
+      if (kind === "dataset") {
+        if (overview.dataset_id === previous.datasetId) {
+          setUnconfirmed(null);
+          setNotice(`Nothing was replaced: ${previous.datasetName ?? "the current data"} is still in use.`);
+          return;
+        }
+        const replaced = overview.dataset_id ? await getDataset(overview.dataset_id) : null;
+        if (from !== epoch.current) return;
+        setUnconfirmed(null);
+        setDataset(replaced);
+        setUploadId(replaced?.upload_id ?? null);
+        setSelectedFeatures(replaced?.recommended_anomaly_features ?? []);
+        setAnalysis(null);
+        clearConversation();
+        setSheets([]);
+        setNotice(
+          "The server finished the upload despite the error, so the new data is now in use and earlier results were cleared.",
+        );
+        return;
+      }
+      if (overview.document_collection_id === previous.documentsId) {
+        setUnconfirmed(null);
+        setNotice("Nothing was replaced: the current documents are still indexed.");
+        return;
+      }
+      const replaced = overview.document_collection_id
+        ? await getDocumentCollection(overview.document_collection_id)
+        : null;
+      if (from !== epoch.current) return;
+      setUnconfirmed(null);
+      setDocuments(replaced);
+      clearConversation();
+      setNotice(
+        replaced
+          ? "The server finished indexing despite the error, so the new documents are now in use and the conversation was cleared."
+          : "The previous documents are no longer available on the server. Upload documents again to use them.",
+      );
+    } catch {
+      if (from === epoch.current) setUnconfirmed({ kind });
+    }
+  };
+
+  const recheckReplacement = () => {
+    if (!workspace || !unconfirmed) return;
+    void reconcileReplacement(unconfirmed.kind, workspace, epoch.current, {
+      datasetId: dataset?.id ?? null,
+      documentsId: documents?.id ?? null,
+      datasetName: dataset?.filename ?? null,
+    });
+  };
+
+  const handleUpload = async (file: File, confirmed = false): Promise<boolean> => {
+    if (!workspace || busy) return false;
+    // Moving focus to the section heading would pull it out of a confirmation dialog.
+    if (activeSection !== "data") navigate("data");
+    const replacing = datasetReplacement();
+    if (!confirmed && replacing) {
+      const accepted = await confirm({
+        title: `Replace ${dataset?.filename ?? "the current data"}?`,
+        consequences: replacing,
+        confirmLabel: "Upload and replace",
+      });
+      if (!accepted) return false;
+    }
     const operation = begin("upload");
     if (!operation) return false;
+    const from = epoch.current;
+    const previous = {
+      datasetId: dataset?.id ?? null,
+      documentsId: documents?.id ?? null,
+      datasetName: dataset?.filename ?? null,
+    };
     setError(null);
-    setDataset(null);
-    setAnalysis(null);
-    clearConversation();
-    setSheets([]);
-    updateDraft("sheet", "");
+    setNotice(null);
     try {
       const upload = await uploadTabular(workspace.id, file);
-      setUploadId(upload.id);
       const workbookSheets = await listWorkbookSheets(upload.id);
+      if (from !== epoch.current) return false;
+      setUploadId(upload.id);
       if (workbookSheets.length > 0) {
+        // The current dataset stays in use until a sheet has been profiled.
         setSheets(workbookSheets);
+        updateDraft("sheet", "");
       } else {
         const profiled = await createDataset(upload.id);
+        if (from !== epoch.current) return false;
         setDataset(profiled);
         setSelectedFeatures(profiled.recommended_anomaly_features);
+        setAnalysis(null);
+        clearConversation();
+        setSheets([]);
+        updateDraft("sheet", "");
       }
       operation.finish("succeeded");
       return true;
     } catch (caught) {
       operation.finish("failed");
+      if (from !== epoch.current) return false;
       setError(normalizeError(caught));
+      if (previous.datasetId) await reconcileReplacement("dataset", workspace, from, previous);
       return false;
     }
   };
@@ -220,10 +368,13 @@ export default function App() {
     if (!uploadId) return;
     const operation = begin("dataset");
     if (!operation) return;
+    const from = epoch.current;
     setError(null);
     try {
       const profiled = await createDataset(uploadId, sheet);
+      if (from !== epoch.current) return;
       setDataset(profiled);
+      setAnalysis(null);
       setSelectedFeatures(profiled.recommended_anomaly_features);
       setSheets([]);
       updateDraft("sheet", "");
@@ -235,8 +386,15 @@ export default function App() {
     }
   };
 
+  const confirmConversationLoss = async (title: string, confirmLabel: string) =>
+    pendingApprovals === 0 ||
+    (await confirm({ title, consequences: conversationConsequences(), confirmLabel }));
+
   const handleSchema = async (mapping: SchemaMappingUpdate) => {
-    if (!dataset) return;
+    if (!dataset || busy) return;
+    if (!(await confirmConversationLoss("Confirm the schema and clear the conversation?", "Confirm schema"))) {
+      return;
+    }
     const operation = begin("schema");
     if (!operation) return;
     setError(null);
@@ -253,7 +411,10 @@ export default function App() {
   };
 
   const handleAnalysis = async () => {
-    if (!dataset) return;
+    if (!dataset || busy) return;
+    if (!(await confirmConversationLoss("Run the analysis and clear the conversation?", "Run analysis"))) {
+      return;
+    }
     const operation = begin("analysis");
     if (!operation) return;
     navigate("analysis");
@@ -272,20 +433,42 @@ export default function App() {
     }
   };
 
-  const handleDocuments = async (files: File[]): Promise<boolean> => {
-    if (!workspace) return false;
-    navigate("documents");
+  const handleDocuments = async (files: File[], confirmed = false): Promise<boolean> => {
+    if (!workspace || busy) return false;
+    // Moving focus to the section heading would pull it out of a confirmation dialog.
+    if (activeSection !== "documents") navigate("documents");
+    const replacing = documentReplacement();
+    if (!confirmed && replacing) {
+      const accepted = await confirm({
+        title: "Replace the indexed documents?",
+        consequences: replacing,
+        confirmLabel: "Index and replace",
+        tone: "danger",
+      });
+      if (!accepted) return false;
+    }
     const operation = begin("documents");
     if (!operation) return false;
+    const from = epoch.current;
+    const previous = {
+      datasetId: dataset?.id ?? null,
+      documentsId: documents?.id ?? null,
+      datasetName: dataset?.filename ?? null,
+    };
     setError(null);
+    setNotice(null);
     try {
-      setDocuments(await uploadDocuments(workspace.id, files));
+      const indexed = await uploadDocuments(workspace.id, files);
+      if (from !== epoch.current) return false;
+      setDocuments(indexed);
       clearConversation();
       operation.finish("succeeded");
       return true;
     } catch (caught) {
       operation.finish("failed");
+      if (from !== epoch.current) return false;
       setError(normalizeError(caught));
+      if (previous.documentsId) await reconcileReplacement("documents", workspace, from, previous);
       return false;
     }
   };
@@ -312,8 +495,18 @@ export default function App() {
       );
       return;
     }
-    if (await handleUpload(data)) {
-      await handleDocuments([policy]);
+    const replacing = [...(datasetReplacement() ?? []), ...(documentReplacement() ?? [])];
+    if (replacing.length > 0) {
+      const accepted = await confirm({
+        title: "Replace the current data and documents with the demo?",
+        consequences: [...new Set(replacing)],
+        confirmLabel: "Load demo and replace",
+        tone: documents ? "danger" : "default",
+      });
+      if (!accepted) return;
+    }
+    if (await handleUpload(data, true)) {
+      await handleDocuments([policy], true);
       navigate("data");
     }
   };
@@ -455,7 +648,20 @@ export default function App() {
   };
 
   const handleReset = async () => {
-    if (!workspace || !window.confirm("Delete this local workspace and all derived data?")) return;
+    if (!workspace || busy) return;
+    const accepted = await confirm({
+      title: "Delete this workspace?",
+      consequences: [
+        "Its uploaded data, documents, analysis, and conversation are deleted from the server. This cannot be undone.",
+        ...(pendingApprovals > 0
+          ? [`${plural(pendingApprovals, "SQL request")} waiting for approval are deleted with it and will never run.`]
+          : []),
+        "Export the workspace first if you need a copy.",
+      ],
+      confirmLabel: "Delete workspace",
+      tone: "danger",
+    });
+    if (!accepted) return;
     const operation = begin("reset");
     if (!operation) return;
     setError(null);
@@ -471,6 +677,9 @@ export default function App() {
       setMessages([]);
       setSelectedFeatures([]);
       setRecovery(null);
+      setNotice(null);
+      setUnconfirmed(null);
+      epoch.current += 1;
       resetDrafts();
       writeWorkspaceHint(null);
       workspaceKey.current = crypto.randomUUID();
@@ -504,6 +713,33 @@ export default function App() {
   const globalNotices = (
     <>
       <OperationAnnouncer announcement={announcement} />
+      <ConfirmDialog
+        request={confirmation?.request ?? null}
+        onResolve={(confirmed) => {
+          confirmation?.resolve(confirmed);
+          setConfirmation(null);
+        }}
+      />
+      {unconfirmed ? (
+        <StatusBanner kind="error">
+          <strong>
+            The server did not confirm whether the {unconfirmed.kind === "dataset" ? "data upload" : "document replacement"}{" "}
+            finished.
+          </strong>{" "}
+          The results shown may be out of date, so other changes are paused until the server&apos;s state is checked.
+          <button className="button button--link" type="button" disabled={mutationBusy} onClick={recheckReplacement}>
+            Check server state
+          </button>
+        </StatusBanner>
+      ) : null}
+      {notice ? (
+        <StatusBanner kind="info">
+          {notice}
+          <button className="button button--link" type="button" onClick={() => setNotice(null)}>
+            Dismiss
+          </button>
+        </StatusBanner>
+      ) : null}
       {error ? (
         <StatusBanner kind="error" requestId={error.requestId}>
           <strong>{error.message}</strong>

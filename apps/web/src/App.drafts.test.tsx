@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -155,6 +155,9 @@ describe("unsaved workflow drafts across section navigation", () => {
     vi.mocked(createDataset).mockResolvedValueOnce({ ...reviewDatasetFixture, id: "dataset-2" });
     await user.upload(screen.getByLabelText("CSV or Excel file"), csvFile());
     await user.click(screen.getByRole("button", { name: "Upload and profile" }));
+    // Replacing a dataset now asks first (UI-2).
+    await user.click(await screen.findByRole("button", { name: "Upload and replace" }));
+    await waitFor(() => expect(createDataset).toHaveBeenCalledTimes(2));
     await screen.findByRole("heading", { name: "Confirm the canonical schema" });
     expect(screen.getByLabelText("merchant")).toHaveValue("merchant");
   });
@@ -229,7 +232,6 @@ describe("unsaved workflow drafts across section navigation", () => {
 
   it("clears every draft when the workspace is reset", async () => {
     const user = userEvent.setup();
-    vi.stubGlobal("confirm", vi.fn(() => true));
     render(<App />);
     await screen.findByText("Local workspace ready");
 
@@ -241,6 +243,7 @@ describe("unsaved workflow drafts across section navigation", () => {
     await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
 
     await user.click(screen.getByRole("button", { name: "Reset workspace" }));
+    await user.click(await screen.findByRole("button", { name: "Delete workspace" }));
     expect(deleteWorkspace).toHaveBeenCalledWith("workspace-1");
     await screen.findByText("Local workspace ready");
 

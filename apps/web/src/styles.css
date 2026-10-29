@@ -285,6 +285,13 @@ input[type="file"]::file-selector-button { margin-right: .75rem; padding: .45rem
 .button--secondary:hover:not(:disabled) { border-color: #5c7089; background: #1b2838; }
 .button--danger-quiet { color: #f0b8be; border-color: #60313a; background: transparent; }
 .button--danger-quiet:hover:not(:disabled) { background: var(--danger-surface); }
+.button--danger { color: #1a0d10; border-color: var(--danger); background: var(--danger); }
+.button--danger:hover:not(:disabled) { background: #eb9aa2; }
+.confirm-dialog { max-width: min(34rem, calc(100vw - 2rem)); padding: 1.5rem; color: var(--text); border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-raised); }
+.confirm-dialog::backdrop { background: rgb(3 7 12 / 72%); }
+.confirm-dialog h2 { margin-top: 0; font-size: 1.15rem; }
+.confirm-dialog__consequences { margin: 0 0 1.25rem; padding-left: 1.2rem; color: var(--text-secondary); line-height: 1.5; }
+.confirm-dialog .button-row { justify-content: flex-end; flex-wrap: wrap; }
 .button--compact { min-height: 34px; padding: .35rem .65rem; font-size: .74rem; }
 .button--link { min-height: auto; margin-left: .4rem; padding: .2rem; color: inherit; background: transparent; text-decoration: underline; }
 .button-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0; }

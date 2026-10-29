@@ -418,7 +418,10 @@ test("an unsupported upload fails with a clear message and the page stays usable
     buffer: Buffer.from("not a table"),
   });
   await page.getByRole("button", { name: "Upload and profile" }).click();
+  // The demo table is already in use, so replacing it asks first; a refused upload replaces nothing.
+  await page.getByRole("dialog", { name: /^Replace / }).getByRole("button", { name: "Upload and replace" }).click();
   await expect(page.getByRole("alert")).toContainText("Supported tabular file types");
+  await expect(page.getByText(/Nothing was replaced: .* is still in use\./)).toBeVisible();
   await expect(page.getByRole("button", { name: "Upload and profile" })).toBeEnabled();
 });
 
@@ -557,13 +560,13 @@ test("axe finds no violations in the loaded workspace, with answers, at desktop 
 
 test("resetting deletes the workspace; an expired reference gets a clear explanation", async ({ page, request }) => {
   await open(page);
-  page.once("dialog", (dialog) => void dialog.accept());
   const replacementWorkspace = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
     new URL(response.url()).pathname === "/api/v1/workspaces" &&
     response.status() === 201,
   );
   await page.getByRole("button", { name: "Reset workspace" }).click();
+  await page.getByRole("dialog", { name: "Delete this workspace?" }).getByRole("button", { name: "Delete workspace" }).click();
   await replacementWorkspace;
   await expect(page.getByText("Local workspace ready")).toBeVisible();
   await expect(page.locator(".message-pair")).toHaveCount(0);

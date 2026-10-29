@@ -213,6 +213,38 @@ Slices, each committed separately and each keeping `check_all --full` green:
    state" section to `docs/architecture/workbench-shell.md` and update the axe baselines for the
    dialog and announcer.
 
+## Implemented semantics: S4 safe replacement
+
+- **Server behaviour, verified in code.**
+  - Size and type validation and rate limits are refused before anything is written.
+  - Chroma builds the new index in a staging collection. Only after every batch succeeds does it
+    delete the canonical collection and rename the staged one into its place.
+  - pgvector's `replace_chunks` is atomic.
+  - The repository swaps the collection record only after indexing has finished.
+  - An indexing failure therefore leaves the previous documents intact. A client timeout or network
+    error tells the browser nothing: the server may still finish the replacement afterwards.
+  - Dataset uploads are additive; the overview returns the latest dataset.
+- **After any failed dataset or document replacement**, the client reads
+  `GET /workspaces/{id}/overview` and compares resource IDs:
+  - unchanged: "Nothing was replaced", and current results stay;
+  - changed: the new resource is adopted, its dependents are cleared, and the user is told the server
+    finished despite the error;
+  - collection gone: the user is told so.
+- **If the overview cannot be read**, an error banner says the outcome is unconfirmed. Every change is
+  paused (`busy`) until **Check server state** succeeds. Results are never assumed valid.
+- **Stale responses.** An epoch counter is bumped on every workspace switch, creation, or reset, and
+  any response from an earlier epoch is dropped.
+- **Pending approvals.** The confirmation text says that clearing the conversation in the browser
+  does not run, approve, or cancel pending SQL; the requests stay unanswered on the server. Reset
+  says they are deleted with the workspace.
+- **Backend follow-up (recommended, not in UI-2).**
+  - An idempotency key on document and tabular uploads would make retries after a timeout safe.
+  - A transactional "replace if current collection is X" precondition (`If-Match` on the
+    collection) would let the client prove which collection a replacement superseded.
+  - The narrow window in `vector_store.replace` between deleting the canonical collection and
+    renaming the staged one could leave no index after a crash. Promotion by rename-then-delete
+    would close it.
+
 ## Do not touch
 
 - API routes, OpenAPI, `schema.d.ts`, backend packages, the evaluation baselines, and the
