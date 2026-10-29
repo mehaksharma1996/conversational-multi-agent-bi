@@ -418,7 +418,10 @@ test("an unsupported upload fails with a clear message and the page stays usable
     buffer: Buffer.from("not a table"),
   });
   await page.getByRole("button", { name: "Upload and profile" }).click();
+  // The demo table is already in use, so replacing it asks first; a refused upload replaces nothing.
+  await page.getByRole("dialog", { name: /^Replace / }).getByRole("button", { name: "Upload and replace" }).click();
   await expect(page.getByRole("alert")).toContainText("Supported tabular file types");
+  await expect(page.getByText(/Nothing was replaced: .* is still in use\./)).toBeVisible();
   await expect(page.getByRole("button", { name: "Upload and profile" })).toBeEnabled();
 });
 
@@ -555,15 +558,73 @@ test("axe finds no violations in the loaded workspace, with answers, at desktop 
   await axe(page);
 });
 
+// UI-2 (#132): a reload during a real request, and a confirmed document replacement, against the
+// production API. These run after the read-only journeys because they replace the demo documents.
+const reviewPolicy = path.resolve(repoRoot, "tests/e2e/review_policy.pdf");
+
+test("a reload during document indexing says the outcome cannot be confirmed and retries nothing", async ({ page }) => {
+  await open(page);
+  await goTo(page, "Documents");
+  const before = await page.getByText(/^Indexed \d+ document/).textContent();
+  let indexRequests = 0;
+  // Hold the upload in the browser (never fulfilled) so the reload interrupts it before the server
+  // sees it, as an unloading page would: no error handler runs.
+  await page.route("**/api/v1/workspaces/*/document-collections", () => {
+    indexRequests += 1;
+  });
+  await page.getByLabel("PDF documents").setInputFiles(reviewPolicy);
+  await page.getByRole("button", { name: "Upload and index PDFs" }).click();
+  await page.getByRole("dialog", { name: "Replace the indexed documents?" }).getByRole("button", { name: "Index and replace" }).click();
+  await expect.poll(() => indexRequests).toBe(1);
+  await expect(page.locator("#documents-workspace")).toHaveAttribute("aria-busy", "true");
+
+  await page.reload();
+  // Remove the route only after the navigation dropped the request; never release it to the server.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const banner = page.getByText(/A document upload was in progress when the page reloaded/);
+  await expect(banner).toContainText("its outcome cannot be confirmed");
+  await expect(banner).toContainText("never retried automatically");
+  await goTo(page, "Documents");
+  await expect(page.getByText(/^Indexed \d+ document/)).toHaveText(before ?? "");
+  expect(indexRequests).toBe(1);
+  await page.getByRole("button", { name: "Dismiss" }).first().click();
+  await expect(banner).toHaveCount(0);
+  await axe(page);
+});
+
+test("replacing documents asks first; the new collection is then in use and the conversation is cleared", async ({ page }) => {
+  await open(page);
+  await goTo(page, "Ask");
+  await expect(page.locator(".message-pair").first()).toBeVisible();
+  await goTo(page, "Documents");
+  await page.getByLabel("PDF documents").setInputFiles(reviewPolicy);
+  await page.getByRole("button", { name: "Upload and index PDFs" }).click();
+  const dialog = page.getByRole("dialog", { name: "Replace the indexed documents?" });
+  await expect(dialog).toContainText("The server deletes the current");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await axe(page);
+  await dialog.getByRole("button", { name: "Index and replace" }).click();
+
+  await expect(page.getByText(/^Indexed 1 document\(s\), .*: review_policy\.pdf\.$/)).toBeVisible();
+  await expect(page.getByTestId("operation-announcer")).toContainText("Document indexing finished.");
+  await goTo(page, "Ask");
+  await expect(page.locator(".message-pair")).toHaveCount(0);
+
+  // The server agrees after a reload: the replaced collection is the one restored.
+  await page.reload();
+  await goTo(page, "Documents");
+  await expect(page.getByText(/review_policy\.pdf\.$/)).toBeVisible();
+});
+
 test("resetting deletes the workspace; an expired reference gets a clear explanation", async ({ page, request }) => {
   await open(page);
-  page.once("dialog", (dialog) => void dialog.accept());
   const replacementWorkspace = page.waitForResponse((response) =>
     response.request().method() === "POST" &&
     new URL(response.url()).pathname === "/api/v1/workspaces" &&
     response.status() === 201,
   );
   await page.getByRole("button", { name: "Reset workspace" }).click();
+  await page.getByRole("dialog", { name: "Delete this workspace?" }).getByRole("button", { name: "Delete workspace" }).click();
   await replacementWorkspace;
   await expect(page.getByText("Local workspace ready")).toBeVisible();
   await expect(page.locator(".message-pair")).toHaveCount(0);

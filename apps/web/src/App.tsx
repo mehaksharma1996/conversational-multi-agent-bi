@@ -15,6 +15,9 @@ import {
   downloadReport,
   downloadResultExport,
   downloadWorkspaceExport,
+  getDataset,
+  getDocumentCollection,
+  getWorkspaceOverview,
   listMessages,
   listWorkbookSheets,
   runAnalysis,
@@ -29,9 +32,11 @@ import {
   type Workspace,
 } from "./api/client";
 import { AnalysisDashboard } from "./components/AnalysisDashboard";
+import { ConfirmDialog, type ConfirmationRequest } from "./components/ConfirmDialog";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { DemoGuide } from "./components/DemoGuide";
 import { DocumentUpload } from "./components/DocumentUpload";
+import { OperationAnnouncer, type Announcement } from "./components/OperationAnnouncer";
 import { ProductOverview } from "./components/ProductOverview";
 import { SchemaReview } from "./components/SchemaReview";
 import { StatusBanner } from "./components/StatusBanner";
@@ -47,30 +52,34 @@ import {
   DEMO_POLICY_FILENAME,
   fetchDemoFile,
 } from "./demo/retailDemo";
+import { announcementFor } from "./operations/announcements";
+import { discardStale, useOperations, type OperationEvent } from "./operations/useOperations";
 import { useWorkflowDrafts } from "./workspace/drafts";
+import {
+  assessMarker,
+  describeAssessment,
+  readOperationMarker,
+  recordOperationEvent,
+  writeOperationMarker,
+  type MarkerAssessment,
+} from "./workspace/operationMarker";
 import {
   recoverWorkspace,
   writeWorkspaceHint,
   type RecoveredWorkspace,
 } from "./workspace/recovery";
 
-type Task =
-  | "workspace"
-  | "upload"
-  | "dataset"
-  | "schema"
-  | "analysis"
-  | "documents"
-  | "consent"
-  | "conversation"
-  | "download"
-  | "reset"
-  | null;
-
 type Recovery =
   | { kind: "restored"; createdAt: string; hasData: boolean; messageCount: number }
   | { kind: "expired" }
   | null;
+
+/** A failed replacement whose outcome the server has not yet confirmed. */
+type Unconfirmed = { kind: "dataset" | "documents" } | null;
+
+function plural(count: number, one: string, many = `${one}s`): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
 
 function normalizeError(error: unknown): ApiClientError {
   if (error instanceof ApiClientError) return error;
@@ -90,14 +99,37 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
   const [contamination, setContamination] = useState(0.05);
-  const [task, setTask] = useState<Task>(null);
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const workspaceId = useRef<string | null>(null);
+  const onOperationEvent = useCallback((event: OperationEvent) => {
+    const text = announcementFor(event);
+    if (text) setAnnouncement((current) => ({ text, sequence: (current?.sequence ?? 0) + 1 }));
+    // Mark a workspace-changing request while it runs, so a reload can say it was interrupted.
+    recordOperationEvent(event, workspaceId.current);
+  }, []);
+  const { begin, mutationBusy, readBusy, isActive } = useOperations({ onEvent: onOperationEvent });
   const [error, setError] = useState<ApiClientError | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   const [startFailed, setStartFailed] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [interrupted, setInterrupted] = useState<MarkerAssessment | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState<Unconfirmed>(null);
+  const [confirmation, setConfirmation] = useState<
+    { request: ConfirmationRequest; resolve: (confirmed: boolean) => void } | null
+  >(null);
+  // Bumped whenever the workspace is replaced, so a response that belongs to an earlier workspace is
+  // dropped instead of repopulating the new one.
+  const epoch = useRef(0);
+  // Until a failed replacement's outcome is confirmed, nothing else may change the workspace.
+  const busy = mutationBusy || readBusy || unconfirmed !== null;
   const [activeSection, setActiveSection] = useState<WorkbenchSection>(
     () => sectionForHash(window.location.hash) ?? "overview",
   );
   const { drafts, updateDraft, resetDrafts } = useWorkflowDrafts();
+
+  useEffect(() => {
+    workspaceId.current = workspace?.id ?? null;
+  }, [workspace]);
 
   // An intentional section change moves focus to the section heading, including a reselection of
   // the current section (for example from the phone drawer, whose links are about to go inert).
@@ -126,6 +158,7 @@ export default function App() {
   }, []);
 
   const applyRecovered = useCallback((recovered: RecoveredWorkspace) => {
+    epoch.current += 1;
     setWorkspace(recovered.workspace);
     setDataset(recovered.dataset);
     setUploadId(recovered.dataset?.upload_id ?? null);
@@ -144,34 +177,46 @@ export default function App() {
   // Rediscover the caller's own workspace before creating one, so a reload does not strand work.
   // Only a definite "none" creates a new workspace; any other failure is shown, not papered over.
   const initializeWorkspace = useCallback(async () => {
-    setTask("workspace");
+    const operation = begin("workspace");
+    if (!operation) return;
+    let outcome: "succeeded" | "failed" = "failed";
     setError(null);
     setStartFailed(false);
+    const marker = readOperationMarker();
     try {
-      const outcome = await recoverWorkspace();
-      if (outcome.kind === "restored") {
-        applyRecovered(outcome.recovered);
-        writeWorkspaceHint(outcome.recovered.workspace.id);
-        const { dataset: restoredDataset, documents: restoredDocuments } = outcome.recovered;
+      const recovered = await recoverWorkspace();
+      if (marker) {
+        // Compare the interrupted request with the server's state; only "unknown" keeps the marker
+        // (until the person checks again or dismisses it).
+        const assessment = assessMarker(marker, recovered.kind === "restored" ? recovered.recovered : null);
+        setInterrupted(assessment);
+        if (assessment.outcome !== "unknown") writeOperationMarker(null);
+      }
+      if (recovered.kind === "restored") {
+        applyRecovered(recovered.recovered);
+        writeWorkspaceHint(recovered.recovered.workspace.id);
+        const { dataset: restoredDataset, documents: restoredDocuments } = recovered.recovered;
         setRecovery({
           kind: "restored",
-          createdAt: outcome.recovered.workspace.created_at,
+          createdAt: recovered.recovered.workspace.created_at,
           hasData: restoredDataset !== null || restoredDocuments !== null,
-          messageCount: outcome.recovered.messages.length,
+          messageCount: recovered.recovered.messages.length,
         });
       } else {
         const created = await createWorkspace(workspaceKey.current);
+        epoch.current += 1;
         setWorkspace(created);
         writeWorkspaceHint(created.id);
-        setRecovery(outcome.hintWasStale ? { kind: "expired" } : null);
+        setRecovery(recovered.hintWasStale ? { kind: "expired" } : null);
       }
+      outcome = "succeeded";
     } catch (caught) {
       setStartFailed(true);
       setError(normalizeError(caught));
     } finally {
-      setTask(null);
+      operation.finish(outcome);
     }
-  }, [applyRecovered]);
+  }, [applyRecovered, begin]);
 
   useEffect(() => {
     if (workspaceStarted.current) return;
@@ -186,73 +231,216 @@ export default function App() {
     updateDraft("approvals", {});
   };
 
-  const handleUpload = async (file: File): Promise<boolean> => {
-    if (!workspace) return false;
-    navigate("data");
-    setTask("upload");
+  const confirm = (request: ConfirmationRequest) =>
+    new Promise<boolean>((resolve) => setConfirmation({ request, resolve }));
+
+  const pendingApprovals = messages.filter((message) => message.status === "pending_approval").length;
+
+  // Clearing the conversation here only stops showing it: pending SQL is never run, approved, or
+  // cancelled from the browser, and the server keeps the request unanswered.
+  const conversationConsequences = (): string[] => {
+    const consequences: string[] = [];
+    if (messages.length > 0) {
+      consequences.push(
+        `The current conversation (${plural(messages.length, "message")}) is cleared from the workbench.`,
+      );
+    }
+    if (pendingApprovals > 0) {
+      consequences.push(
+        `${plural(pendingApprovals, "SQL request")} waiting for your approval will no longer be shown. ` +
+          "They are not run, approved, or cancelled; they stay unanswered on the server.",
+      );
+    }
+    return consequences;
+  };
+
+  const datasetReplacement = (): string[] | null => {
+    if (!dataset) return null;
+    return [
+      `The workbench switches to the new file once it has been profiled. ${dataset.filename} stays in the workspace until it expires but is no longer used.`,
+      ...(analysis ? ["The current analysis results are cleared."] : []),
+      ...conversationConsequences(),
+      "If the upload fails, the current data and results are kept.",
+    ];
+  };
+
+  const documentReplacement = (): string[] | null => {
+    if (!documents) return null;
+    return [
+      `The server deletes the current ${plural(documents.document_count, "indexed document")} (${documents.filenames.join(", ")}) once the new ones are indexed. This cannot be undone.`,
+      ...conversationConsequences(),
+      "If indexing fails, the current documents are kept.",
+    ];
+  };
+
+  // A failed replacement may still have completed on the server (for example after a client
+  // timeout), so its outcome is read back from the server instead of assumed.
+  const reconcileReplacement = async (
+    kind: "dataset" | "documents",
+    owner: Workspace,
+    from: number,
+    previous: { datasetId: string | null; documentsId: string | null; datasetName: string | null },
+  ) => {
+    try {
+      const overview = await getWorkspaceOverview(owner.id);
+      if (from !== epoch.current) return;
+      if (kind === "dataset") {
+        if (overview.dataset_id === previous.datasetId) {
+          setUnconfirmed(null);
+          setNotice(`Nothing was replaced: ${previous.datasetName ?? "the current data"} is still in use.`);
+          return;
+        }
+        const replaced = overview.dataset_id ? await getDataset(overview.dataset_id) : null;
+        if (from !== epoch.current) return;
+        setUnconfirmed(null);
+        setDataset(replaced);
+        setUploadId(replaced?.upload_id ?? null);
+        setSelectedFeatures(replaced?.recommended_anomaly_features ?? []);
+        setAnalysis(null);
+        clearConversation();
+        setSheets([]);
+        setNotice(
+          "The server finished the upload despite the error, so the new data is now in use and earlier results were cleared.",
+        );
+        return;
+      }
+      if (overview.document_collection_id === previous.documentsId) {
+        setUnconfirmed(null);
+        setNotice("Nothing was replaced: the current documents are still indexed.");
+        return;
+      }
+      const replaced = overview.document_collection_id
+        ? await getDocumentCollection(overview.document_collection_id)
+        : null;
+      if (from !== epoch.current) return;
+      setUnconfirmed(null);
+      setDocuments(replaced);
+      clearConversation();
+      setNotice(
+        replaced
+          ? "The server finished indexing despite the error, so the new documents are now in use and the conversation was cleared."
+          : "The previous documents are no longer available on the server. Upload documents again to use them.",
+      );
+    } catch {
+      if (from === epoch.current) setUnconfirmed({ kind });
+    }
+  };
+
+  const recheckReplacement = () => {
+    if (!workspace || !unconfirmed) return;
+    void reconcileReplacement(unconfirmed.kind, workspace, epoch.current, {
+      datasetId: dataset?.id ?? null,
+      documentsId: documents?.id ?? null,
+      datasetName: dataset?.filename ?? null,
+    });
+  };
+
+  const handleUpload = async (file: File, confirmed = false): Promise<boolean> => {
+    if (!workspace || busy) return false;
+    // Moving focus to the section heading would pull it out of a confirmation dialog.
+    if (activeSection !== "data") navigate("data");
+    const replacing = datasetReplacement();
+    if (!confirmed && replacing) {
+      const accepted = await confirm({
+        title: `Replace ${dataset?.filename ?? "the current data"}?`,
+        consequences: replacing,
+        confirmLabel: "Upload and replace",
+      });
+      if (!accepted) return false;
+    }
+    const operation = begin("upload");
+    if (!operation) return false;
+    const from = epoch.current;
+    const previous = {
+      datasetId: dataset?.id ?? null,
+      documentsId: documents?.id ?? null,
+      datasetName: dataset?.filename ?? null,
+    };
     setError(null);
-    setDataset(null);
-    setAnalysis(null);
-    clearConversation();
-    setSheets([]);
-    updateDraft("sheet", "");
+    setNotice(null);
     try {
       const upload = await uploadTabular(workspace.id, file);
-      setUploadId(upload.id);
       const workbookSheets = await listWorkbookSheets(upload.id);
+      if (discardStale(operation, from, epoch.current)) return false;
+      setUploadId(upload.id);
       if (workbookSheets.length > 0) {
+        // The current dataset stays in use until a sheet has been profiled.
         setSheets(workbookSheets);
+        updateDraft("sheet", "");
       } else {
         const profiled = await createDataset(upload.id);
+        if (discardStale(operation, from, epoch.current)) return false;
         setDataset(profiled);
         setSelectedFeatures(profiled.recommended_anomaly_features);
+        setAnalysis(null);
+        clearConversation();
+        setSheets([]);
+        updateDraft("sheet", "");
       }
+      operation.finish("succeeded");
       return true;
     } catch (caught) {
+      operation.finish("failed");
+      if (from !== epoch.current) return false;
       setError(normalizeError(caught));
+      if (previous.datasetId) await reconcileReplacement("dataset", workspace, from, previous);
       return false;
-    } finally {
-      setTask(null);
     }
   };
 
   const handleSheet = async (sheet: string) => {
     if (!uploadId) return;
-    setTask("dataset");
+    const operation = begin("dataset");
+    if (!operation) return;
+    const from = epoch.current;
     setError(null);
     try {
       const profiled = await createDataset(uploadId, sheet);
+      if (discardStale(operation, from, epoch.current)) return;
       setDataset(profiled);
+      setAnalysis(null);
       setSelectedFeatures(profiled.recommended_anomaly_features);
       setSheets([]);
       updateDraft("sheet", "");
       clearConversation();
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
+  const confirmConversationLoss = async (title: string, confirmLabel: string) =>
+    pendingApprovals === 0 ||
+    (await confirm({ title, consequences: conversationConsequences(), confirmLabel }));
+
   const handleSchema = async (mapping: SchemaMappingUpdate) => {
-    if (!dataset) return;
-    setTask("schema");
+    if (!dataset || busy) return;
+    if (!(await confirmConversationLoss("Confirm the schema and clear the conversation?", "Confirm schema"))) {
+      return;
+    }
+    const operation = begin("schema");
+    if (!operation) return;
     setError(null);
     try {
       setDataset(await confirmSchema(dataset.id, mapping));
       updateDraft("schema", null);
       clearConversation();
       navigate("analysis");
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleAnalysis = async () => {
-    if (!dataset) return;
-    setTask("analysis");
+    if (!dataset || busy) return;
+    if (!(await confirmConversationLoss("Run the analysis and clear the conversation?", "Run analysis"))) {
+      return;
+    }
+    const operation = begin("analysis");
+    if (!operation) return;
     navigate("analysis");
     setError(null);
     try {
@@ -262,27 +450,50 @@ export default function App() {
       });
       setAnalysis(result);
       clearConversation();
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
-  const handleDocuments = async (files: File[]): Promise<boolean> => {
-    if (!workspace) return false;
-    navigate("documents");
-    setTask("documents");
+  const handleDocuments = async (files: File[], confirmed = false): Promise<boolean> => {
+    if (!workspace || busy) return false;
+    // Moving focus to the section heading would pull it out of a confirmation dialog.
+    if (activeSection !== "documents") navigate("documents");
+    const replacing = documentReplacement();
+    if (!confirmed && replacing) {
+      const accepted = await confirm({
+        title: "Replace the indexed documents?",
+        consequences: replacing,
+        confirmLabel: "Index and replace",
+        tone: "danger",
+      });
+      if (!accepted) return false;
+    }
+    const operation = begin("documents");
+    if (!operation) return false;
+    const from = epoch.current;
+    const previous = {
+      datasetId: dataset?.id ?? null,
+      documentsId: documents?.id ?? null,
+      datasetName: dataset?.filename ?? null,
+    };
     setError(null);
+    setNotice(null);
     try {
-      setDocuments(await uploadDocuments(workspace.id, files));
+      const indexed = await uploadDocuments(workspace.id, files);
+      if (discardStale(operation, from, epoch.current)) return false;
+      setDocuments(indexed);
       clearConversation();
+      operation.finish("succeeded");
       return true;
     } catch (caught) {
+      operation.finish("failed");
+      if (from !== epoch.current) return false;
       setError(normalizeError(caught));
+      if (previous.documentsId) await reconcileReplacement("documents", workspace, from, previous);
       return false;
-    } finally {
-      setTask(null);
     }
   };
 
@@ -308,23 +519,34 @@ export default function App() {
       );
       return;
     }
-    if (await handleUpload(data)) {
-      await handleDocuments([policy]);
+    const replacing = [...(datasetReplacement() ?? []), ...(documentReplacement() ?? [])];
+    if (replacing.length > 0) {
+      const accepted = await confirm({
+        title: "Replace the current data and documents with the demo?",
+        consequences: [...new Set(replacing)],
+        confirmLabel: "Load demo and replace",
+        tone: documents ? "danger" : "default",
+      });
+      if (!accepted) return;
+    }
+    if (await handleUpload(data, true)) {
+      await handleDocuments([policy], true);
       navigate("data");
     }
   };
 
   const handleConsent = async () => {
     if (!workspace) return;
-    setTask("consent");
+    const operation = begin("consent");
+    if (!operation) return;
     setError(null);
     try {
       await acceptConsent(workspace.id);
       setWorkspace({ ...workspace, consent_accepted: true });
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
@@ -332,9 +554,10 @@ export default function App() {
     question: string,
     requireSqlApproval: boolean,
   ): Promise<boolean> => {
-    if (!workspace || task !== null) return false;
+    if (!workspace) return false;
+    const operation = begin("conversation");
+    if (!operation) return false;
     navigate("ask");
-    setTask("conversation");
     setError(null);
     try {
       const activeConversation = conversation ?? await createConversation(
@@ -349,12 +572,12 @@ export default function App() {
         requireSqlApproval,
       );
       setMessages((current) => [...current, message]);
+      operation.finish("succeeded");
       return true;
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
       return false;
-    } finally {
-      setTask(null);
     }
   };
 
@@ -374,8 +597,8 @@ export default function App() {
     decision: "approve" | "reject",
     sql?: string,
   ) => {
-    if (task !== null) return;
-    setTask("conversation");
+    const operation = begin("approval");
+    if (!operation) return;
     setError(null);
     try {
       const resolved = await decideSqlApproval(message.id, decision, sql ?? null);
@@ -385,11 +608,11 @@ export default function App() {
       updateDraft("approvals", (current) =>
         Object.fromEntries(Object.entries(current).filter(([id]) => id !== message.id)),
       );
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
       await resyncMessages();
-    } finally {
-      setTask(null);
     }
   };
 
@@ -406,48 +629,65 @@ export default function App() {
 
   const handleReportDownload = async (format: "markdown" | "pdf") => {
     if (!analysis) return;
-    setTask("download");
+    const operation = begin("download");
+    if (!operation) return;
     setError(null);
     try {
       const report = await createReport(analysis.id, format === "pdf");
       const blob = await downloadReport(report.id, format);
       saveBlob(blob, format === "pdf" ? "business-intelligence-report.pdf" : "business-intelligence-report.md");
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleResultExport = async (message: Message, format: "csv" | "xlsx") => {
-    setTask("download");
+    const operation = begin("download");
+    if (!operation) return;
     setError(null);
     try {
       const resultExport = await createResultExport(message.id, format);
       saveBlob(await downloadResultExport(resultExport.id), resultExport.filename);
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleWorkspaceExport = async () => {
     if (!workspace) return;
-    setTask("download");
+    const operation = begin("export");
+    if (!operation) return;
     setError(null);
     try {
       saveBlob(await downloadWorkspaceExport(workspace.id), `workspace-${workspace.id}.zip`);
+      operation.finish("succeeded");
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const handleReset = async () => {
-    if (!workspace || !window.confirm("Delete this local workspace and all derived data?")) return;
-    setTask("reset");
+    if (!workspace || busy) return;
+    const accepted = await confirm({
+      title: "Delete this workspace?",
+      consequences: [
+        "Its uploaded data, documents, analysis, and conversation are deleted from the server. This cannot be undone.",
+        ...(pendingApprovals > 0
+          ? [`${plural(pendingApprovals, "SQL request")} waiting for approval are deleted with it and will never run.`]
+          : []),
+        "Export the workspace first if you need a copy.",
+      ],
+      confirmLabel: "Delete workspace",
+      tone: "danger",
+    });
+    if (!accepted) return;
+    const operation = begin("reset");
+    if (!operation) return;
     setError(null);
     try {
       await deleteWorkspace(workspace.id);
@@ -461,22 +701,27 @@ export default function App() {
       setMessages([]);
       setSelectedFeatures([]);
       setRecovery(null);
+      setNotice(null);
+      setUnconfirmed(null);
+      setInterrupted(null);
+      epoch.current += 1;
       resetDrafts();
       writeWorkspaceHint(null);
       workspaceKey.current = crypto.randomUUID();
       navigate("overview");
+      // Finish first: the new workspace is a separate operation in the same lane.
+      operation.finish("succeeded");
       await initializeWorkspace();
     } catch (caught) {
+      operation.finish("failed");
       setError(normalizeError(caught));
-    } finally {
-      setTask(null);
     }
   };
 
   const numericColumns = dataset?.profile.numeric_columns ?? [];
   const workspaceStatus = workspace
     ? "Local workspace ready"
-    : task === "workspace"
+    : isActive("workspace")
       ? "Restoring or starting workspace…"
       : "Workspace unavailable";
   const datasetLabel = dataset
@@ -492,6 +737,34 @@ export default function App() {
 
   const globalNotices = (
     <>
+      <OperationAnnouncer announcement={announcement} />
+      <ConfirmDialog
+        request={confirmation?.request ?? null}
+        onResolve={(confirmed) => {
+          confirmation?.resolve(confirmed);
+          setConfirmation(null);
+        }}
+      />
+      {unconfirmed ? (
+        <StatusBanner kind="error">
+          <strong>
+            The server did not confirm whether the {unconfirmed.kind === "dataset" ? "data upload" : "document replacement"}{" "}
+            finished.
+          </strong>{" "}
+          The results shown may be out of date, so other changes are paused until the server&apos;s state is checked.
+          <button className="button button--link" type="button" disabled={mutationBusy} onClick={recheckReplacement}>
+            Check server state
+          </button>
+        </StatusBanner>
+      ) : null}
+      {notice ? (
+        <StatusBanner kind="info">
+          {notice}
+          <button className="button button--link" type="button" onClick={() => setNotice(null)}>
+            Dismiss
+          </button>
+        </StatusBanner>
+      ) : null}
       {error ? (
         <StatusBanner kind="error" requestId={error.requestId}>
           <strong>{error.message}</strong>
@@ -499,7 +772,7 @@ export default function App() {
             <button
               className="button button--link"
               type="button"
-              disabled={task !== null}
+              disabled={busy}
               onClick={() => void initializeWorkspace()}
             >
               Retry workspace
@@ -508,6 +781,31 @@ export default function App() {
         </StatusBanner>
       ) : null}
 
+      {interrupted ? (
+        <StatusBanner kind="info">
+          <strong>{describeAssessment(interrupted)}</strong>
+          {interrupted.outcome === "unknown" ? (
+            <button
+              className="button button--link"
+              type="button"
+              disabled={busy}
+              onClick={() => void initializeWorkspace()}
+            >
+              Check again
+            </button>
+          ) : null}
+          <button
+            className="button button--link"
+            type="button"
+            onClick={() => {
+              setInterrupted(null);
+              writeOperationMarker(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </StatusBanner>
+      ) : null}
       {recovery?.kind === "restored" ? (
         <StatusBanner kind="info">
           <strong>Your workspace was restored.</strong> It was created{" "}
@@ -543,9 +841,9 @@ export default function App() {
       documentLabel={documentLabel}
       analysisLabel={analysisLabel}
       messageLabel={conversationLabel(conversationCounts)}
-      actionsDisabled={!workspace || task !== null}
-      exportBusy={task === "download"}
-      resetBusy={task === "reset"}
+      actionsDisabled={!workspace || busy}
+      exportBusy={isActive("export")}
+      resetBusy={isActive("reset")}
       onExport={() => void handleWorkspaceExport()}
       onReset={() => void handleReset()}
       retentionNotice={
@@ -565,7 +863,7 @@ export default function App() {
       {globalNotices}
 
       {activeSection === "overview" ? (
-        <div className="section-stack" id="overview-workspace">
+        <div className="section-stack" id="overview-workspace" aria-busy={mutationBusy || undefined}>
           <WorkspaceOverview
             workspace={workspace}
             dataset={dataset}
@@ -577,8 +875,8 @@ export default function App() {
           <ProductOverview />
           <DemoGuide
             workspaceReady={workspace !== null}
-            busy={task !== null}
-            loading={task === "upload" || task === "dataset" || task === "documents"}
+            busy={busy}
+            loading={isActive("upload") || isActive("dataset") || isActive("documents")}
             dataLoaded={dataset?.filename === DEMO_DATA_FILENAME}
             dataConfirmed={dataset?.filename === DEMO_DATA_FILENAME && dataset.status === "ready"}
             policyLoaded={documents?.filenames.includes(DEMO_POLICY_FILENAME) ?? false}
@@ -590,10 +888,10 @@ export default function App() {
       ) : null}
 
       {activeSection === "data" ? (
-        <div className="section-stack" id="data-workspace">
+        <div className="section-stack" id="data-workspace" aria-busy={mutationBusy || undefined}>
           <UploadStep
-            disabled={!workspace || task !== null}
-            busy={task === "upload" || task === "dataset"}
+            disabled={!workspace || busy}
+            busy={isActive("upload") || isActive("dataset")}
             sheets={sheets}
             file={drafts.datasetFile}
             sheet={drafts.sheet}
@@ -606,7 +904,7 @@ export default function App() {
           {dataset?.status === "review_required" ? (
             <SchemaReview
               dataset={dataset}
-              busy={task !== null}
+              busy={busy}
               draft={drafts.schema?.datasetId === dataset.id ? drafts.schema.mapping : null}
               onDraftChange={(mapping) => updateDraft("schema", { datasetId: dataset.id, mapping })}
               onConfirm={handleSchema}
@@ -626,7 +924,7 @@ export default function App() {
       ) : null}
 
       {activeSection === "analysis" ? (
-        <div className="section-stack" id="analysis-workspace">
+        <div className="section-stack" id="analysis-workspace" aria-busy={mutationBusy || undefined}>
           {dataset?.status === "ready" ? (
             <section className="panel" aria-labelledby="analysis-heading">
               <div className="section-heading">
@@ -645,7 +943,7 @@ export default function App() {
                     <input
                       type="checkbox"
                       checked={selectedFeatures.includes(column)}
-                      disabled={task !== null}
+                      disabled={busy}
                       onChange={(event) =>
                         setSelectedFeatures((current) =>
                           event.target.checked
@@ -669,17 +967,17 @@ export default function App() {
                   max="0.5"
                   step="0.01"
                   value={contamination}
-                  disabled={task !== null}
+                  disabled={busy}
                   onChange={(event) => setContamination(Number(event.target.value))}
                 />
               </div>
               <button
                 className="button button--primary"
                 type="button"
-                disabled={task !== null}
+                disabled={busy}
                 onClick={() => void handleAnalysis()}
               >
-                {task === "analysis"
+                {isActive("analysis")
                   ? "Running analysis…"
                   : analysis
                     ? "Run analysis again"
@@ -691,7 +989,7 @@ export default function App() {
           {analysis ? (
             <AnalysisDashboard
               analysis={analysis}
-              downloadBusy={task !== null}
+              downloadBusy={busy}
               onDownloadReport={handleReportDownload}
             />
           ) : null}
@@ -707,10 +1005,10 @@ export default function App() {
       ) : null}
 
       {activeSection === "documents" ? (
-        <div className="section-stack" id="documents-workspace">
+        <div className="section-stack" id="documents-workspace" aria-busy={mutationBusy || undefined}>
           <DocumentUpload
-            disabled={!workspace || task !== null}
-            busy={task === "documents"}
+            disabled={!workspace || busy}
+            busy={isActive("documents")}
             collection={documents}
             files={drafts.documentFiles}
             onFilesChange={(files) => updateDraft("documentFiles", files)}
@@ -720,12 +1018,13 @@ export default function App() {
       ) : null}
 
       {activeSection === "ask" ? (
-        <div className="section-stack" id="ask-workspace">
+        <div className="section-stack" id="ask-workspace" aria-busy={mutationBusy || undefined}>
           {workspace ? (
             <ConversationPanel
               workspace={workspace}
               messages={messages}
-              busy={task !== null}
+              busy={busy}
+              asking={isActive("conversation")}
               hasContext={dataset?.status === "ready" || documents !== null}
               demo={{
                 dataReady:

@@ -101,11 +101,16 @@ describe("AuthGate", () => {
 
   it("signs out, clears the CSRF token, and removes the application", async () => {
     vi.mocked(getBrowserSession).mockResolvedValue(session);
+    window.sessionStorage.setItem(
+      "conversational-bi.operation-in-flight",
+      JSON.stringify({ kind: "upload", workspaceId: "workspace-1", startedAt: Date.now() }),
+    );
     renderGate();
 
     await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
 
     expect(endBrowserSession).toHaveBeenCalledOnce();
+    expect(window.sessionStorage.getItem("conversational-bi.operation-in-flight")).toBeNull();
     expect(await screen.findByText("You have been signed out.")).toBeInTheDocument();
     expect(setCsrfToken).toHaveBeenLastCalledWith(null);
     expect(screen.queryByText("protected application")).not.toBeInTheDocument();

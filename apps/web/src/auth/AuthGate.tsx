@@ -9,6 +9,7 @@ import {
   setUnauthorizedHandler,
 } from "../api/client";
 import { StatusBanner } from "../components/StatusBanner";
+import { writeOperationMarker } from "../workspace/operationMarker";
 
 const LOGIN_PATH = "/api/v1/auth/login";
 
@@ -102,6 +103,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     try {
       await endBrowserSession();
       setCsrfToken(null);
+      writeOperationMarker(null);
       setState({ kind: "signed-out", loginAvailable: true, notice: SIGNED_OUT_NOTICE });
     } catch (caught) {
       setSignOutError(asClientError(caught));
