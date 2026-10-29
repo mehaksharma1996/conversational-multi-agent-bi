@@ -110,6 +110,10 @@ persistent live region.
 Decisions marked **[approval]** change behaviour or scope and need maintainer sign-off before
 implementation. The others follow from existing contracts.
 
+**Maintainer approval (2026-10-29).** D2 and R1 are approved as proposed: the hook ships now, and
+real-stack job coverage comes with UI-6b. D4 and D5 are approved as written. D6 is approved, with
+the marker holding only the operation kind, the workspace ID, and the start time.
+
 - **D1. Operation model.** Add `apps/web/src/operations/` with a pure reducer and a hook. Each
   operation is `{ id, kind, lane, phase, progress?, error?, startedAt }`.
   - `phase` is `queued | running | cancelling | succeeded | failed | cancelled | interrupted`.
