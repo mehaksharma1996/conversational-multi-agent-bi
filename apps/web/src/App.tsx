@@ -32,6 +32,7 @@ import { AnalysisDashboard } from "./components/AnalysisDashboard";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { DemoGuide } from "./components/DemoGuide";
 import { DocumentUpload } from "./components/DocumentUpload";
+import { OperationAnnouncer, type Announcement } from "./components/OperationAnnouncer";
 import { ProductOverview } from "./components/ProductOverview";
 import { SchemaReview } from "./components/SchemaReview";
 import { StatusBanner } from "./components/StatusBanner";
@@ -47,7 +48,8 @@ import {
   DEMO_POLICY_FILENAME,
   fetchDemoFile,
 } from "./demo/retailDemo";
-import { useOperations } from "./operations/useOperations";
+import { announcementFor } from "./operations/announcements";
+import { useOperations, type OperationEvent } from "./operations/useOperations";
 import { useWorkflowDrafts } from "./workspace/drafts";
 import {
   recoverWorkspace,
@@ -78,7 +80,12 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
   const [contamination, setContamination] = useState(0.05);
-  const { begin, mutationBusy, readBusy, isActive } = useOperations();
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const announce = useCallback((event: OperationEvent) => {
+    const text = announcementFor(event);
+    if (text) setAnnouncement((current) => ({ text, sequence: (current?.sequence ?? 0) + 1 }));
+  }, []);
+  const { begin, mutationBusy, readBusy, isActive } = useOperations({ onEvent: announce });
   const busy = mutationBusy || readBusy;
   const [error, setError] = useState<ApiClientError | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
@@ -496,6 +503,7 @@ export default function App() {
 
   const globalNotices = (
     <>
+      <OperationAnnouncer announcement={announcement} />
       {error ? (
         <StatusBanner kind="error" requestId={error.requestId}>
           <strong>{error.message}</strong>
@@ -569,7 +577,7 @@ export default function App() {
       {globalNotices}
 
       {activeSection === "overview" ? (
-        <div className="section-stack" id="overview-workspace">
+        <div className="section-stack" id="overview-workspace" aria-busy={mutationBusy || undefined}>
           <WorkspaceOverview
             workspace={workspace}
             dataset={dataset}
@@ -594,7 +602,7 @@ export default function App() {
       ) : null}
 
       {activeSection === "data" ? (
-        <div className="section-stack" id="data-workspace">
+        <div className="section-stack" id="data-workspace" aria-busy={mutationBusy || undefined}>
           <UploadStep
             disabled={!workspace || busy}
             busy={isActive("upload") || isActive("dataset")}
@@ -630,7 +638,7 @@ export default function App() {
       ) : null}
 
       {activeSection === "analysis" ? (
-        <div className="section-stack" id="analysis-workspace">
+        <div className="section-stack" id="analysis-workspace" aria-busy={mutationBusy || undefined}>
           {dataset?.status === "ready" ? (
             <section className="panel" aria-labelledby="analysis-heading">
               <div className="section-heading">
@@ -711,7 +719,7 @@ export default function App() {
       ) : null}
 
       {activeSection === "documents" ? (
-        <div className="section-stack" id="documents-workspace">
+        <div className="section-stack" id="documents-workspace" aria-busy={mutationBusy || undefined}>
           <DocumentUpload
             disabled={!workspace || busy}
             busy={isActive("documents")}
@@ -724,7 +732,7 @@ export default function App() {
       ) : null}
 
       {activeSection === "ask" ? (
-        <div className="section-stack" id="ask-workspace">
+        <div className="section-stack" id="ask-workspace" aria-busy={mutationBusy || undefined}>
           {workspace ? (
             <ConversationPanel
               workspace={workspace}

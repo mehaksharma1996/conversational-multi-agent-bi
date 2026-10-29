@@ -80,7 +80,7 @@ afterEach(() => {
   window.history.replaceState(null, "", "#overview");
 });
 
-// Guards for the per-operation model in App. They also pass on the single-\`task\` code, because every
+// Guards for the per-operation model in App. They also pass on the single-`task` code, because every
 // control is disabled while anything runs and React re-renders between discrete clicks; overlapping
 // operations are covered by the reducer tests in operations/model.test.ts.
 describe("operation state", () => {
@@ -100,6 +100,27 @@ describe("operation state", () => {
     expect(askQuestion).toHaveBeenCalledTimes(1);
     answer.resolve({ ...messageFixture, id: "msg-new" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Ask workbench" })).toBeInTheDocument());
+  });
+
+  it("announces a question's start and end in one persistent live region and marks the section busy", async () => {
+    window.history.replaceState(null, "", "#ask");
+    const answer = deferred<Message>();
+    vi.mocked(askQuestion).mockReturnValue(answer.promise);
+    render(<App />);
+
+    const announcer = screen.getByTestId("operation-announcer");
+    expect(announcer).toHaveAttribute("aria-live", "polite");
+    await userEvent.type(await screen.findByLabelText("Business question"), "How many rows?");
+    fireEvent.click(screen.getByRole("button", { name: "Ask workbench" }));
+    await waitFor(() =>
+      expect(announcer).toHaveTextContent("Question started. This can take up to two minutes."),
+    );
+    expect(document.getElementById("ask-workspace")).toHaveAttribute("aria-busy", "true");
+
+    answer.resolve({ ...messageFixture, id: "msg-done" });
+    await waitFor(() => expect(announcer).toHaveTextContent("Question finished."));
+    expect(screen.getByTestId("operation-announcer")).toBe(announcer);
+    expect(document.getElementById("ask-workspace")).not.toHaveAttribute("aria-busy");
   });
 
   it("two clicks on a report download create one report", async () => {
