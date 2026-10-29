@@ -51,6 +51,55 @@ draft is cleared by workspace reset.
 Browsers cannot restore a file input's selection, so a remounted upload control names the kept
 file(s) beside the input with a "Clear selection" action; choosing a file replaces the selection.
 
+## Operation state, replacement, and recovery (UI-2, #132)
+
+Design record: `docs/agents/briefs/132-ui2-operation-state-recovery.md`.
+
+- **Operations.** `src/operations/` gives every operation its own record (`queued`, `running`,
+  `cancelling`, then `succeeded`, `failed`, `cancelled`, or `interrupted`), so one finishing never
+  clears another's busy state.
+  - Two lanes: `mutation` (anything that changes workspace resources; at most one, matching the
+    non-idempotent API) and `read` (report and result downloads, and workspace export).
+  - A second request in a busy lane is refused, not queued.
+  - The workbench still disables every action while any operation runs, so lanes do not overlap
+    in today's UI. The model is what lets UI-6b's jobs run beside other work.
+- **Feedback.** One always-mounted polite live region (`OperationAnnouncer`) announces start,
+  finish, failure, cancellation, and interruption.
+  - Slow synchronous requests say they can take up to two minutes, because aborting a fetch would
+    not stop the server; synchronous requests have no Cancel button.
+  - The active section is `aria-busy` while a mutation runs. Errors stay `role="alert"` banners.
+- **Confirmation.** `ConfirmDialog` is a native `<dialog>` opened with `showModal()`, so the rest of
+  the page is inert.
+  - Cancel is focused first, Escape cancels, and focus returns to the opener, or to the section
+    heading if the opener is gone.
+  - It asks before replacing a dataset or documents, before a schema confirmation or analysis
+    re-run abandons pending SQL approvals, and before reset.
+  - Each dialog lists the consequences, including that the server deletes replaced documents and
+    that clearing the conversation does not run, approve, or cancel pending SQL on the server.
+- **Replacement.** Results stay on screen until a replacement succeeds. After a failure the client
+  reads the workspace overview and compares resource IDs, because a timed-out request may still
+  have completed on the server. If the overview cannot be read, all changes pause until
+  **Check server state** succeeds. A workspace epoch drops responses that belong to an earlier
+  workspace. This is client-side consistency, not a server transaction (see the brief's backend
+  follow-ups).
+- **Reload.** While a workspace-changing request runs, sessionStorage holds only `{kind,
+  workspaceId, startedAt}`. After a reload the marker is compared with the server's `created_at`
+  times:
+  - the operation "appears to have completed" when a matching resource is newer;
+  - otherwise its outcome "cannot be confirmed";
+  - a marker for any other workspace is never applied to the restored one.
+
+  Nothing is retried. Clock skew between browser and server can misclassify an operation, so the
+  wording stays tentative and shows both times.
+- **Jobs.** `useJob` polls `/api/v1/jobs/{id}` one request at a time with 1–10 s exponential
+  backoff, and always stops: at a terminal status, on 404, on 401/403, after five transient
+  failures, or after 200 reads.
+  - Jobs are process-local, so after an API restart a 404 means the outcome is unknown, never
+    success.
+  - Cancellation reports requested, acknowledged, completed, or too late, and never claims an
+    immediate stop.
+  - `JobProgress` renders the status for UI-6b.
+
 ## Workspace context
 
 The context bar reports only state already held by the client:

@@ -7,6 +7,7 @@ import {
   ApiClientError,
   createDataset,
   deleteWorkspace,
+  downloadWorkspaceExport,
   getAnalysis,
   getConversation,
   getDataset,
@@ -49,6 +50,7 @@ vi.mock("./api/client", async (importOriginal) => {
     uploadDocuments: vi.fn(),
     runAnalysis: vi.fn(),
     deleteWorkspace: vi.fn(),
+    downloadWorkspaceExport: vi.fn(),
   };
 });
 
@@ -240,6 +242,65 @@ describe("other confirmations", () => {
     const dialog = await screen.findByRole("dialog", { name: "Delete this workspace?" });
     expect(dialog).toHaveTextContent("1 SQL request waiting for approval are deleted with it and will never run.");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(deleteWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("lanes and lasting blocks", () => {
+  it("while a workspace export runs, data actions wait, and only the export shows as busy", async () => {
+    let finish!: (blob: Blob) => void;
+    vi.mocked(downloadWorkspaceExport).mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    // jsdom has no object URLs; the saved file itself is not under test here.
+    Object.assign(URL, { createObjectURL: vi.fn(() => "blob:export"), revokeObjectURL: vi.fn() });
+    const user = await openApp("#data");
+    await user.upload(await screen.findByLabelText("CSV or Excel file"), csv());
+    await user.click(screen.getByRole("button", { name: "Export workspace" }));
+
+    expect(await screen.findByRole("button", { name: "Preparing workspace export" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Upload and profile" })).toBeDisabled();
+    expect(screen.getByTestId("operation-announcer")).toHaveTextContent("Workspace export started.");
+    expect(document.getElementById("data-workspace")).not.toHaveAttribute("aria-busy");
+
+    finish(new Blob(["zip"]));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Upload and profile" })).toBeEnabled());
+    expect(screen.getByTestId("operation-announcer")).toHaveTextContent("Workspace export finished.");
+    expect(uploadTabular).not.toHaveBeenCalled();
+  });
+
+  it("an unconfirmed replacement stays blocking across navigation and other dismissals", async () => {
+    vi.mocked(uploadTabular).mockRejectedValue(new ApiClientError("Network error.", "network_error"));
+    const user = await openApp("#data");
+    vi.mocked(getWorkspaceOverview).mockRejectedValue(new ApiClientError("Network error.", "network_error"));
+    const { dialog } = await startUpload(user);
+    await user.click(within(dialog).getByRole("button", { name: "Upload and replace" }));
+    await screen.findByText(/The server did not confirm whether the data upload/);
+
+    for (const dismiss of screen.queryAllByRole("button", { name: "Dismiss" })) await user.click(dismiss);
+    await goTo(user, /Ask/);
+    expect(screen.getByLabelText("Business question")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reset workspace" })).toBeDisabled();
+    await goTo(user, /Data/);
+    expect(screen.getByText(/The server did not confirm whether the data upload/)).toBeVisible();
+
+    // A failed check keeps the block; only a successful read lifts it.
+    await user.click(screen.getByRole("button", { name: "Check server state" }));
+    expect(await screen.findByText(/The server did not confirm/)).toBeVisible();
+    vi.mocked(getWorkspaceOverview).mockResolvedValue(overview);
+    await user.click(screen.getByRole("button", { name: "Check server state" }));
+    await waitFor(() => expect(screen.queryByText(/did not confirm/)).toBeNull());
+    expect(screen.getByRole("button", { name: "Reset workspace" })).toBeEnabled();
+  });
+
+  it("a dismissed confirmation sends no request at all", async () => {
+    const user = await openApp("#documents");
+    await user.upload(await screen.findByLabelText("PDF documents"), pdf());
+    await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
+    await screen.findByRole("dialog", { name: "Replace the indexed documents?" });
+    await user.keyboard("{Escape}");
+    await goTo(user, /Overview/);
+    await user.click(screen.getByRole("button", { name: "Reset workspace" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Delete this workspace?" })).getByRole("button", { name: "Cancel" }));
+    expect(uploadDocuments).not.toHaveBeenCalled();
     expect(deleteWorkspace).not.toHaveBeenCalled();
   });
 });

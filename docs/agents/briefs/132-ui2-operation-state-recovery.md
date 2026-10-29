@@ -310,6 +310,51 @@ Slices, each committed separately and each keeping `check_all --full` green:
   real-stack job coverage comes with UI-6b (R1). Nothing here verifies real restart recovery of
   jobs.
 
+## Implemented semantics: S7 journeys, coverage, and documentation
+
+**Coverage by layer** (counts as of S7; all deterministic, with no fixed sleeps):
+
+| Layer | What runs | UI-2 coverage |
+|---|---|---|
+| Unit and component (Vitest, jsdom) | Reducer, hooks, and `App` with a mocked API client | Lanes and refusal; per-operation finish; announcements and `aria-busy`; dialog consequences, Cancel-first focus, Escape, and focus return; keep-until-success; reconciliation (unchanged, adopted, or unconfirmed, with the block surviving navigation and other dismissals); dismissed dialogs send nothing; the marker's content, validation, and assessment; reload outcomes; sign-out clearing; `useJob` (22 tests with fake timers) and `JobProgress` |
+| Mocked Playwright (Chromium, intercepted API) | Production bundle, real browser | Modal `:modal`, inert background, Tab containment, and Escape with focus return; axe with the dialog open; failed replacement reconciliation with axe; reload with a marker from another workspace, with axe |
+| Scripted real stack (production API code, scripted provider, Chromium) | Real frontend and backend | Reset and replacement dialogs; a refused upload replaces nothing; a reload during real document indexing (the request is dropped by the navigation) reports an unconfirmed outcome and retries nothing; a confirmed document replacement puts the new collection in use, clears the conversation, and survives a reload; axe |
+
+**Not covered, and not claimed.**
+- Job polling against a real job, and job loss after a real API restart (no screen starts a job
+  until UI-6b).
+- Concurrent lanes in the UI: actions are disabled while anything runs, so the overlap is covered
+  only by the reducer tests.
+- Responsive layout of the dialog: it uses `min(34rem, 100vw - 2rem)`, and the existing
+  phone-width journeys pass, but no dialog-specific phone test exists.
+- Reduced motion: none of UI-2's additions animate.
+
+**Found while writing the real-stack reload journey.** Releasing a held request with
+`page.unroute` lets it reach the server. The app then correctly reported "appears to have
+completed", because the upload really had finished. The journey now keeps the route through the
+reload, so the navigation drops the request, as a real reload does.
+
+## Acceptance mapping (#132)
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| Typed operation model (idle, queued, running with progress, cancelling, terminal) replaces the global `task` | Met | `operations/model.ts`, `useOperations.ts`, and their tests; `App.tsx` has no `task` |
+| Poll tenant-scoped jobs with backoff; announce changes through a live region | Met for the hook; no consuming screen yet | `useJob` and its tests; `OperationAnnouncer` and its tests. Browser and real-stack job coverage is deferred to UI-6b (R1, approved) |
+| Replacement confirms first and clears dependent state without orphans | Met | S4 Vitest, mocked Playwright, and real-stack journeys |
+| Recover after reload or API restart, including interrupted operations; cancel where the API supports it | Met for synchronous operations and the job hook | Reload marker (Vitest, mocked, real stack); existing real-stack API-restart journey; `useJob` 404 → unknown and cancellation states (Vitest only) |
+| Concurrent operations cannot overwrite each other's state; reload during a job restores truthful state | Met in the model; reload truthfulness verified for synchronous operations | Reducer and hook tests; reload journeys. A reload during a *job* is untestable until a screen starts jobs |
+| axe and keyboard checks pass; Vitest, mocked Playwright, and scripted real-stack tests cover the new states | Met, except job states in the browser | See the coverage table |
+| `check_all --full` passes; no evaluation case changes | See the final verification in the PR | `evals/` untouched |
+
+**Backend follow-ups (separate issues; not in UI-2):**
+1. Idempotency keys for tabular and document uploads, so a retry after a timeout cannot duplicate
+   work.
+2. An expected-resource precondition for document replacement (for example `If-Match` with the
+   current collection ID), so the server only replaces the collection the client saw.
+3. Crash consistency of the Chroma swap in `vector_store.replace`: today it deletes the canonical
+   collection and then renames the staging one. A crash between the two leaves no index; a
+   rename-then-delete or versioned-pointer promotion would close the gap.
+
 ## Do not touch
 
 - API routes, OpenAPI, `schema.d.ts`, backend packages, the evaluation baselines, and the
