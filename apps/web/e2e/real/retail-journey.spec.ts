@@ -381,12 +381,23 @@ test("network failures and slow answers: the question is kept, and repeats are n
   await goTo(page, "Ask");
   const messages = "**/api/v1/conversations/*/messages";
 
-  await page.route(messages, (route) => route.abort("failed"));
+  // Both the question and the read-back fail: the outcome is unknown, so asking pauses (UI-6a D2).
+  // A predicate matches the paged GET too, whose query string the glob above does not cover.
+  const anyMessages = (url: URL) => url.pathname.endsWith("/messages");
+  await page.route(anyMessages, (route) => route.abort("failed"));
   await page.getByRole("textbox", { name: "Business question" }).fill(TOTAL);
   await page.getByRole("button", { name: "Ask workbench" }).click();
-  await expect(page.getByRole("alert")).toContainText("Could not reach the server");
+  await expect(page.getByRole("alert").filter({ hasText: "Could not reach the server" })).toBeVisible();
+  const check = page.getByRole("button", { name: "Check server state" });
+  await expect(check).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Business question" })).toHaveValue(TOTAL);
-  await page.unroute(messages);
+  await expect(page.getByRole("textbox", { name: "Business question" })).toBeDisabled();
+  await page.unroute(anyMessages);
+  // The real server never received the question, so the check finds nothing and asking resumes.
+  await check.click();
+  await expect(page.getByRole("article", { name: "Question failed" })).toContainText("Nothing was saved");
+  await expect(page.getByRole("textbox", { name: "Business question" })).toBeEnabled();
+  await expect(page.getByRole("textbox", { name: "Business question" })).toHaveValue(TOTAL);
 
   let posts = 0;
   await page.route(messages, async (route) => {
@@ -406,6 +417,32 @@ test("network failures and slow answers: the question is kept, and repeats are n
   });
   expect(posts).toBe(1);
   expect(await messageCount(page)).toBe(before + 1);
+  await page.unroute(messages);
+});
+
+test("a connection lost after the server answered is reconciled: the stored answer is shown, nothing is re-sent", async ({
+  page,
+}) => {
+  await open(page);
+  await goTo(page, "Ask");
+  const messages = "**/api/v1/conversations/*/messages";
+  let posts = 0;
+  // The real API answers and stores the message; the browser then sees a dropped connection.
+  await page.route(messages, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    posts += 1;
+    await route.fetch();
+    await route.abort("failed");
+  });
+  const before = await messageCount(page);
+  await page.getByRole("textbox", { name: "Business question" }).fill(TOTAL);
+  await page.getByRole("button", { name: "Ask workbench" }).click();
+
+  await expect(page.getByText(/server answered despite the connection error/)).toBeVisible({ timeout: 15_000 });
+  await expect(latest(page).getByRole("region", { name: /Query result/ })).toContainText("1,625,730.59");
+  expect(await messageCount(page)).toBe(before + 1);
+  await expect(page.getByRole("textbox", { name: "Business question" })).toHaveValue("");
+  expect(posts).toBe(1);
   await page.unroute(messages);
 });
 
@@ -478,7 +515,7 @@ test("after the API restarts, data and history return and a pending approval is 
   await expect(page.getByText("Your workspace was restored.")).toBeVisible({ timeout: 60_000 });
   expect(await messageCount(page)).toBe(before);
   const card = latest(page);
-  await expect(card.getByText("Not executed")).toBeVisible();
+  await expect(card.getByText("Cancelled by restart")).toBeVisible();
   await expect(card).toContainText(/restart/i);
   await expect(card.getByRole("button", { name: "Approve SQL" })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Business question" })).toBeEnabled();

@@ -25,4 +25,10 @@ describe("operation announcements", () => {
     expect(announcementFor({ kind: "workspace", phase: "succeeded" })).toBeNull();
     expect(announcementFor({ kind: "workspace", phase: "failed" })).toContain("failed");
   });
+
+  it("leaves a question's outcome to the Ask workspace, which names what actually happened", () => {
+    expect(announcementFor({ kind: "conversation", phase: "running" })).toContain("Question started");
+    expect(announcementFor({ kind: "conversation", phase: "succeeded" })).toBeNull();
+    expect(announcementFor({ kind: "conversation", phase: "failed" })).toBeNull();
+  });
 });
