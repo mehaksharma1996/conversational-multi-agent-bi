@@ -575,12 +575,12 @@ export default function App() {
   // Reads the conversation back after an uncertain submission. A stored answer is adopted, never
   // re-asked; no evidence means nothing was saved; an unreadable server keeps the composer locked.
   const reconcileQuestion = async (pending: UnconfirmedQuestion): Promise<AskResult> => {
-    setQuestionUnconfirmed(pending);
     let serverMessages: Message[];
     try {
       serverMessages = await listMessages(pending.conversationId);
     } catch {
       if (pending.epoch !== epoch.current) return "discard";
+      setQuestionUnconfirmed(pending);
       setLocalEntry(null);
       announce("The server did not confirm whether the question was answered. Asking again is paused.");
       return "restore";
@@ -652,15 +652,21 @@ export default function App() {
       announce(outcomeAnnouncement(message));
       return "answered";
     } catch (caught) {
-      operation.finish("failed");
-      if (from !== epoch.current) return "discard";
+      if (from !== epoch.current) {
+        operation.finish("failed");
+        return "discard";
+      }
       const failure = normalizeError(caught);
       setError(failure);
       // A refusal (4xx) is definite. A lost connection, timeout, or 5xx after the question was sent
       // may still have been answered, so the server is asked before the question can be sent again.
+      // The operation stays open during that read, so nothing can be asked in the meantime.
       if (failure.retryable && sentTo) {
-        return reconcileQuestion({ question, conversationId: sentTo, startedAt, knownIds, epoch: from });
+        const result = await reconcileQuestion({ question, conversationId: sentTo, startedAt, knownIds, epoch: from });
+        operation.finish(result === "answered" ? "succeeded" : "failed");
+        return result;
       }
+      operation.finish("failed");
       setLocalEntry({ kind: "failed", question, reason: failure.message, requestId: failure.requestId });
       announce("Question failed. Nothing was saved; the question is back in the box.");
       return "restore";

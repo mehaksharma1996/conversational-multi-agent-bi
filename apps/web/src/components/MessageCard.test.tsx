@@ -75,7 +75,7 @@ describe("citations", () => {
     expect(passage?.closest("details")).toHaveAttribute("open");
 
     const back = screen.getAllByRole("link", { name: /Back to the answer/ });
-    expect(back.map((link) => link.textContent)).toEqual(["Back to the answer (Source 1)"]);
+    expect(back.map((link) => link.textContent)).toEqual(["Back to the answer (passage 1)"]);
     fireEvent.click(back[0] as HTMLElement);
     expect(document.getElementById("cite-m-rag-1")).toHaveFocus();
   });
@@ -93,7 +93,7 @@ describe("citations", () => {
 describe("exchange presentation", () => {
   it("gives each exchange a heading with its position and outcome", () => {
     card(messageFixture, 2, 3);
-    expect(screen.getByRole("heading", { level: 3, name: "Question 2 of 3: Answered" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Question 2 of 3" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 4, name: "Generated SQL" })).toBeInTheDocument();
   });
 

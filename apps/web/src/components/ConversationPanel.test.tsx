@@ -85,8 +85,8 @@ describe("history", () => {
     expect(items[1]).toHaveTextContent("Second?");
     expect(items[2]).toHaveTextContent("Third?");
     expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual([
-      "Question 1 of 2: Answered",
-      "Question 2 of 2: Answered",
+      "Question 1 of 2",
+      "Question 2 of 2",
     ]);
   });
 

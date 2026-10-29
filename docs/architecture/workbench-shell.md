@@ -100,6 +100,51 @@ Design record: `docs/agents/briefs/132-ui2-operation-state-recovery.md`.
     immediate stop.
   - `JobProgress` renders the status for UI-6b.
 
+## Ask workspace (UI-6a, #154)
+
+Design record: `docs/agents/briefs/154-ui6a-ask-conversations.md`.
+
+- **Lifecycle.** `src/conversation/thread.ts` holds the one outcome vocabulary: answered, out of
+  scope (`unsupported` route), investigation proposed, awaiting approval, not executed, and
+  cancelled by restart. Chips, exchange headings, and announcements all use it.
+  - The server stores a message only when a question succeeds. The thread therefore adds at most one
+    memory-only entry: **Sending** while the request runs, or **Failed, not saved** after a definite
+    failure, with the text back in the composer. Nothing about a question is written to browser
+    storage.
+- **No duplicate questions.** Messages are not idempotent.
+  - After a lost connection, a timeout, or a 5xx on a question that was sent, the client keeps the
+    question operation open and re-reads the conversation.
+  - **Answer found.** A new message with the same text, created after the request started, is
+    adopted and the question is not sent again.
+  - **Nothing found.** The question is reported as not saved.
+  - **Read failed.** Asking pauses behind **Check server state**.
+  - A failed conversation start is definite, because nothing was asked.
+- **Stale responses.** Question and approval handlers drop a response from an earlier workspace
+  epoch, or one for another conversation or message.
+- **History.** The history is an ordered list in server order. Each exchange has a visually hidden
+  `h3` ("Question 2 of 5") for heading navigation, an outcome chip, and the server's `created_at`
+  as a `<time>`. A complete SQL answer whose rows the server evicted (only the newest answers keep
+  rows) says so and offers no export.
+- **Citations.**
+  - A "Source N" with a retrieved passage is a link named with the file and page. It opens and
+    focuses the passage, which links back to the first citing link.
+  - A "Source N" without a passage is marked "(not among the retrieved passages)" and is never
+    linked.
+  - Only server-returned citation strings are shown. The original PDF is not served.
+- **SQL approval.**
+  - The decision group describes each choice's consequence.
+  - After a failure the client re-reads the messages and explains the server's answer: already
+    decided or cancelled (409), applied safely with nothing executed (422), not allowed (403), or
+    gone (404).
+  - After a lost connection, a decision the server applied is shown. One still pending keeps the
+    controls disabled until **Check again** reads the server, because the first request may still be
+    running.
+  - The click is never authority: the server re-checks the request, the policy, and the read-only
+    guards.
+  - This covers v1 message approval only; investigation SQL-wave approval belongs to UI-6b.
+- **Announcements.** The panel has no live region of its own. Question and decision outcomes go
+  once through `OperationAnnouncer` in the outcome's own words, replacing the generic "finished".
+
 ## Workspace context
 
 The context bar reports only state already held by the client:

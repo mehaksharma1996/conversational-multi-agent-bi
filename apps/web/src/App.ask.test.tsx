@@ -192,6 +192,24 @@ describe("asking a question", () => {
     expect(askQuestion).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the question busy while the server is read back, without claiming the outcome is unconfirmed", async () => {
+    vi.mocked(askQuestion).mockRejectedValue(networkError());
+    render(<App />);
+    await screen.findByLabelText("Business question");
+    const read = deferred<Message[]>();
+    vi.mocked(listMessages).mockReturnValue(read.promise);
+    await ask();
+
+    await waitFor(() => expect(listMessages).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText("Business question")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Analyzing question…" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Check server state" })).not.toBeInTheDocument();
+
+    read.resolve([messageFixture]);
+    expect(await screen.findByRole("article", { name: "Question failed" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Business question")).toBeEnabled();
+  });
+
   it("a failed conversation start means nothing was asked, so no server check is needed", async () => {
     mockWorkspace({ withConversation: false });
     vi.mocked(createConversation).mockRejectedValue(networkError());

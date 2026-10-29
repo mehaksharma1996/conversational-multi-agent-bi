@@ -150,7 +150,7 @@ export function MessageCard({
   return (
     <div className="message-pair" data-message-id={message.id}>
       <h3 className="sr-only">
-        Question {position} of {total}: {OUTCOME_LABEL[outcome]}
+        Question {position} of {total}
       </h3>
       <article className="chat-message chat-message--user">
         <p className="message-label">You</p>
@@ -343,7 +343,7 @@ export function MessageCard({
                         returnToCitation(event, citationElementId(message.id, source.number as number))
                       }
                     >
-                      Back to the answer<span className="sr-only"> (Source {source.number})</span>
+                      Back to the answer<span className="sr-only"> (passage {source.number})</span>
                     </a>
                   ) : null}
                 </li>
