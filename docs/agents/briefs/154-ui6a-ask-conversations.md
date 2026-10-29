@@ -103,6 +103,10 @@ rules, with no API change.
 Decisions marked **[approval]** change behaviour or scope and need maintainer sign-off before
 implementation. The others follow from existing contracts.
 
+**Maintainer approval (2026-10-29).** D2, D3, and D8 are approved as written: reconciliation with
+the unconfirmed lock, client-only sending and failed entries, and approval without an extra
+confirmation dialog.
+
 - **D1. One lifecycle module.** Add `apps/web/src/conversation/thread.ts`, a pure module with no
   React:
   - `outcomeOf(message)` returns `answered | out_of_scope | awaiting_approval | not_executed`.
