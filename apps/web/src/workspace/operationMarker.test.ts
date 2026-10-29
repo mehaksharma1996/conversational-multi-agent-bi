@@ -10,6 +10,7 @@ import {
   assessMarker,
   describeAssessment,
   readOperationMarker,
+  recordOperationEvent,
   writeOperationMarker,
   type OperationMarker,
 } from "./operationMarker";
@@ -105,5 +106,24 @@ describe("assessing an interrupted operation against the server", () => {
     const text = describeAssessment(assessMarker(marker("conversation"), restored()));
     expect(text).toContain("cannot be confirmed");
     expect(text).toContain("never retried automatically");
+  });
+});
+
+describe("recordOperationEvent", () => {
+  it("writes the marker while a marked operation runs and clears it at any terminal phase", () => {
+    for (const terminal of ["succeeded", "failed", "cancelled", "interrupted"]) {
+      recordOperationEvent({ kind: "documents", phase: "running" }, workspaceFixture.id, START);
+      expect(readOperationMarker(START + 1)).toEqual(marker("documents"));
+      recordOperationEvent({ kind: "documents", phase: "cancelling" }, workspaceFixture.id, START);
+      expect(readOperationMarker(START + 1)).not.toBeNull();
+      recordOperationEvent({ kind: "documents", phase: terminal }, workspaceFixture.id, START);
+      expect(window.sessionStorage.getItem(KEY)).toBeNull();
+    }
+  });
+
+  it("ignores unmarked kinds and never writes without a workspace", () => {
+    recordOperationEvent({ kind: "download", phase: "running" }, workspaceFixture.id, START);
+    recordOperationEvent({ kind: "upload", phase: "running" }, null, START);
+    expect(window.sessionStorage.getItem(KEY)).toBeNull();
   });
 });

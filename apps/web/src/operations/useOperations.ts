@@ -22,6 +22,17 @@ export interface OperationHandle {
   finish(phase: TerminalPhase): void;
 }
 
+/**
+ * Ends `operation` as cancelled when its response was issued for an earlier workspace (`issuedIn` is
+ * the workspace epoch the request started in). Returns true when the caller must drop the response.
+ * Only this operation's own record finishes, so a newer operation is never affected.
+ */
+export function discardStale(operation: OperationHandle, issuedIn: number, current: number): boolean {
+  if (issuedIn === current) return false;
+  operation.finish("cancelled");
+  return true;
+}
+
 export interface OperationEvent {
   kind: OperationKind;
   phase: ActivePhase | TerminalPhase;

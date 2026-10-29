@@ -10,7 +10,7 @@ import {
   reduceOperations,
   type OperationState,
 } from "./model";
-import { useOperations, type OperationEvent } from "./useOperations";
+import { discardStale, useOperations, type OperationEvent } from "./useOperations";
 
 function start(state: OperationState, id: string, kind: Parameters<typeof laneOf>[0]) {
   return reduceOperations(state, { type: "start", id, kind, startedAt: 0 });
@@ -119,5 +119,59 @@ describe("useOperations", () => {
       "download:succeeded",
       "conversation:failed",
     ]);
+  });
+});
+
+describe("discardStale", () => {
+  it("finishes a stale operation as cancelled, so the lane is free again", () => {
+    const onEvent = vi.fn<(event: OperationEvent) => void>();
+    const { result } = renderHook(() => useOperations({ onEvent }));
+    let upload: ReturnType<typeof result.current.begin> = null;
+    act(() => {
+      upload = result.current.begin("upload");
+    });
+    let dropped = false;
+    act(() => {
+      if (upload) dropped = discardStale(upload, 1, 2);
+    });
+    expect(dropped).toBe(true);
+    expect(result.current.mutationBusy).toBe(false);
+    expect(onEvent.mock.calls.map(([event]) => `${event.kind}:${event.phase}`)).toEqual([
+      "upload:running",
+      "upload:cancelled",
+    ]);
+  });
+
+  it("leaves a current operation running", () => {
+    const { result } = renderHook(() => useOperations());
+    let upload: ReturnType<typeof result.current.begin> = null;
+    act(() => {
+      upload = result.current.begin("upload");
+    });
+    let dropped = true;
+    act(() => {
+      if (upload) dropped = discardStale(upload, 3, 3);
+    });
+    expect(dropped).toBe(false);
+    expect(result.current.isActive("upload")).toBe(true);
+  });
+
+  it("never touches a newer operation", () => {
+    const { result } = renderHook(() => useOperations());
+    let old: ReturnType<typeof result.current.begin> = null;
+    let newer: ReturnType<typeof result.current.begin> = null;
+    act(() => {
+      old = result.current.begin("documents");
+    });
+    act(() => {
+      if (old) discardStale(old, 1, 2);
+      newer = result.current.begin("upload");
+    });
+    act(() => {
+      if (old) discardStale(old, 1, 2);
+    });
+    expect(newer).not.toBeNull();
+    expect(result.current.isActive("upload")).toBe(true);
+    expect(result.current.mutationBusy).toBe(true);
   });
 });

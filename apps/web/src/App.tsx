@@ -53,13 +53,13 @@ import {
   fetchDemoFile,
 } from "./demo/retailDemo";
 import { announcementFor } from "./operations/announcements";
-import { useOperations, type OperationEvent } from "./operations/useOperations";
+import { discardStale, useOperations, type OperationEvent } from "./operations/useOperations";
 import { useWorkflowDrafts } from "./workspace/drafts";
 import {
   assessMarker,
   describeAssessment,
-  isMarked,
   readOperationMarker,
+  recordOperationEvent,
   writeOperationMarker,
   type MarkerAssessment,
 } from "./workspace/operationMarker";
@@ -105,12 +105,7 @@ export default function App() {
     const text = announcementFor(event);
     if (text) setAnnouncement((current) => ({ text, sequence: (current?.sequence ?? 0) + 1 }));
     // Mark a workspace-changing request while it runs, so a reload can say it was interrupted.
-    if (!isMarked(event.kind)) return;
-    if (event.phase === "running" && workspaceId.current) {
-      writeOperationMarker({ kind: event.kind, workspaceId: workspaceId.current, startedAt: Date.now() });
-    } else if (event.phase !== "running" && event.phase !== "queued" && event.phase !== "cancelling") {
-      writeOperationMarker(null);
-    }
+    recordOperationEvent(event, workspaceId.current);
   }, []);
   const { begin, mutationBusy, readBusy, isActive } = useOperations({ onEvent: onOperationEvent });
   const [error, setError] = useState<ApiClientError | null>(null);
@@ -366,7 +361,7 @@ export default function App() {
     try {
       const upload = await uploadTabular(workspace.id, file);
       const workbookSheets = await listWorkbookSheets(upload.id);
-      if (from !== epoch.current) return false;
+      if (discardStale(operation, from, epoch.current)) return false;
       setUploadId(upload.id);
       if (workbookSheets.length > 0) {
         // The current dataset stays in use until a sheet has been profiled.
@@ -374,7 +369,7 @@ export default function App() {
         updateDraft("sheet", "");
       } else {
         const profiled = await createDataset(upload.id);
-        if (from !== epoch.current) return false;
+        if (discardStale(operation, from, epoch.current)) return false;
         setDataset(profiled);
         setSelectedFeatures(profiled.recommended_anomaly_features);
         setAnalysis(null);
@@ -401,7 +396,7 @@ export default function App() {
     setError(null);
     try {
       const profiled = await createDataset(uploadId, sheet);
-      if (from !== epoch.current) return;
+      if (discardStale(operation, from, epoch.current)) return;
       setDataset(profiled);
       setAnalysis(null);
       setSelectedFeatures(profiled.recommended_anomaly_features);
@@ -488,7 +483,7 @@ export default function App() {
     setNotice(null);
     try {
       const indexed = await uploadDocuments(workspace.id, files);
-      if (from !== epoch.current) return false;
+      if (discardStale(operation, from, epoch.current)) return false;
       setDocuments(indexed);
       clearConversation();
       operation.finish("succeeded");

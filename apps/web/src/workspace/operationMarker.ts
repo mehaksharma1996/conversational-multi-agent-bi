@@ -34,6 +34,23 @@ export function isMarked(kind: OperationKind): boolean {
   return MARKED.has(kind);
 }
 
+/**
+ * Keeps the marker in step with operation events: written when a marked operation starts running in
+ * a known workspace, removed when it reaches any terminal phase (including a discarded stale one).
+ */
+export function recordOperationEvent(
+  event: { kind: OperationKind; phase: string },
+  workspaceId: string | null,
+  now = Date.now(),
+): void {
+  if (!isMarked(event.kind)) return;
+  if (event.phase === "running") {
+    if (workspaceId) writeOperationMarker({ kind: event.kind, workspaceId, startedAt: now });
+  } else if (event.phase !== "queued" && event.phase !== "cancelling") {
+    writeOperationMarker(null);
+  }
+}
+
 export function writeOperationMarker(marker: OperationMarker | null): void {
   try {
     if (marker === null) window.sessionStorage.removeItem(MARKER_KEY);
