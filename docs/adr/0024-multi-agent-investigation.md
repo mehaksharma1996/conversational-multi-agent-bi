@@ -661,6 +661,40 @@ reconciliation (with its audit event) are INV-11 (#144). `expired` runs have no 
 is not a report status. A wave's handles keep their 10-minute TTL, so a slow approval expires the
 wave. Approval UI is UI-6b/UI-6c.
 
+## Amendment 9: investigations API, jobs, durable reports, and reconciliation (INV-11, #144, 2026-10-27)
+
+INV-11 makes decisions 4 and 9 concrete for the API. Investigation routing stays off by default,
+and production stays fail-closed: without a reviewed bounded adapter, planning ends `failed` with
+`metering_unbounded`. Details are in `docs/architecture/investigation-workflow.md` and
+`docs/agents/briefs/144-inv11-investigation-api.md` (E1 to E9).
+
+1. **A tenant-scoped resource (E1, E2).** Additive endpoints start an investigation from an INV-9
+   `investigation_proposed` message (202, `Idempotency-Key` required), read it, decide its plan
+   and SQL waves, and cancel it. Foreign and unknown IDs are the same 404. The question, scope,
+   schema, approver, and provider configuration come only from server-side records and the
+   verified identity; bodies carry identifiers, digests, and choices.
+2. **One trusted adapter (E3).** `apps/api/investigations.py` is the API's only constructor of
+   `InvestigationAuthority`, always with SQL approval required, built from an INV-10 grant
+   (a structural test). Provider configuration is injected at application construction, never
+   chosen by a request.
+3. **Durable records and content (E4, E7).** Metadata migration 4 holds content-free records and
+   hashed idempotency keys, so a replayed creation returns the same investigation across restarts.
+   Plans, verified reports, and evidence live in the workspace's encrypted `investigations.db`;
+   a report is returned only when its digest equals the recorded one.
+4. **Jobs and cancellation (E5, E6).** Planning, execution, and resume run on the bounded job
+   executor, each with its job context as the cancellation token. Cancellation stops further
+   work; calls in flight finish and their results are discarded. Nothing promises immediate
+   interruption.
+5. **Restart (E8).** Startup moves every non-terminal record to `interrupted` with a fixed,
+   user-visible explanation and records `agent.investigation_reconciled`. Completed reports
+   remain; nothing resumes.
+
+**Known limitations and deferred work.** Runs, grants, waves, and the replay registry stay
+process-local; a restart interrupts rather than resumes them (durable checkpoints are #149).
+Document display titles are not passed to planning, because only filenames are stored. The
+authority epoch is fixed per investigation; the live check revokes on workspace deletion or
+expiry. The approval and report UI is UI-6b/UI-6c, and default activation is DEP-1.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

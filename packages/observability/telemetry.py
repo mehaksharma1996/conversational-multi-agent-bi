@@ -108,6 +108,7 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "sqlite_encrypted": "bool",
     "sweep_enabled": "bool",
     "orphans_swept": "int",
+    "investigations_interrupted": "int",
     "orphan_sweep_failures": "int",
     "durable_metadata": "bool",
     "metadata_schema_version": "int",

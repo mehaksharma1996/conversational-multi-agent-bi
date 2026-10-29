@@ -340,6 +340,11 @@ def message_response(record: MessageRecord) -> MessageResponse:
     return response.model_copy(update={"proposal": proposal}) if proposal is not None else response
 
 
+def is_investigation_proposal(record: MessageRecord) -> bool:
+    """INV-11: whether ``record`` is a coherent, reconstructable INV-9 proposal message."""
+    return _investigation_proposal(record) is not None
+
+
 def _investigation_proposal(record: MessageRecord) -> InvestigationProposalMessage | None:
     """Reconstruct only coherent, recorded INV-9 metadata; never reclassify history."""
     diagnostics = record.diagnostics

@@ -502,6 +502,10 @@ _GRANTS = {
 # authority, and never a decision that SQL needs no approval).
 _APPROVAL_SERVICE = "src/orchestration/investigation_approval.py"
 _SERVICE_GRANTS = {"PlanApprovalRecord", "FollowUpApproval", "PlanApprovalGrant", "SQLWaveDecision"}
+# INV-11: the API's trusted adapter builds the execution authority from a service-issued grant,
+# and nothing else (never an approval record, and never SQL without approval).
+_API_ADAPTER = "apps/api/investigations.py"
+_ADAPTER_GRANTS = {"InvestigationAuthority"}
 
 
 def _grant_constructions(source: str) -> list[str]:
@@ -531,8 +535,16 @@ def test_no_production_module_grants_approval_or_authority() -> None:
             found = _grant_constructions(path.read_text(encoding="utf-8"))
             if relative == _APPROVAL_SERVICE:
                 found = [item for item in found if item not in _SERVICE_GRANTS]
+            if relative == _API_ADAPTER:
+                found = [item for item in found if item not in _ADAPTER_GRANTS]
             offenders += [f"{relative}: {item}" for item in found]
     assert offenders == []
+
+
+def test_the_api_adapter_builds_only_the_execution_authority() -> None:
+    source = (ROOT / _API_ADAPTER).read_text(encoding="utf-8")
+    assert set(_grant_constructions(source)) == _ADAPTER_GRANTS
+    assert "sql_approval_required=True" in source  # INV-11 always requires SQL approval
 
 
 def test_the_approval_service_constructs_each_grant_it_is_allowed() -> None:

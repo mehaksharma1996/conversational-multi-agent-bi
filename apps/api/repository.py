@@ -441,6 +441,16 @@ class LocalResourceRepository:
         self._reports: dict[str, ReportRecord] = {}
         self._exports: dict[str, ExportRecord] = {}
 
+    @property
+    def metadata_store(self) -> MetadataStore | None:
+        """The durable metadata store, opened by ``recover`` (INV-11 keeps investigations there)."""
+        return self._store
+
+    @property
+    def encryption_key(self) -> bytes | None:
+        """The workspace content encryption key, when content is stored durably."""
+        return None if self._content is None else self._content.encryption_key
+
     def ready(self) -> bool:
         """True when the workspace storage root exists and accepts writes."""
         try:

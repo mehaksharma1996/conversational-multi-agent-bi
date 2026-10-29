@@ -189,6 +189,10 @@ class WorkspaceContentStore:
         self._root = storage_root
         self._key = encryption_key
 
+    @property
+    def encryption_key(self) -> bytes | None:
+        return self._key
+
     def path(self, tenant_id: str, workspace_id: str) -> Path:
         if _TENANT.fullmatch(tenant_id) is None or _WORKSPACE.fullmatch(workspace_id) is None:
             raise ContentStoreError("Invalid workspace identifier.")
