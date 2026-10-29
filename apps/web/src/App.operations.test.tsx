@@ -118,7 +118,9 @@ describe("operation state", () => {
     expect(document.getElementById("ask-workspace")).toHaveAttribute("aria-busy", "true");
 
     answer.resolve({ ...messageFixture, id: "msg-done" });
-    await waitFor(() => expect(announcer).toHaveTextContent("Question finished."));
+    // The outcome is announced once, in the answer's own words, not as a generic "finished".
+    await waitFor(() => expect(announcer).toHaveTextContent("Answer ready, hybrid route."));
+    expect(document.querySelectorAll("[aria-live]")).toHaveLength(1);
     expect(screen.getByTestId("operation-announcer")).toBe(announcer);
     expect(document.getElementById("ask-workspace")).not.toHaveAttribute("aria-busy");
   });

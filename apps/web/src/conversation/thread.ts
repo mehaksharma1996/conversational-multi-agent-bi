@@ -92,6 +92,21 @@ export function threadEntries(messages: readonly Message[], local: LocalEntry | 
   return entries;
 }
 
+/**
+ * What the composer does with a submitted question: an answered one is not put back, a failed one
+ * is restored for editing, and one that belonged to an earlier workspace is dropped.
+ */
+export type AskResult = "answered" | "restore" | "discard";
+
+/** A question whose request may have reached the server, kept until the server's state is read. */
+export interface UnconfirmedQuestion {
+  question: string;
+  conversationId: string;
+  startedAt: number;
+  knownIds: ReadonlySet<string>;
+  epoch: number;
+}
+
 /** Allowed browser and server clock difference when matching a stored answer to a request. */
 const CLOCK_SKEW_MS = 5_000;
 

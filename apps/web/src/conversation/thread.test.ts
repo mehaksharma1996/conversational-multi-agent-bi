@@ -36,6 +36,9 @@ describe("message outcomes", () => {
       "Request not executed. No query result was kept.",
     );
     expect(outcomeAnnouncement(messageFixture)).toBe("Answer ready, hybrid route.");
+    expect(outcomeAnnouncement(investigationProposalMessageFixture)).toBe(
+      "Investigation proposed. No investigation has started. Approval is required before any investigation can run.",
+    );
   });
 });
 

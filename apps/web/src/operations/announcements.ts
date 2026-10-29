@@ -19,6 +19,9 @@ const LABELS: Record<OperationKind, string> = {
 /** Synchronous requests that may take a while; aborting them in the browser would not stop the server. */
 const SLOW = new Set<OperationKind>(["upload", "dataset", "analysis", "documents", "conversation"]);
 
+/** Operations whose outcome the Ask workspace announces itself, with the answer's own wording. */
+const OUTCOME_ANNOUNCED_ELSEWHERE = new Set<OperationKind>(["conversation"]);
+
 /**
  * The polite status text for an operation event, or null when nothing should be announced.
  * Wording states only what the client knows: "finished" means the server answered, and details
@@ -26,6 +29,7 @@ const SLOW = new Set<OperationKind>(["upload", "dataset", "analysis", "documents
  */
 export function announcementFor({ kind, phase }: OperationEvent): string | null {
   const label = LABELS[kind];
+  if (OUTCOME_ANNOUNCED_ELSEWHERE.has(kind) && (phase === "succeeded" || phase === "failed")) return null;
   switch (phase) {
     case "queued":
       return `${label} queued.`;

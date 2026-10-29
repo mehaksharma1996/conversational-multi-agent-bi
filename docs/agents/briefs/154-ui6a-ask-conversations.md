@@ -130,8 +130,9 @@ confirmation dialog.
   - While a question runs, the thread shows the user's question with a "Sending, can take up to two
     minutes" assistant placeholder (`aria-busy`).
   - On a definite failure it becomes a **Failed, not saved** entry with the error category and
-    request ID. It offers **Edit and ask again**, which moves the text to the composer and removes
-    the entry.
+    request ID. *As implemented (S2):* the text goes straight back into the composer, as before, so
+    no separate "Edit and ask again" button was needed. The entry says the question is back in the
+    box.
   - Nothing is written to browser storage (the drafts policy is unchanged). Entries are dropped on
     workspace change, reset, or the next successful question.
 - **D4. Stale responses.** Every conversation handler captures `epoch` and the conversation ID and

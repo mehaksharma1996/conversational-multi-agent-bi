@@ -44,6 +44,13 @@ import { UploadStep } from "./components/UploadStep";
 import { WorkbenchShell } from "./components/WorkbenchShell";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { conversationLabel, countConversation } from "./components/conversationStatus";
+import {
+  findStoredAnswer,
+  outcomeAnnouncement,
+  type AskResult,
+  type LocalEntry,
+  type UnconfirmedQuestion,
+} from "./conversation/thread";
 import { sectionForHash, type WorkbenchSection } from "./components/workbenchNavigation";
 import {
   DEMO_DATA_FILE,
@@ -114,6 +121,13 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [interrupted, setInterrupted] = useState<MarkerAssessment | null>(null);
   const [unconfirmed, setUnconfirmed] = useState<Unconfirmed>(null);
+  // The question being sent or the one that just failed: memory only, never stored in the browser.
+  const [localEntry, setLocalEntry] = useState<LocalEntry | null>(null);
+  // A question that may have reached the server; asking again waits until its outcome is read.
+  const [questionUnconfirmed, setQuestionUnconfirmed] = useState<UnconfirmedQuestion | null>(null);
+  const announce = useCallback((text: string) => {
+    setAnnouncement((current) => ({ text, sequence: (current?.sequence ?? 0) + 1 }));
+  }, []);
   const [confirmation, setConfirmation] = useState<
     { request: ConfirmationRequest; resolve: (confirmed: boolean) => void } | null
   >(null);
@@ -168,6 +182,8 @@ export default function App() {
     setDocuments(recovered.documents);
     setConversation(recovered.conversation);
     setMessages(recovered.messages);
+    setLocalEntry(null);
+    setQuestionUnconfirmed(null);
     setSheets([]);
     if (recovered.messages.some((message) => message.status === "pending_approval")) {
       navigate("ask");
@@ -228,6 +244,8 @@ export default function App() {
   const clearConversation = () => {
     setConversation(null);
     setMessages([]);
+    setLocalEntry(null);
+    setQuestionUnconfirmed(null);
     updateDraft("approvals", {});
   };
 
@@ -550,34 +568,98 @@ export default function App() {
     }
   };
 
-  const handleQuestion = async (
-    question: string,
-    requireSqlApproval: boolean,
-  ): Promise<boolean> => {
-    if (!workspace) return false;
+  // Reads the conversation back after an uncertain submission. A stored answer is adopted, never
+  // re-asked; no evidence means nothing was saved; an unreadable server keeps the composer locked.
+  const reconcileQuestion = async (pending: UnconfirmedQuestion): Promise<AskResult> => {
+    setQuestionUnconfirmed(pending);
+    let serverMessages: Message[];
+    try {
+      serverMessages = await listMessages(pending.conversationId);
+    } catch {
+      if (pending.epoch !== epoch.current) return "discard";
+      setLocalEntry(null);
+      announce("The server did not confirm whether the question was answered. Asking again is paused.");
+      return "restore";
+    }
+    if (pending.epoch !== epoch.current) return "discard";
+    setQuestionUnconfirmed(null);
+    const stored = findStoredAnswer(serverMessages, pending.knownIds, pending.question, pending.startedAt);
+    if (stored) {
+      setMessages(serverMessages);
+      setLocalEntry(null);
+      setError(null);
+      setNotice("The server answered despite the connection error, so its answer is shown. The question was not sent again.");
+      announce(outcomeAnnouncement(stored));
+      return "answered";
+    }
+    setLocalEntry({
+      kind: "failed",
+      question: pending.question,
+      reason: "The connection failed and the server has no answer for this question. Nothing was saved.",
+      requestId: null,
+    });
+    announce("Question failed. Nothing was saved; the question is back in the box.");
+    return "restore";
+  };
+
+  const recheckQuestion = async () => {
+    if (!questionUnconfirmed) return;
+    const { question } = questionUnconfirmed;
+    if ((await reconcileQuestion(questionUnconfirmed)) === "answered") {
+      updateDraft("question", (current) => (current.trim() === question ? "" : current));
+    }
+  };
+
+  const handleQuestion = async (question: string, requireSqlApproval: boolean): Promise<AskResult> => {
+    if (!workspace || questionUnconfirmed) return "restore";
     const operation = begin("conversation");
-    if (!operation) return false;
+    if (!operation) return "restore";
     navigate("ask");
     setError(null);
+    setNotice(null);
+    setLocalEntry({ kind: "sending", question });
+    const from = epoch.current;
+    const startedAt = Date.now();
+    const knownIds = new Set(messages.map((message) => message.id));
+    let sentTo: string | null = null;
     try {
-      const activeConversation = conversation ?? await createConversation(
-        workspace.id,
-        dataset?.status === "ready" ? dataset.id : null,
-        documents?.id ?? null,
-      );
-      if (!conversation) setConversation(activeConversation);
-      const message = await askQuestion(
-        activeConversation.id,
-        question,
-        requireSqlApproval,
-      );
+      let activeConversation = conversation;
+      if (!activeConversation) {
+        activeConversation = await createConversation(
+          workspace.id,
+          dataset?.status === "ready" ? dataset.id : null,
+          documents?.id ?? null,
+        );
+        if (discardStale(operation, from, epoch.current)) return "discard";
+        setConversation(activeConversation);
+      }
+      sentTo = activeConversation.id;
+      const message = await askQuestion(activeConversation.id, question, requireSqlApproval);
+      // A response for an earlier workspace or conversation is never merged into the current one.
+      if (discardStale(operation, from, epoch.current)) return "discard";
+      if (message.conversation_id !== sentTo) {
+        operation.finish("cancelled");
+        setLocalEntry(null);
+        return "discard";
+      }
       setMessages((current) => [...current, message]);
+      setLocalEntry(null);
       operation.finish("succeeded");
-      return true;
+      announce(outcomeAnnouncement(message));
+      return "answered";
     } catch (caught) {
       operation.finish("failed");
-      setError(normalizeError(caught));
-      return false;
+      if (from !== epoch.current) return "discard";
+      const failure = normalizeError(caught);
+      setError(failure);
+      // A refusal (4xx) is definite. A lost connection, timeout, or 5xx after the question was sent
+      // may still have been answered, so the server is asked before the question can be sent again.
+      if (failure.retryable && sentTo) {
+        return reconcileQuestion({ question, conversationId: sentTo, startedAt, knownIds, epoch: from });
+      }
+      setLocalEntry({ kind: "failed", question, reason: failure.message, requestId: failure.requestId });
+      announce("Question failed. Nothing was saved; the question is back in the box.");
+      return "restore";
     }
   };
 
@@ -699,6 +781,8 @@ export default function App() {
       setDocuments(null);
       setConversation(null);
       setMessages([]);
+      setLocalEntry(null);
+      setQuestionUnconfirmed(null);
       setSelectedFeatures([]);
       setRecovery(null);
       setNotice(null);
@@ -1023,8 +1107,11 @@ export default function App() {
             <ConversationPanel
               workspace={workspace}
               messages={messages}
+              localEntry={localEntry}
               busy={busy}
               asking={isActive("conversation")}
+              questionUnconfirmed={questionUnconfirmed !== null}
+              onRecheckQuestion={() => void recheckQuestion()}
               hasContext={dataset?.status === "ready" || documents !== null}
               demo={{
                 dataReady:

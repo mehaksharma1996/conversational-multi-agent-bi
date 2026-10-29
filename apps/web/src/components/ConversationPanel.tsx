@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import type { Message, Workspace } from "../api/client";
+import { QUESTION_MAX_LENGTH, type AskResult, type LocalEntry } from "../conversation/thread";
 import type { ApprovalDraft } from "../workspace/drafts";
 import { DEMO_QUESTIONS, type DemoQuestion } from "../demo/retailDemo";
+import { LocalEntryCard } from "./LocalEntryCard";
 import { MessageCard } from "./MessageCard";
 import { StatusBanner } from "./StatusBanner";
+
+/** The counter appears once a question is this close to the server's limit. */
+const COUNTER_THRESHOLD = QUESTION_MAX_LENGTH - 400;
 
 export interface DemoContext {
   /** The retail demo table is the loaded, schema-confirmed dataset. */
@@ -16,9 +21,14 @@ export interface DemoContext {
 interface ConversationPanelProps {
   workspace: Workspace;
   messages: Message[];
+  /** The question being sent or the one that just failed; held in memory only. */
+  localEntry?: LocalEntry | null;
   busy: boolean;
   /** Whether a question is being answered; defaults to `busy`. */
   asking?: boolean;
+  /** A sent question's outcome is unknown; asking again waits for a server check. */
+  questionUnconfirmed?: boolean;
+  onRecheckQuestion?: () => void;
   hasContext: boolean;
   demo?: DemoContext;
   /** Composer and approval drafts held by the parent, so they survive the section being unmounted. */
@@ -29,8 +39,8 @@ interface ConversationPanelProps {
   onRequireSqlApprovalChange: (required: boolean) => void;
   onApprovalDraftChange: (messageId: string, draft: ApprovalDraft) => void;
   onAcceptConsent: () => Promise<void>;
-  /** Resolves true when the question was answered, so a failed one can be put back for retry. */
-  onAsk: (question: string, requireSqlApproval: boolean) => Promise<boolean>;
+  /** Resolves "restore" when the question failed, so it can be put back for editing. */
+  onAsk: (question: string, requireSqlApproval: boolean) => Promise<AskResult>;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
   onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
 }
@@ -50,8 +60,11 @@ function missingReason(item: DemoQuestion): string {
 export function ConversationPanel({
   workspace,
   messages,
+  localEntry = null,
   busy,
   asking = busy,
+  questionUnconfirmed = false,
+  onRecheckQuestion,
   hasContext,
   demo,
   question,
@@ -66,23 +79,28 @@ export function ConversationPanel({
   onExport,
 }: ConversationPanelProps) {
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const reasonId = useId();
+  const keysId = useId();
+  const counterId = useId();
   const consentBlocked = workspace.consent_required && !workspace.consent_accepted;
   const approvalPending = messages.some((message) => message.status === "pending_approval");
-  const composerDisabled = busy || !hasContext || consentBlocked || approvalPending;
-
-  // Tell screen-reader users what happened. Derived from the latest message, so nothing is
-  // announced for history that was already on screen when the panel first rendered.
-  const [initialCount] = useState(messages.length);
+  const composerDisabled = busy || !hasContext || consentBlocked || approvalPending || questionUnconfirmed;
+  // Outcomes are announced by the shell's single live region; this panel only says why it is locked.
+  const disabledReason = questionUnconfirmed
+    ? "Asking again is paused until the server confirms whether the last question was answered."
+    : asking
+      ? "Your question is being answered. This can take up to two minutes."
+      : approvalPending
+        ? "Resolve the pending SQL approval before asking another question."
+        : consentBlocked
+          ? "Accept the data-sharing notice above to enable questions."
+          : !hasContext
+            ? "Add a confirmed table or index documents before asking a question."
+            : busy
+              ? "Another workbench operation is running. Questions are available when it finishes."
+              : null;
+  const showCounter = question.length >= COUNTER_THRESHOLD;
   const latest = messages[messages.length - 1];
-  let announcement = "";
-  if (latest && messages.length > initialCount) {
-    if (latest.proposal?.type === "investigation_proposed") {
-      announcement =
-        "Investigation proposed. No investigation has started. Approval is required before any investigation can run.";
-    } else if (latest.status === "pending_approval") announcement = "SQL approval required. Nothing has run yet.";
-    else if (latest.status === "rejected") announcement = "Request not executed. No query result was kept.";
-    else announcement = `Answer ready, ${latest.route} route.`;
-  }
 
   // Move focus to where the next action is: the approval controls when one is requested, and the
   // question box once an approval has been resolved.
@@ -103,8 +121,8 @@ export function ConversationPanel({
     const trimmed = question.trim();
     if (!trimmed || composerDisabled) return;
     setQuestion("");
-    void onAsk(trimmed, requireSqlApproval).then((answered) => {
-      if (!answered) setQuestion((current) => current || trimmed);
+    void onAsk(trimmed, requireSqlApproval).then((result) => {
+      if (result === "restore") setQuestion((current) => current || trimmed);
     });
   };
 
@@ -147,11 +165,18 @@ export function ConversationPanel({
         </StatusBanner>
       ) : null}
 
-      <p className="sr-only" role="status" aria-live="polite">
-        {announcement}
-      </p>
+      {questionUnconfirmed ? (
+        <StatusBanner kind="error">
+          <strong>The server did not confirm whether your last question was answered.</strong> It is
+          not sent again automatically, so asking is paused until the server&apos;s state is checked.
+          <button className="button button--link" type="button" disabled={asking} onClick={onRecheckQuestion}>
+            Check server state
+          </button>
+        </StatusBanner>
+      ) : null}
+
       <div className="message-list">
-        {messages.length === 0 ? (
+        {messages.length === 0 && !localEntry ? (
           <p className="empty-state">
             Ask about the analyzed table, uploaded policy, prior findings, or a combination of
             both.
@@ -169,6 +194,7 @@ export function ConversationPanel({
             onExport={onExport}
           />
         ))}
+        {localEntry ? <LocalEntryCard entry={localEntry} /> : null}
       </div>
 
       {demo && (demo.dataReady || demo.policyReady) ? (
@@ -215,7 +241,11 @@ export function ConversationPanel({
           ref={composerRef}
           rows={3}
           value={question}
+          maxLength={QUESTION_MAX_LENGTH}
           disabled={composerDisabled}
+          aria-describedby={[disabledReason ? reasonId : null, keysId, showCounter ? counterId : null]
+            .filter(Boolean)
+            .join(" ")}
           placeholder={
             approvalPending
               ? "Resolve the pending SQL approval before asking another question."
@@ -229,6 +259,20 @@ export function ConversationPanel({
             }
           }}
         />
+        {disabledReason ? (
+          <p id={reasonId} className="field-hint composer-reason">
+            {disabledReason}
+          </p>
+        ) : null}
+        <p id={keysId} className="field-hint">
+          Enter sends the question; Shift+Enter adds a new line. A question is never sent twice
+          automatically.
+        </p>
+        {showCounter ? (
+          <p id={counterId} className="field-hint">
+            {question.length.toLocaleString()} of {QUESTION_MAX_LENGTH.toLocaleString()} characters
+          </p>
+        ) : null}
         <label className="approval-option">
           <input
             type="checkbox"
