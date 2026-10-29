@@ -179,7 +179,9 @@ confirmation dialog.
       current state."
     - 422: "The decision could not be applied safely. Nothing was executed." The message is now
       rejected.
-    - 404: the message or workspace is gone, and the UI-2 recovery re-sync runs.
+    - 404: the message or workspace is gone. *As implemented (S5):* the message list is re-read and
+      the error asks the person to reload to see the server's state. Workspace recovery is not
+      started automatically, because recovery can create a new workspace when none is found.
     - 403: "You are not allowed to decide SQL in this workspace."
     - Network, timeout, or 5xx: re-sync. If still pending: "Your decision may not have reached the
       server, or may still be running. Check again before deciding." **Check again** re-lists, and

@@ -20,7 +20,7 @@ const LABELS: Record<OperationKind, string> = {
 const SLOW = new Set<OperationKind>(["upload", "dataset", "analysis", "documents", "conversation"]);
 
 /** Operations whose outcome the Ask workspace announces itself, with the answer's own wording. */
-const OUTCOME_ANNOUNCED_ELSEWHERE = new Set<OperationKind>(["conversation"]);
+const OUTCOME_ANNOUNCED_ELSEWHERE = new Set<OperationKind>(["conversation", "approval"]);
 
 /**
  * The polite status text for an operation event, or null when nothing should be announced.

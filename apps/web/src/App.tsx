@@ -125,6 +125,8 @@ export default function App() {
   const [localEntry, setLocalEntry] = useState<LocalEntry | null>(null);
   // A question that may have reached the server; asking again waits until its outcome is read.
   const [questionUnconfirmed, setQuestionUnconfirmed] = useState<UnconfirmedQuestion | null>(null);
+  // A message whose SQL decision may have reached the server; deciding again waits for a check.
+  const [approvalUnconfirmed, setApprovalUnconfirmed] = useState<string | null>(null);
   const announce = useCallback((text: string) => {
     setAnnouncement((current) => ({ text, sequence: (current?.sequence ?? 0) + 1 }));
   }, []);
@@ -184,6 +186,7 @@ export default function App() {
     setMessages(recovered.messages);
     setLocalEntry(null);
     setQuestionUnconfirmed(null);
+    setApprovalUnconfirmed(null);
     setSheets([]);
     if (recovered.messages.some((message) => message.status === "pending_approval")) {
       navigate("ask");
@@ -246,6 +249,7 @@ export default function App() {
     setMessages([]);
     setLocalEntry(null);
     setQuestionUnconfirmed(null);
+    setApprovalUnconfirmed(null);
     updateDraft("approvals", {});
   };
 
@@ -663,38 +667,105 @@ export default function App() {
     }
   };
 
-  // After a refused edit or a restart the server may already have resolved the message, so show
-  // its real state instead of the stale "pending" one.
-  const resyncMessages = async () => {
-    if (!conversation) return;
+  // After a decision error the server may already have resolved the message, so its real state is
+  // read back instead of trusting the stale "pending" one. Returns null when it cannot be read, or
+  // when the workspace changed meanwhile.
+  const resyncMessages = async (conversationId: string, from: number): Promise<Message[] | null> => {
     try {
-      setMessages(await listMessages(conversation.id));
+      const current = await listMessages(conversationId);
+      if (from !== epoch.current) return null;
+      setMessages(current);
+      return current;
     } catch {
-      // Keep what is on screen; the original error is already displayed.
+      return null;
     }
   };
 
-  const handleApproval = async (
-    message: Message,
-    decision: "approve" | "reject",
-    sql?: string,
-  ) => {
+  const dropApprovalDraft = (messageId: string) =>
+    updateDraft("approvals", (current) =>
+      Object.fromEntries(Object.entries(current).filter(([id]) => id !== messageId)),
+    );
+
+  // The browser's click is never the authority: the server re-checks the request, its policy, and
+  // the read-only guards. Every failure is explained from the server's answer and current state.
+  const handleApproval = async (message: Message, decision: "approve" | "reject", sql?: string) => {
+    if (approvalUnconfirmed) return;
     const operation = begin("approval");
     if (!operation) return;
+    const from = epoch.current;
+    const conversationId = conversation?.id ?? message.conversation_id;
     setError(null);
+    setNotice(null);
     try {
       const resolved = await decideSqlApproval(message.id, decision, sql ?? null);
-      setMessages((current) =>
-        current.map((item) => (item.id === resolved.id ? resolved : item)),
-      );
-      updateDraft("approvals", (current) =>
-        Object.fromEntries(Object.entries(current).filter(([id]) => id !== message.id)),
-      );
+      if (discardStale(operation, from, epoch.current)) return;
+      if (resolved.id !== message.id || resolved.conversation_id !== conversationId) {
+        operation.finish("cancelled");
+        return;
+      }
+      setMessages((current) => current.map((item) => (item.id === resolved.id ? resolved : item)));
+      dropApprovalDraft(message.id);
       operation.finish("succeeded");
+      announce(outcomeAnnouncement(resolved));
     } catch (caught) {
       operation.finish("failed");
-      setError(normalizeError(caught));
-      await resyncMessages();
+      if (from !== epoch.current) return;
+      const failure = normalizeError(caught);
+      const resynced = await resyncMessages(conversationId, from);
+      if (from !== epoch.current) return;
+      const now = resynced?.find((item) => item.id === message.id) ?? null;
+      if (now && now.status !== "pending_approval") dropApprovalDraft(message.id);
+      const explain = (text: string) =>
+        setError(new ApiClientError(text, failure.code, failure.requestId, failure.status));
+
+      if (failure.retryable) {
+        if (now && now.status !== "pending_approval") {
+          setNotice("The server applied a decision despite the connection error. Its outcome is shown.");
+          announce(outcomeAnnouncement(now));
+          return;
+        }
+        // Still pending, or unreadable: the first request may still be running on the server.
+        setApprovalUnconfirmed(message.id);
+        explain(
+          resynced
+            ? "Your decision may not have reached the server, or may still be running. The request is still pending; check again before deciding."
+            : "Your decision may not have reached the server, and its current state could not be read. Check again before deciding.",
+        );
+      } else if (failure.code === "sql_approval_not_pending" || failure.status === 409) {
+        explain("This SQL request was already decided or cancelled, so your decision was not applied. Its current state is shown.");
+      } else if (failure.status === 422) {
+        explain(`The decision could not be applied safely, so nothing was executed. ${failure.message}`);
+      } else if (failure.status === 403) {
+        explain("You are not allowed to decide SQL requests in this workspace. Nothing was executed.");
+      } else if (failure.status === 404) {
+        explain(
+          "This SQL request no longer exists on the server; the workspace may have expired or been reset. Nothing was executed. Reload to see the server's current state.",
+        );
+      } else {
+        setError(failure);
+      }
+      announce("SQL decision not applied. The reason is shown on the page.");
+    }
+  };
+
+  const recheckApproval = async () => {
+    if (!approvalUnconfirmed) return;
+    const conversationId = conversation?.id;
+    if (!conversationId) return;
+    const from = epoch.current;
+    const resynced = await resyncMessages(conversationId, from);
+    if (!resynced || from !== epoch.current) return;
+    const now = resynced.find((item) => item.id === approvalUnconfirmed) ?? null;
+    setApprovalUnconfirmed(null);
+    setError(null);
+    if (now && now.status !== "pending_approval") {
+      dropApprovalDraft(now.id);
+      setNotice("The server applied a decision. Its outcome is shown.");
+      announce(outcomeAnnouncement(now));
+    } else if (now) {
+      setNotice("The SQL request is still pending on the server, so you can decide now.");
+    } else {
+      setNotice("That SQL request is no longer in the conversation on the server.");
     }
   };
 
@@ -783,6 +854,7 @@ export default function App() {
       setMessages([]);
       setLocalEntry(null);
       setQuestionUnconfirmed(null);
+      setApprovalUnconfirmed(null);
       setSelectedFeatures([]);
       setRecovery(null);
       setNotice(null);
@@ -1112,6 +1184,8 @@ export default function App() {
               asking={isActive("conversation")}
               questionUnconfirmed={questionUnconfirmed !== null}
               onRecheckQuestion={() => void recheckQuestion()}
+              approvalUnconfirmed={approvalUnconfirmed}
+              onRecheckApproval={() => void recheckApproval()}
               hasContext={dataset?.status === "ready" || documents !== null}
               demo={{
                 dataReady:

@@ -29,6 +29,9 @@ interface ConversationPanelProps {
   /** A sent question's outcome is unknown; asking again waits for a server check. */
   questionUnconfirmed?: boolean;
   onRecheckQuestion?: () => void;
+  /** The message whose SQL decision may have reached the server; deciding again waits for a check. */
+  approvalUnconfirmed?: string | null;
+  onRecheckApproval?: () => void;
   hasContext: boolean;
   demo?: DemoContext;
   /** Composer and approval drafts held by the parent, so they survive the section being unmounted. */
@@ -65,6 +68,8 @@ export function ConversationPanel({
   asking = busy,
   questionUnconfirmed = false,
   onRecheckQuestion,
+  approvalUnconfirmed = null,
+  onRecheckApproval,
   hasContext,
   demo,
   question,
@@ -192,6 +197,8 @@ export function ConversationPanel({
                   position={entry.position}
                   total={entry.total}
                   busy={busy}
+                  decisionUnconfirmed={approvalUnconfirmed === entry.message.id}
+                  onRecheckDecision={onRecheckApproval}
                   approvalDraft={approvalDrafts[entry.message.id] ?? null}
                   onApprovalDraftChange={(draft) => onApprovalDraftChange(entry.message.id, draft)}
                   onApproval={onApproval}

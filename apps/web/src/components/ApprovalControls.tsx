@@ -6,6 +6,9 @@ import type { ApprovalDraft } from "../workspace/drafts";
 interface ApprovalControlsProps {
   message: Message;
   busy: boolean;
+  /** A decision may have reached the server; the controls stay disabled until it is checked. */
+  unconfirmed?: boolean;
+  onRecheck?: (() => void) | undefined;
   /** Edit state held by the parent, so it survives the section being unmounted. */
   draft: ApprovalDraft | null;
   onDraftChange: (draft: ApprovalDraft) => void;
@@ -18,9 +21,14 @@ interface ApprovalControlsProps {
  * request rejected with nothing executed.
  */
 export const ApprovalControls = forwardRef<HTMLDivElement, ApprovalControlsProps>(
-  function ApprovalControls({ message, busy, draft: saved, onDraftChange, onApproval }, ref) {
+  function ApprovalControls(
+    { message, busy: running, unconfirmed = false, onRecheck, draft: saved, onDraftChange, onApproval },
+    ref,
+  ) {
     const editId = useId();
     const hintId = useId();
+    const consequencesId = useId();
+    const busy = running || unconfirmed;
     const editing = saved?.editing ?? false;
     const draft = saved?.sql ?? message.sql ?? "";
     const changed = draft.trim() !== (message.sql ?? "").trim();
@@ -32,11 +40,34 @@ export const ApprovalControls = forwardRef<HTMLDivElement, ApprovalControlsProps
         className="approval-controls"
         role="group"
         aria-label="SQL approval decision"
+        aria-describedby={consequencesId}
       >
         <p className="approval-state">
           <strong>Awaiting your decision.</strong> The query above passed validation but has not
           run, and no table data has been read for this question.
         </p>
+        <ul id={consequencesId} className="approval-consequences">
+          <li>
+            <strong>Approve</strong> runs this read-only query on the uploaded table in this
+            workspace. The rows are kept with this conversation and are not sent anywhere else.
+          </li>
+          <li>
+            <strong>Edit</strong> lets you change the query; the edit is checked again against the
+            same read-only rules before anything runs.
+          </li>
+          <li>
+            <strong>Reject</strong> runs nothing and keeps no result.
+          </li>
+        </ul>
+        {unconfirmed ? (
+          <p className="approval-unconfirmed" role="note">
+            Your last decision on this request may still be running on the server. Check its state
+            before deciding again.{" "}
+            <button className="button button--link" type="button" disabled={running} onClick={onRecheck}>
+              Check again
+            </button>
+          </p>
+        ) : null}
         {editing ? (
           <div className="approval-edit">
             <label htmlFor={editId}>Edit SQL</label>

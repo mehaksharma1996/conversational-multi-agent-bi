@@ -15,6 +15,9 @@ interface MessageCardProps {
   /** Number of messages in the conversation, for the exchange heading. */
   total: number;
   busy: boolean;
+  /** This message's SQL decision may have reached the server; its controls wait for a check. */
+  decisionUnconfirmed?: boolean;
+  onRecheckDecision?: (() => void) | undefined;
   approvalDraft: ApprovalDraft | null;
   onApprovalDraftChange: (draft: ApprovalDraft) => void;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
@@ -119,6 +122,8 @@ export function MessageCard({
   position,
   total,
   busy,
+  decisionUnconfirmed = false,
+  onRecheckDecision,
   approvalDraft,
   onApprovalDraftChange,
   onApproval,
@@ -256,6 +261,8 @@ export function MessageCard({
             key={message.id}
             message={message}
             busy={busy}
+            unconfirmed={decisionUnconfirmed}
+            onRecheck={onRecheckDecision}
             draft={approvalDraft}
             onDraftChange={onApprovalDraftChange}
             onApproval={onApproval}
