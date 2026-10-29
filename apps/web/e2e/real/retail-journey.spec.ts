@@ -478,7 +478,7 @@ test("after the API restarts, data and history return and a pending approval is 
   await expect(page.getByText("Your workspace was restored.")).toBeVisible({ timeout: 60_000 });
   expect(await messageCount(page)).toBe(before);
   const card = latest(page);
-  await expect(card.getByText("Not executed")).toBeVisible();
+  await expect(card.getByText("Cancelled by restart")).toBeVisible();
   await expect(card).toContainText(/restart/i);
   await expect(card.getByRole("button", { name: "Approve SQL" })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Business question" })).toBeEnabled();

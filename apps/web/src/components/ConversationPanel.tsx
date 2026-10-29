@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 
 import type { Message, Workspace } from "../api/client";
-import { QUESTION_MAX_LENGTH, type AskResult, type LocalEntry } from "../conversation/thread";
+import { QUESTION_MAX_LENGTH, threadEntries, type AskResult, type LocalEntry } from "../conversation/thread";
 import type { ApprovalDraft } from "../workspace/drafts";
 import { DEMO_QUESTIONS, type DemoQuestion } from "../demo/retailDemo";
 import { LocalEntryCard } from "./LocalEntryCard";
@@ -175,27 +175,37 @@ export function ConversationPanel({
         </StatusBanner>
       ) : null}
 
-      <div className="message-list">
-        {messages.length === 0 && !localEntry ? (
-          <p className="empty-state">
-            Ask about the analyzed table, uploaded policy, prior findings, or a combination of
-            both.
-          </p>
-        ) : null}
-        {messages.map((message, index) => (
-          <MessageCard
-            key={message.id}
-            message={message}
-            position={index + 1}
-            busy={busy}
-            approvalDraft={approvalDrafts[message.id] ?? null}
-            onApprovalDraftChange={(draft) => onApprovalDraftChange(message.id, draft)}
-            onApproval={onApproval}
-            onExport={onExport}
-          />
-        ))}
-        {localEntry ? <LocalEntryCard entry={localEntry} /> : null}
-      </div>
+      {messages.length === 0 && !localEntry ? (
+        <p className="empty-state">
+          No questions yet. Ask about the analyzed table, uploaded policy, prior findings, or a
+          combination of both.
+        </p>
+      ) : (
+        // Server order (oldest first), then the client-only entry. Each exchange has a heading, so
+        // screen-reader heading navigation moves between questions.
+        <ol className="message-list" aria-label="Conversation history">
+          {threadEntries(messages, localEntry).map((entry) =>
+            entry.kind === "message" ? (
+              <li key={entry.message.id}>
+                <MessageCard
+                  message={entry.message}
+                  position={entry.position}
+                  total={entry.total}
+                  busy={busy}
+                  approvalDraft={approvalDrafts[entry.message.id] ?? null}
+                  onApprovalDraftChange={(draft) => onApprovalDraftChange(entry.message.id, draft)}
+                  onApproval={onApproval}
+                  onExport={onExport}
+                />
+              </li>
+            ) : (
+              <li key="local-entry">
+                <LocalEntryCard entry={entry} />
+              </li>
+            ),
+          )}
+        </ol>
+      )}
 
       {demo && (demo.dataReady || demo.policyReady) ? (
         <section className="sample-questions" aria-labelledby="sample-questions-heading">

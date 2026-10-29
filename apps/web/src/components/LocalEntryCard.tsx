@@ -7,7 +7,7 @@ import type { LocalEntry } from "../conversation/thread";
 export function LocalEntryCard({ entry }: { entry: LocalEntry }) {
   const sending = entry.kind === "sending";
   return (
-    <div className="message-pair message-pair--local" data-local-entry={entry.kind}>
+    <div className="local-entry" data-local-entry={entry.kind}>
       <article className="chat-message chat-message--user">
         <p className="message-label">You</p>
         <p>{entry.question}</p>

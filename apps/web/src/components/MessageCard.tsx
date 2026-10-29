@@ -6,11 +6,14 @@ import { AnswerProvenance } from "./AnswerProvenance";
 import { ApprovalControls } from "./ApprovalControls";
 import { ResultTable } from "./ResultTable";
 import { parseSource, splitSqlAnswer } from "./evidence";
+import { OUTCOME_LABEL, outcomeOf } from "../conversation/thread";
 
 interface MessageCardProps {
   message: Message;
   /** 1-based position in the conversation; makes each result table's accessible name unique. */
   position: number;
+  /** Number of messages in the conversation, for the exchange heading. */
+  total: number;
   busy: boolean;
   approvalDraft: ApprovalDraft | null;
   onApprovalDraftChange: (draft: ApprovalDraft) => void;
@@ -18,10 +21,17 @@ interface MessageCardProps {
   onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
 }
 
-const STATUS_TEXT: Partial<Record<Message["status"], string>> = {
-  pending_approval: "Awaiting approval",
-  rejected: "Not executed",
-};
+/** Server time in the reader's locale; the date is added unless it is today. */
+function formatTime(iso: string, now = new Date()): string | null {
+  const time = new Date(iso);
+  if (Number.isNaN(time.getTime())) return null;
+  const sameDay = time.toDateString() === now.toDateString();
+  return new Intl.DateTimeFormat(undefined, {
+    ...(sameDay ? {} : { year: "numeric", month: "short", day: "numeric" }),
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(time);
+}
 
 type InvestigationProposal = NonNullable<Message["proposal"]>;
 type InvestigationReason = InvestigationProposal["reason_codes"][number];
@@ -75,6 +85,7 @@ function withCitationLinks(text: string, messageId: string, known: Set<number>):
 export function MessageCard({
   message,
   position,
+  total,
   busy,
   approvalDraft,
   onApprovalDraftChange,
@@ -87,10 +98,21 @@ export function MessageCard({
   );
   const sqlAnswer =
     message.sql && message.status === "complete" ? splitSqlAnswer(message.answer) : null;
-  const statusText = STATUS_TEXT[message.status];
+  const outcome = outcomeOf(message);
+  const time = formatTime(message.created_at);
+  // The query ran (a row count was recorded) but the server no longer keeps its rows: only the
+  // newest answers retain them.
+  const rowsEvicted =
+    message.status === "complete" &&
+    message.sql !== null &&
+    message.rows === null &&
+    message.provenance.execution.sql_row_count !== null;
 
   return (
     <div className="message-pair" data-message-id={message.id}>
+      <h3 className="sr-only">
+        Question {position} of {total}: {OUTCOME_LABEL[outcome]}
+      </h3>
       <article className="chat-message chat-message--user">
         <p className="message-label">You</p>
         <p>{message.question}</p>
@@ -102,8 +124,11 @@ export function MessageCard({
         <div className="message-meta">
           <span>Workbench</span>
           <span className="route-badge">{message.route} route</span>
-          {statusText ? (
-            <span className={`status-chip status-chip--${message.status}`}>{statusText}</span>
+          <span className={`status-chip status-chip--${outcome}`}>{OUTCOME_LABEL[outcome]}</span>
+          {time ? (
+            <time className="message-time" dateTime={message.created_at}>
+              {time}
+            </time>
           ) : null}
         </div>
 
@@ -113,7 +138,7 @@ export function MessageCard({
             aria-labelledby={`investigation-proposal-${message.id}`}
           >
             <p className="eyebrow">Investigation recommendation</p>
-            <h3 id={`investigation-proposal-${message.id}`}>Multi-step investigation proposed</h3>
+            <h4 id={`investigation-proposal-${message.id}`}>Multi-step investigation proposed</h4>
             <p>{message.proposal.summary}</p>
             <dl className="proposal-facts">
               <div>
@@ -148,7 +173,7 @@ export function MessageCard({
             <p className="answer-text">{sqlAnswer.headline}</p>
             {sqlAnswer.observations.length > 0 ? (
               <>
-                <h3>Calculated from the result table</h3>
+                <h4>Calculated from the result table</h4>
                 <ul className="observation-list">
                   {sqlAnswer.observations.map((text) => (
                     <li key={text}>{text}</li>
@@ -158,7 +183,7 @@ export function MessageCard({
             ) : null}
             {sqlAnswer.limits.length > 0 ? (
               <>
-                <h3>Limits of this answer</h3>
+                <h4>Limits of this answer</h4>
                 <ul className="limit-list">
                   {sqlAnswer.limits.map((text) => (
                     <li key={text}>{text}</li>
@@ -172,8 +197,9 @@ export function MessageCard({
               </p>
             ))}
             <p className="field-hint">
-              These statements are computed by code from the rows below, not written by a model.
-              The API does not return cell-level references, so check them against the table.
+              {rowsEvicted
+                ? "These statements were computed by code from the query result, not written by a model."
+                : "These statements are computed by code from the rows below, not written by a model. The API does not return cell-level references, so check them against the table."}
             </p>
           </div>
         ) : (
@@ -184,7 +210,7 @@ export function MessageCard({
 
         {message.sql ? (
           <div className="sql-section">
-            <h3>Generated SQL</h3>
+            <h4>Generated SQL</h4>
             <pre className="sql-block" tabIndex={0}>
               <code>{message.sql}</code>
             </pre>
@@ -230,6 +256,13 @@ export function MessageCard({
         ) : null}
         {message.status === "complete" && message.rows && message.rows.length === 0 ? (
           <p className="field-hint">The query returned no rows.</p>
+        ) : null}
+        {rowsEvicted ? (
+          <p className="answer-note rows-evicted">
+            The result rows for this answer are no longer kept: the workspace keeps rows only for its
+            most recent answers. The SQL above is unchanged; ask the question again to see current
+            rows or to download them.
+          </p>
         ) : null}
 
         {sources.length > 0 ? (

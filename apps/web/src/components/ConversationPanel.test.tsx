@@ -65,6 +65,38 @@ describe("announcements", () => {
   });
 });
 
+describe("history", () => {
+  const ready = { ...workspaceFixture, consent_accepted: true };
+
+  it("is an ordered list in server order, with the client-only entry last", () => {
+    render(
+      <ConversationPanel
+        {...panel(ready, [
+          { ...messageFixture, id: "m1", question: "First?" },
+          { ...messageFixture, id: "m2", question: "Second?" },
+        ]).props}
+        localEntry={{ kind: "sending", question: "Third?" }}
+      />,
+    );
+    const list = screen.getByRole("list", { name: "Conversation history" });
+    const items = Array.from(list.children);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent("First?");
+    expect(items[1]).toHaveTextContent("Second?");
+    expect(items[2]).toHaveTextContent("Third?");
+    expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual([
+      "Question 1 of 2: Answered",
+      "Question 2 of 2: Answered",
+    ]);
+  });
+
+  it("says plainly when there are no questions yet", () => {
+    renderPanel(ready);
+    expect(screen.queryByRole("list", { name: "Conversation history" })).not.toBeInTheDocument();
+    expect(screen.getByText(/No questions yet/)).toBeInTheDocument();
+  });
+});
+
 describe("composer", () => {
   const ready = { ...workspaceFixture, consent_accepted: true };
 

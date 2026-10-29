@@ -351,19 +351,22 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .report-card p, .report-card li { color: var(--text-secondary); line-height: 1.5; }
 
 .consent-button { width: fit-content; margin-top: .4rem; }
-.message-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); margin: var(--space-5) 0; }
-.message-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
+.message-list { padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); margin: var(--space-5) 0; }
+.message-pair, .local-entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
 .chat-message { min-width: 0; max-width: min(100%, 960px); padding: var(--space-4); overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: var(--radius-md); }
 .chat-message p { margin: 0; line-height: 1.55; }
 .chat-message--user { justify-self: end; border-color: #315667; background: #102532; }
 .chat-message--assistant { background: var(--surface-subtle); }
 .message-label, .message-meta { margin-bottom: .35rem !important; color: var(--muted); font-size: .7rem; font-weight: 800; text-transform: uppercase; }
-.message-meta { display: flex; align-items: center; gap: .5rem; }
+.message-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .route-badge, .status-chip { padding: .2rem .45rem; border: 1px solid #496070; border-radius: 999px; color: #c5dbe2; background: #142631; font-size: .62rem; }
-.status-chip--pending_approval { color: #f1cf94; border-color: #8a6630; background: var(--warning-surface); }
-.status-chip--rejected { color: #f0b8be; border-color: #75404a; background: var(--danger-surface); }
+.status-chip--awaiting_approval, .status-chip--proposal { color: #f1cf94; border-color: #8a6630; background: var(--warning-surface); }
+.status-chip--not_executed, .status-chip--cancelled_by_restart { color: #f0b8be; border-color: #75404a; background: var(--danger-surface); }
 .status-chip--sending { color: #c5dbe2; border-style: dashed; }
 .status-chip--failed { color: #f0b8be; border-color: #75404a; background: var(--danger-surface); }
+.status-chip--out_of_scope { color: #e3d6ae; border-style: dashed; }
+.message-time { margin-left: auto; font-weight: 600; text-transform: none; }
+.rows-evicted { margin-top: .5rem; }
 .chat-message--sending { border-style: dashed; }
 .chat-message--failed { border-color: #75404a; }
 .progress-indicator { display: inline-block; width: .8rem; height: .8rem; margin-right: .35rem; vertical-align: -.1rem; border: 2px solid #496070; border-top-color: #c5dbe2; border-radius: 50%; animation: spin 1s linear infinite; }
@@ -371,7 +374,7 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .composer-reason { color: var(--text); }
 .answer-text { white-space: pre-wrap; }
 .investigation-proposal { display: grid; gap: .65rem; margin-top: .75rem; padding: .9rem; border: 1px solid #496070; border-radius: var(--radius-md); background: #101c28; }
-.investigation-proposal h3 { margin: 0; color: var(--text); font-size: 1rem; }
+.investigation-proposal h4 { margin: 0; color: var(--text); font-size: 1rem; }
 .proposal-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin: 0; }
 .proposal-facts div { padding: .6rem; border-radius: var(--radius-sm); background: var(--surface-raised); }
 .proposal-facts dt { color: var(--muted); font-size: .7rem; font-weight: 800; text-transform: uppercase; }
@@ -403,7 +406,7 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .approval-edit { display: grid; gap: .35rem; margin: .75rem 0; }
 .approval-edit textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82rem; }
 .approval-state { color: #efd09b !important; }
-.answer-structured h3, .sql-section h3 { margin: .9rem 0 .3rem; color: #cdd8e5; font-size: .76rem; letter-spacing: .06em; text-transform: uppercase; }
+.answer-structured h4, .sql-section h4 { margin: .9rem 0 .3rem; color: #cdd8e5; font-size: .76rem; letter-spacing: .06em; text-transform: uppercase; }
 .observation-list, .limit-list { margin: 0; padding-left: 1.15rem; line-height: 1.55; }
 .limit-list { color: #efd4a3; }
 .answer-note { margin: .55rem 0 0; color: var(--muted); font-size: .86rem; line-height: 1.5; }
