@@ -245,6 +245,34 @@ Slices, each committed separately and each keeping `check_all --full` green:
     renaming the staged one could leave no index after a crash. Promotion by rename-then-delete
     would close it.
 
+## Implemented semantics: S5 reload recovery
+
+- **What is stored.** While a workspace-changing request runs (upload, sheet, schema, analysis,
+  documents, consent, question, approval decision, or reset), sessionStorage holds
+  `conversational-bi.operation-in-flight` = `{kind, workspaceId, startedAt}`. Nothing else is
+  stored: no filenames, question text, SQL, or IDs beyond the workspace already kept in the hint.
+  It is removed when the operation finishes, on reset, and on sign-out.
+- **Validation.** On reading, a marker with an unknown kind, any extra key, a future start time, or
+  an age over 24 hours is discarded.
+- **On reload**, after the server-side recovery the marker is compared with the server's resources:
+  - **evidence:** the matching resource (latest dataset, analysis, collection, or message) was
+    created after `startedAt`, or consent is now accepted. The message says the operation
+    "appears to have completed" and shows the server's timestamp.
+  - **unknown:** nothing newer exists. Closing a page does not stop a synchronous request on the
+    server, so the operation may still finish, or it may have failed. Schema confirmation and
+    approval decisions always fall here, because they leave no comparable timestamp. The message
+    says completion cannot be confirmed and that nothing is retried, and offers **Check again**
+    (a fresh server read) and **Dismiss**.
+  - **workspace gone:** the marker's workspace is not the restored one (expired, deleted, or
+    another workspace), so it is never used to describe the current workspace. For a reset, this
+    means the reset completed.
+  - Evidence and workspace-gone clear the marker. Unknown keeps it until Check again finds
+    evidence or the person dismisses it.
+- **Limits.** The comparison uses server `created_at` against the browser clock, so clock skew can
+  misclassify an operation. The wording therefore says "appears", shows both times, and asks the
+  person to check. There is no "failed" outcome for synchronous requests, because the server keeps
+  no record of a failed request. A marker is never treated as durable job state.
+
 ## Do not touch
 
 - API routes, OpenAPI, `schema.d.ts`, backend packages, the evaluation baselines, and the

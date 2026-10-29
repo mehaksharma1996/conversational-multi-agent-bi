@@ -56,6 +56,14 @@ import { announcementFor } from "./operations/announcements";
 import { useOperations, type OperationEvent } from "./operations/useOperations";
 import { useWorkflowDrafts } from "./workspace/drafts";
 import {
+  assessMarker,
+  describeAssessment,
+  isMarked,
+  readOperationMarker,
+  writeOperationMarker,
+  type MarkerAssessment,
+} from "./workspace/operationMarker";
+import {
   recoverWorkspace,
   writeWorkspaceHint,
   type RecoveredWorkspace,
@@ -92,15 +100,24 @@ export default function App() {
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
   const [contamination, setContamination] = useState(0.05);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
-  const announce = useCallback((event: OperationEvent) => {
+  const workspaceId = useRef<string | null>(null);
+  const onOperationEvent = useCallback((event: OperationEvent) => {
     const text = announcementFor(event);
     if (text) setAnnouncement((current) => ({ text, sequence: (current?.sequence ?? 0) + 1 }));
+    // Mark a workspace-changing request while it runs, so a reload can say it was interrupted.
+    if (!isMarked(event.kind)) return;
+    if (event.phase === "running" && workspaceId.current) {
+      writeOperationMarker({ kind: event.kind, workspaceId: workspaceId.current, startedAt: Date.now() });
+    } else if (event.phase !== "running" && event.phase !== "queued" && event.phase !== "cancelling") {
+      writeOperationMarker(null);
+    }
   }, []);
-  const { begin, mutationBusy, readBusy, isActive } = useOperations({ onEvent: announce });
+  const { begin, mutationBusy, readBusy, isActive } = useOperations({ onEvent: onOperationEvent });
   const [error, setError] = useState<ApiClientError | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   const [startFailed, setStartFailed] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [interrupted, setInterrupted] = useState<MarkerAssessment | null>(null);
   const [unconfirmed, setUnconfirmed] = useState<Unconfirmed>(null);
   const [confirmation, setConfirmation] = useState<
     { request: ConfirmationRequest; resolve: (confirmed: boolean) => void } | null
@@ -114,6 +131,10 @@ export default function App() {
     () => sectionForHash(window.location.hash) ?? "overview",
   );
   const { drafts, updateDraft, resetDrafts } = useWorkflowDrafts();
+
+  useEffect(() => {
+    workspaceId.current = workspace?.id ?? null;
+  }, [workspace]);
 
   // An intentional section change moves focus to the section heading, including a reselection of
   // the current section (for example from the phone drawer, whose links are about to go inert).
@@ -166,8 +187,16 @@ export default function App() {
     let outcome: "succeeded" | "failed" = "failed";
     setError(null);
     setStartFailed(false);
+    const marker = readOperationMarker();
     try {
       const recovered = await recoverWorkspace();
+      if (marker) {
+        // Compare the interrupted request with the server's state; only "unknown" keeps the marker
+        // (until the person checks again or dismisses it).
+        const assessment = assessMarker(marker, recovered.kind === "restored" ? recovered.recovered : null);
+        setInterrupted(assessment);
+        if (assessment.outcome !== "unknown") writeOperationMarker(null);
+      }
       if (recovered.kind === "restored") {
         applyRecovered(recovered.recovered);
         writeWorkspaceHint(recovered.recovered.workspace.id);
@@ -679,6 +708,7 @@ export default function App() {
       setRecovery(null);
       setNotice(null);
       setUnconfirmed(null);
+      setInterrupted(null);
       epoch.current += 1;
       resetDrafts();
       writeWorkspaceHint(null);
@@ -756,6 +786,31 @@ export default function App() {
         </StatusBanner>
       ) : null}
 
+      {interrupted ? (
+        <StatusBanner kind="info">
+          <strong>{describeAssessment(interrupted)}</strong>
+          {interrupted.outcome === "unknown" ? (
+            <button
+              className="button button--link"
+              type="button"
+              disabled={busy}
+              onClick={() => void initializeWorkspace()}
+            >
+              Check again
+            </button>
+          ) : null}
+          <button
+            className="button button--link"
+            type="button"
+            onClick={() => {
+              setInterrupted(null);
+              writeOperationMarker(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </StatusBanner>
+      ) : null}
       {recovery?.kind === "restored" ? (
         <StatusBanner kind="info">
           <strong>Your workspace was restored.</strong> It was created{" "}

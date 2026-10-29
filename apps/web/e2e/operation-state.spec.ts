@@ -126,3 +126,21 @@ test("a failed replacement keeps the data and says the server confirmed nothing 
   const result = await new AxeBuilder({ page }).analyze();
   expect(result.violations).toEqual([]);
 });
+
+test("after a reload, an interrupted change in a workspace that no longer exists is explained, not retried", async ({ page }) => {
+  const journey = { uploads: 0, failSecondUpload: false };
+  await routeJourney(page, journey);
+  // Runs in the browser before the app loads; the marker names a workspace the caller no longer owns.
+  await page.addInitScript(
+    `sessionStorage.setItem("conversational-bi.operation-in-flight", JSON.stringify({ kind: "documents", workspaceId: "ws_gone", startedAt: Date.now() - 30000 }))`,
+  );
+  await page.goto("/");
+
+  await expect(page.getByText(/A document upload was in progress when the page reloaded/)).toContainText(
+    "is no longer available (expired or deleted)",
+  );
+  expect(await page.evaluate<string | null>('sessionStorage.getItem("conversational-bi.operation-in-flight")')).toBeNull();
+  expect(journey.uploads).toBe(0);
+  const result = await new AxeBuilder({ page }).analyze();
+  expect(result.violations).toEqual([]);
+});
