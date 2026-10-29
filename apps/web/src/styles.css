@@ -292,6 +292,8 @@ input[type="file"]::file-selector-button { margin-right: .75rem; padding: .45rem
 .confirm-dialog h2 { margin-top: 0; font-size: 1.15rem; }
 .confirm-dialog__consequences { margin: 0 0 1.25rem; padding-left: 1.2rem; color: var(--text-secondary); line-height: 1.5; }
 .confirm-dialog .button-row { justify-content: flex-end; flex-wrap: wrap; }
+.job-progress { display: grid; gap: 0.5rem; justify-items: start; }
+.job-progress progress { width: min(100%, 24rem); accent-color: var(--accent); }
 .button--compact { min-height: 34px; padding: .35rem .65rem; font-size: .74rem; }
 .button--link { min-height: auto; margin-left: .4rem; padding: .2rem; color: inherit; background: transparent; text-decoration: underline; }
 .button-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0; }

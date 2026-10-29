@@ -77,6 +77,8 @@ type ErrorResponse = components["schemas"]["ErrorResponse"];
 export type AuthConfig = components["schemas"]["AuthConfigResponse"];
 export type WorkspaceOverview = components["schemas"]["WorkspaceOverviewResponse"];
 export type BrowserSession = components["schemas"]["SessionResponse"];
+export type Job = components["schemas"]["JobResponse"];
+export type JobStatus = components["schemas"]["JobStatus"];
 
 export class ApiClientError extends Error {
   readonly code: string;
@@ -153,6 +155,22 @@ export async function getDataset(datasetId: string): Promise<Dataset> {
 export async function getAnalysis(analysisId: string): Promise<Analysis> {
   const { data, error, response } = await api.GET("/api/v1/analyses/{analysis_id}", {
     params: { path: { analysis_id: analysisId } },
+  });
+  return unwrap(data, error, response);
+}
+
+/** Content-free status of one tenant-owned, process-local job; foreign or unknown IDs are 404. */
+export async function getJob(jobId: string): Promise<Job> {
+  const { data, error, response } = await api.GET("/api/v1/jobs/{job_id}", {
+    params: { path: { job_id: jobId } },
+  });
+  return unwrap(data, error, response);
+}
+
+/** Requests best-effort cancellation; the returned job may still be running. */
+export async function cancelJob(jobId: string): Promise<Job> {
+  const { data, error, response } = await api.DELETE("/api/v1/jobs/{job_id}", {
+    params: { path: { job_id: jobId } },
   });
   return unwrap(data, error, response);
 }

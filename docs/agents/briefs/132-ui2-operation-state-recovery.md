@@ -273,6 +273,43 @@ Slices, each committed separately and each keeping `check_all --full` green:
   person to check. There is no "failed" outcome for synchronous requests, because the server keeps
   no record of a failed request. A marker is never treated as durable job state.
 
+## Implemented semantics: S6 job polling
+
+- **Client.** `getJob` and `cancelJob` in `api/client.ts`, against the existing generated
+  `JobResponse` types. No API change.
+- **`useJob(jobId, workspaceId)`** (`operations/useJob.ts`):
+  - **Validation.** A missing ID is idle. A malformed ID (outside `[A-Za-z0-9_-]{1,128}`) is invalid
+    and sends no request. The server still authorizes every read; the ID grants nothing.
+  - **One request at a time.** The next read is scheduled only after the previous one settles.
+    Delays are 1 s doubling to a 10 s cap, with ±20% jitter.
+  - **Always stops:**
+    - at `succeeded`, `failed`, `cancelled`, or `expired`;
+    - on 404, which gives an *unknown* outcome: the job may have been forgotten by a restart or
+      expired, and it is never treated as success or re-created;
+    - on 401 or 403;
+    - after 5 consecutive network, timeout, or 5xx failures (*unreachable*);
+    - after 200 reads (*poll limit*, about 30 minutes);
+    - on a response for another job or workspace, or with an unknown status (*invalid*).
+  - **Check again** restarts polling after an unreachable or poll-limit stop.
+  - **Stale responses.** A generation counter and a view stored with its own job and workspace key
+    drop every late answer after a job or workspace change or unmount. Sign-out unmounts the
+    application.
+  - **Cancellation states:** `requested` (DELETE sent), `acknowledged` (the server reports
+    `cancel_requested`), `completed` (terminal `cancelled`), `too_late` (finished first), and
+    `failed` (request error; the job keeps running and cancel may be retried). A 404 answer to
+    cancel is unknown. Wording never claims a stop before the server reports one.
+  - **Mapping.** `jobPhase` maps a view onto the D1 phases. Unknown and expired map to
+    `interrupted`, never to success.
+  - **Wording.** `describeJob` gives text without job identifiers or server error details.
+- **`JobProgress`** shows status, determinate progress only from `progress_total`, Cancel while it
+  can be requested, and Check again after an unanswered stop.
+- **Coverage, revised from the plan.** No current screen starts a job. Investigations are
+  feature-flagged off, and their UI is UI-6b. The hook and component are therefore covered by
+  Vitest with fake timers (22 tests), **not** by mocked Playwright. A browser harness would need
+  test-only code in the production bundle, or a second build that CI does not produce. Browser and
+  real-stack job coverage comes with UI-6b (R1). Nothing here verifies real restart recovery of
+  jobs.
+
 ## Do not touch
 
 - API routes, OpenAPI, `schema.d.ts`, backend packages, the evaluation baselines, and the
