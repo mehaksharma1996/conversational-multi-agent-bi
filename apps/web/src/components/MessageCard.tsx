@@ -5,7 +5,7 @@ import type { ApprovalDraft } from "../workspace/drafts";
 import { AnswerProvenance } from "./AnswerProvenance";
 import { ApprovalControls } from "./ApprovalControls";
 import { ResultTable } from "./ResultTable";
-import { parseSource, splitSqlAnswer } from "./evidence";
+import { parseSource, splitSqlAnswer, type ParsedSource } from "./evidence";
 import { OUTCOME_LABEL, outcomeOf } from "../conversation/thread";
 
 interface MessageCardProps {
@@ -61,25 +61,57 @@ function revealSource(event: MouseEvent<HTMLAnchorElement>, targetId: string) {
   target.focus();
 }
 
-/** Turns "Source 2" markers in an answer into links to the passage they cite. */
-function withCitationLinks(text: string, messageId: string, known: Set<number>): ReactNode[] {
-  return text.split(/(Source \d+)/g).map((part, index) => {
-    const match = /^Source (\d+)$/.exec(part);
-    if (match && known.has(Number(match[1]))) {
-      const targetId = sourceElementId(messageId, Number(match[1]));
+function citationElementId(messageId: string, sourceNumber: number): string {
+  return `cite-${messageId}-${sourceNumber}`;
+}
+
+/** Returns focus from a passage to the first place the answer cites it. */
+function returnToCitation(event: MouseEvent<HTMLAnchorElement>, citationId: string) {
+  event.preventDefault();
+  document.getElementById(citationId)?.focus();
+}
+
+/**
+ * Turns "Source 2" markers in answer text into links to the passage they cite. A marker with no
+ * retrieved passage is labelled as such and never linked, so an invalid reference cannot pass for
+ * evidence. The first link to each passage gets an ID, so the passage can link back to it.
+ */
+function citationRenderer(messageId: string, sources: Map<number, ParsedSource>) {
+  const anchored = new Set<number>();
+  return (text: string): ReactNode[] =>
+    text.split(/(Source \d+)/g).map((part, index) => {
+      const match = /^Source (\d+)$/.exec(part);
+      if (!match) return part;
+      const number = Number(match[1]);
+      const source = sources.get(number);
+      if (!source) {
+        return (
+          <span key={index} className="citation-missing">
+            {part} <span className="citation-missing-note">(not among the retrieved passages)</span>
+          </span>
+        );
+      }
+      const targetId = sourceElementId(messageId, number);
+      const first = !anchored.has(number);
+      anchored.add(number);
       return (
         <a
           key={index}
+          id={first ? citationElementId(messageId, number) : undefined}
           className="citation-link"
           href={`#${targetId}`}
+          aria-label={source.filename ? `${part}: ${source.filename}, page ${source.page ?? "unknown"}` : undefined}
           onClick={(event) => revealSource(event, targetId)}
         >
           {part}
         </a>
       );
-    }
-    return part;
-  });
+    });
+}
+
+/** Source numbers the answer text actually cites, so a passage links back only when it can. */
+function citedNumbers(text: string): Set<number> {
+  return new Set(Array.from(text.matchAll(/Source (\d+)/g), (match) => Number(match[1])));
 }
 
 export function MessageCard({
@@ -93,9 +125,11 @@ export function MessageCard({
   onExport,
 }: MessageCardProps) {
   const sources = message.sources.map((source) => parseSource(source.citation));
-  const known = new Set(
-    sources.flatMap((source) => (source.number === null ? [] : [source.number])),
+  const byNumber = new Map(
+    sources.flatMap((source) => (source.number === null ? [] : [[source.number, source] as const])),
   );
+  const cite = citationRenderer(message.id, byNumber);
+  const cited = citedNumbers(message.answer);
   const sqlAnswer =
     message.sql && message.status === "complete" ? splitSqlAnswer(message.answer) : null;
   const outcome = outcomeOf(message);
@@ -167,7 +201,7 @@ export function MessageCard({
           <div className="answer-structured">
             {sqlAnswer.preface.map((text) => (
               <p key={text} className="answer-text">
-                {text}
+                {cite(text)}
               </p>
             ))}
             <p className="answer-text">{sqlAnswer.headline}</p>
@@ -193,7 +227,7 @@ export function MessageCard({
             ) : null}
             {sqlAnswer.notes.map((text) => (
               <p key={text} className="answer-note">
-                {text}
+                {cite(text)}
               </p>
             ))}
             <p className="field-hint">
@@ -203,7 +237,7 @@ export function MessageCard({
             </p>
           </div>
         ) : (
-          <p className="answer-text">{withCitationLinks(message.answer, message.id, known)}</p>
+          <p className="answer-text">{cite(message.answer)}</p>
         )}
 
         {message.proposal ? null : <AnswerProvenance message={message} />}
@@ -289,13 +323,29 @@ export function MessageCard({
                       source.raw
                     )}
                   </p>
-                  {source.excerpt ? <blockquote>{source.excerpt}</blockquote> : null}
+                  {source.excerpt ? (
+                    <blockquote>{source.excerpt}</blockquote>
+                  ) : (
+                    <p className="field-hint">No passage text was returned for this source.</p>
+                  )}
+                  {source.number !== null && cited.has(source.number) ? (
+                    <a
+                      className="citation-back"
+                      href={`#${citationElementId(message.id, source.number)}`}
+                      onClick={(event) =>
+                        returnToCitation(event, citationElementId(message.id, source.number as number))
+                      }
+                    >
+                      Back to the answer<span className="sr-only"> (Source {source.number})</span>
+                    </a>
+                  ) : null}
                 </li>
               ))}
             </ul>
             <p className="field-hint">
-              Passage text is an excerpt (the first 240 characters, with personal data redacted).
-              Open the PDF page to read it in context.
+              Each passage is an excerpt of at most 240 characters, with personal data redacted. It
+              is all the workbench keeps of the passage; the original PDF is not served by the
+              workbench, so open your own copy at the page shown to read it in context.
             </p>
           </details>
         ) : null}

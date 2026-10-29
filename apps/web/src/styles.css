@@ -516,3 +516,6 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
   .status-dot, .summary-state, .brand-mark { forced-color-adjust: none; }
   .nav-item--active { outline: 2px solid CanvasText; }
 }
+.citation-missing { color: #f0b8be; text-decoration: underline wavy #75404a; text-underline-offset: .2em; }
+.citation-missing-note { font-size: .85em; }
+.citation-back { display: inline-block; margin-top: .35rem; font-size: .8rem; }
