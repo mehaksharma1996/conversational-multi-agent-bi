@@ -18,6 +18,7 @@ export type OperationKind =
   | "consent"
   | "conversation"
   | "approval"
+  | "investigation"
   | "download"
   | "export"
   | "reset";
@@ -57,6 +58,7 @@ const LANES: Record<OperationKind, OperationLane> = {
   consent: "mutation",
   conversation: "mutation",
   approval: "mutation",
+  investigation: "mutation",
   download: "read",
   export: "read",
   reset: "mutation",

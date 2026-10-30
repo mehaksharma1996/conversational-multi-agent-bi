@@ -80,6 +80,7 @@ describe("operation model", () => {
     expect(laneOf("download")).toBe("read");
     expect(laneOf("reset")).toBe("mutation");
     expect(laneOf("approval")).toBe("mutation");
+    expect(laneOf("investigation")).toBe("mutation");
   });
 });
 
