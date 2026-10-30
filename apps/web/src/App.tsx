@@ -1300,6 +1300,7 @@ export default function App() {
                     onCancel={() => void handleInvestigationCancel()}
                     onCheckServerState={() => void investigation.checkServerState()}
                     onRefreshJob={investigation.refreshJob}
+                    onSubmitSqlWave={(decision) => void investigation.submitSqlWave(decision)}
                   />
                 ) : null
               }

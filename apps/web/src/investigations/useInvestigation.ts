@@ -112,6 +112,30 @@ function cancellationAfterCancel(value: Investigation): Exclude<InvestigationCan
   return isTerminalInvestigation(value.status) ? "too_late" : "requested";
 }
 
+function sameWaveReview(
+  summary: NonNullable<Investigation["sql_wave"]>,
+  review: InvestigationSqlWave,
+): boolean {
+  if (
+    review.wave_id !== summary.wave_id ||
+    review.wave_digest !== summary.wave_digest ||
+    review.sequence !== summary.sequence ||
+    review.deadline !== summary.deadline ||
+    review.items.length !== summary.items.length
+  ) return false;
+  const expected = new Map(
+    summary.items.map((item) => [`${item.task_id}\u0000${item.sql_fingerprint}`, item]),
+  );
+  if (expected.size !== summary.items.length) return false;
+  for (const item of review.items) {
+    const key = `${item.task_id}\u0000${item.sql_fingerprint}`;
+    const match = expected.get(key);
+    if (match?.attempt !== item.attempt || match.policy_status !== item.policy_status) return false;
+    expected.delete(key);
+  }
+  return expected.size === 0;
+}
+
 export function useInvestigation({
   workspaceId,
   conversationId,
@@ -205,15 +229,18 @@ export function useInvestigation({
     };
   }, [scopeKey, hasScope, conversationId, proposalMessageId, adopt, update]);
 
+  const polledInvestigationId = state.investigation?.id ?? null;
+  const polledInvestigationStatus = state.investigation?.status ?? null;
+
   // Bounded, one-at-a-time investigation polling. Decision and terminal states stop naturally.
   useEffect(() => {
-    const target = state.investigation;
     const continueAfterDecision =
       state.command === "cancel_requested" || state.command === "sql_submitted";
     if (
       state.availability !== "loaded" ||
-      target === null ||
-      (!shouldPollInvestigation(target.status) && !continueAfterDecision) ||
+      polledInvestigationId === null ||
+      polledInvestigationStatus === null ||
+      (!shouldPollInvestigation(polledInvestigationStatus) && !continueAfterDecision) ||
       conversationId === null ||
       proposalMessageId === null
     ) {
@@ -234,11 +261,11 @@ export function useInvestigation({
       if (stopped || current !== generation.current) return;
       polls += 1;
       try {
-        const value = await getInvestigation(target.id);
+        const value = await getInvestigation(polledInvestigationId);
         if (
           stopped ||
           current !== generation.current ||
-          !sameBinding(value, conversationId, proposalMessageId, target.id)
+          !sameBinding(value, conversationId, proposalMessageId, polledInvestigationId)
         ) {
           return;
         }
@@ -292,8 +319,8 @@ export function useInvestigation({
     };
   }, [
     state.availability,
-    state.investigation?.id,
-    state.investigation?.status,
+    polledInvestigationId,
+    polledInvestigationStatus,
     state.command,
     conversationId,
     proposalMessageId,
@@ -301,29 +328,35 @@ export function useInvestigation({
     update,
   ]);
 
+  const sqlTarget = state.investigation;
+
   // SQL exists only in this scoped state, only while the matching authorized wave is pending.
   useEffect(() => {
-    const target = state.investigation;
-    const summary = target?.sql_wave;
+    const summary = sqlTarget?.sql_wave;
     if (
       state.availability !== "loaded" ||
-      target?.status !== "awaiting_sql_approval" ||
-      !summary
+      sqlTarget?.status !== "awaiting_sql_approval" ||
+      !summary ||
+      state.command === "sql_submitted"
     ) {
-      if (state.sqlWave !== null) update((previous) => ({ ...previous, sqlWave: null }));
+      update((previous) => previous.sqlWave === null ? previous : { ...previous, sqlWave: null });
       return;
     }
     const current = generation.current;
     let active = true;
     update((previous) => ({ ...previous, sqlWave: null }));
-    void getInvestigationSqlWave(target.id)
+    void getInvestigationSqlWave(sqlTarget.id)
       .then((wave) => {
-        if (
-          !active ||
-          current !== generation.current ||
-          wave.wave_id !== summary.wave_id ||
-          wave.wave_digest !== summary.wave_digest
-        ) {
+        if (!active || current !== generation.current) return;
+        if (!sameWaveReview(summary, wave)) {
+          update((previous) => ({
+            ...previous,
+            sqlWave: null,
+            error: new ApiClientError(
+              "The SQL review did not match the pending server wave. Nothing was accepted.",
+              "sql_wave_review_mismatch",
+            ),
+          }));
           return;
         }
         update((previous) => ({ ...previous, sqlWave: wave, error: null }));
@@ -335,7 +368,7 @@ export function useInvestigation({
     return () => {
       active = false;
     };
-  }, [state.availability, state.investigation?.id, state.investigation?.status, state.investigation?.sql_wave?.wave_id, update]);
+  }, [state.availability, sqlTarget, state.command, update]);
 
   const job = useJob(state.investigation?.job_id ?? null, workspaceId);
 
@@ -598,7 +631,7 @@ export function useInvestigation({
       }
       markUnconfirmed(state.unconfirmed ?? "create", caught);
     }
-  }, [state.availability, state.investigation, state.unconfirmed, conversationId, proposalMessageId, adopt, update, markUnconfirmed]);
+  }, [state.availability, state.investigation, state.unconfirmed, state.error, conversationId, proposalMessageId, adopt, update, markUnconfirmed]);
 
   return {
     ...state,

@@ -1,6 +1,11 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
-import type { Investigation, InvestigationSqlWave, Message } from "../api/client";
+import type {
+  Investigation,
+  InvestigationSqlWave,
+  InvestigationSqlWaveDecision,
+  Message,
+} from "../api/client";
 import {
   INVESTIGATION_STATUS_LABEL,
   describePlanningCost,
@@ -14,6 +19,7 @@ import type {
   InvestigationUnconfirmed,
 } from "../investigations/useInvestigation";
 import type { JobView } from "../operations/useJob";
+import { InvestigationSqlWavePanel } from "./InvestigationSqlWavePanel";
 import { JobProgress } from "./JobProgress";
 
 type Proposal = NonNullable<Message["proposal"]>;
@@ -35,6 +41,7 @@ interface InvestigationPanelProps {
   onCancel: () => void;
   onCheckServerState: () => void;
   onRefreshJob: () => void;
+  onSubmitSqlWave: (decision: InvestigationSqlWaveDecision) => void;
 }
 
 interface DisplayTask {
@@ -129,6 +136,7 @@ export function InvestigationPanel({
   proposal,
   availability,
   investigation,
+  sqlWave,
   command,
   unconfirmed,
   cancellation,
@@ -141,6 +149,7 @@ export function InvestigationPanel({
   onCancel,
   onCheckServerState,
   onRefreshJob,
+  onSubmitSqlWave,
 }: InvestigationPanelProps) {
   const planHeading = useRef<HTMLHeadingElement>(null);
   const statusHeading = useRef<HTMLHeadingElement>(null);
@@ -305,6 +314,23 @@ export function InvestigationPanel({
           Detailed task-owner progress is unavailable. No task percentage or agent activity is
           estimated.
         </p>
+      ) : null}
+
+      {investigation.status === "awaiting_sql_approval" ? (
+        command === "sql_submitted" ? (
+          <Notice kind="info">
+            SQL decisions were submitted. The server has not yet confirmed that execution resumed;
+            the statements are no longer kept in the browser.
+          </Notice>
+        ) : sqlWave ? (
+          <InvestigationSqlWavePanel
+            wave={sqlWave}
+            busy={actionBusy}
+            onSubmit={onSubmitSqlWave}
+          />
+        ) : (
+          <p>Loading the authorized SQL statement review...</p>
+        )
       ) : null}
 
       {investigation.status === "awaiting_plan_approval" ? (

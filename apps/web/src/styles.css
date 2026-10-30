@@ -400,6 +400,13 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .investigation-owner-progress dd { margin: .2rem 0 0; color: var(--text-secondary); font-size: .8rem; }
 .investigation-progress-tasks { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
 .investigation-progress-tasks li { display: grid; grid-template-columns: minmax(7rem, 1.2fr) repeat(4, minmax(6rem, 1fr)); gap: .5rem; padding: .55rem; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: .8rem; }
+.investigation-wave { display: grid; gap: .8rem; padding: .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.investigation-wave h5, .investigation-wave h6 { margin: 0; }
+.investigation-wave-items { display: grid; gap: .8rem; margin: 0; padding: 0; list-style: none; }
+.investigation-wave-items > li { display: grid; gap: .65rem; padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-raised); }
+.investigation-wave-items fieldset { display: flex; flex-wrap: wrap; gap: .55rem 1rem; margin: 0; padding: .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.investigation-wave-items fieldset label { display: inline-flex; align-items: center; gap: .35rem; }
+.investigation-wave-review { display: grid; justify-items: start; gap: .5rem; padding: .7rem; border-left: 3px solid var(--accent); background: var(--surface-raised); }
 .proposal-reasons { margin-bottom: 0; padding-left: 1.15rem; color: var(--text-secondary); line-height: 1.5; }
 .provenance { display: grid; gap: .4rem; margin: .75rem 0; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: #0b121b; font-size: .82rem; line-height: 1.45; }
 .provenance p { margin: 0; }

@@ -66,6 +66,26 @@ function pendingPlan(): Investigation {
   });
 }
 
+function waitingForSql(): Investigation {
+  return investigation({
+    status: "awaiting_sql_approval",
+    sql_wave: {
+      wave_id: "1".repeat(32),
+      wave_digest: "a".repeat(64),
+      sequence: 1,
+      deadline: "2026-10-30T11:00:00Z",
+      items: [
+        {
+          task_id: "trend",
+          attempt: 1,
+          sql_fingerprint: "b".repeat(64),
+          policy_status: "allowed_read_only",
+        },
+      ],
+    },
+  });
+}
+
 function notFound() {
   return new ApiClientError("not found", "not_found", null, 404);
 }
@@ -241,7 +261,14 @@ describe("investigation polling and decisions", () => {
         wave_digest: "a".repeat(64),
         sequence: 1,
         deadline: "2026-10-30T11:00:00Z",
-        items: [],
+        items: [
+          {
+            task_id: "trend",
+            attempt: 1,
+            sql_fingerprint: "b".repeat(64),
+            policy_status: "not_applicable",
+          },
+        ],
       },
     });
     vi.mocked(getInvestigationByMessage)
@@ -336,6 +363,127 @@ describe("investigation cancellation", () => {
     expect(result.current.cancellation).toBe("confirmed");
     expect(result.current.investigation?.status).toBe("cancelled");
     expect(result.current.unconfirmed).toBeNull();
+  });
+});
+
+describe("investigation SQL waves", () => {
+  it("submits the exact reviewed wave and clears SQL before the request resolves", async () => {
+    const waiting = waitingForSql();
+    const review = {
+      ...waiting.sql_wave!,
+      items: waiting.sql_wave!.items.map((item) => ({ ...item, sql: "SELECT month FROM uploaded_data" })),
+    };
+    const submitted = deferred<Investigation>();
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(waiting);
+    vi.mocked(getInvestigationSqlWave).mockResolvedValue(review);
+    vi.mocked(decideInvestigationSqlWave).mockReturnValue(submitted.promise);
+    const { result } = follow();
+    await waitFor(() => expect(result.current.sqlWave?.items[0]?.sql).toContain("SELECT"));
+    const decision = {
+      wave_id: review.wave_id,
+      wave_digest: review.wave_digest,
+      items: [
+        {
+          task_id: review.items[0]!.task_id,
+          sql_fingerprint: review.items[0]!.sql_fingerprint,
+          decision: "approve" as const,
+        },
+      ],
+    };
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.submitSqlWave(decision);
+    });
+    expect(result.current.sqlWave).toBeNull();
+    expect(decideInvestigationSqlWave).toHaveBeenCalledWith("inv_one", decision);
+    submitted.resolve(investigation({ status: "queued", updated_at: "2026-10-30T10:01:00Z" }));
+    await act(() => request);
+    expect(result.current.investigation?.status).toBe("queued");
+  });
+
+  it("refuses a review whose item binding differs from the durable wave summary", async () => {
+    const waiting = waitingForSql();
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(waiting);
+    vi.mocked(getInvestigationSqlWave).mockResolvedValue({
+      ...waiting.sql_wave!,
+      items: waiting.sql_wave!.items.map((item) => ({
+        ...item,
+        sql_fingerprint: "c".repeat(64),
+        sql: "SELECT month FROM uploaded_data",
+      })),
+    });
+    const { result } = follow();
+
+    await waitFor(() => expect(result.current.error?.code).toBe("sql_wave_review_mismatch"));
+    expect(result.current.sqlWave).toBeNull();
+    expect(decideInvestigationSqlWave).not.toHaveBeenCalled();
+  });
+
+  it("adopts server-confirmed expiry after a stale wave conflict", async () => {
+    const waiting = waitingForSql();
+    const review = {
+      ...waiting.sql_wave!,
+      items: waiting.sql_wave!.items.map((item) => ({ ...item, sql: "SELECT month FROM uploaded_data" })),
+    };
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(waiting);
+    vi.mocked(getInvestigationSqlWave).mockResolvedValue(review);
+    vi.mocked(decideInvestigationSqlWave).mockRejectedValue(
+      new ApiClientError("The SQL approval expired.", "approval_expired", null, 409),
+    );
+    vi.mocked(getInvestigation).mockResolvedValue(
+      investigation({
+        status: "expired",
+        updated_at: "2026-10-30T11:00:00Z",
+        explanation: "The SQL approval deadline expired.",
+      }),
+    );
+    const { result } = follow();
+    await waitFor(() => expect(result.current.sqlWave).not.toBeNull());
+
+    await act(() => result.current.submitSqlWave({
+      wave_id: review.wave_id,
+      wave_digest: review.wave_digest,
+      items: [{
+        task_id: review.items[0]!.task_id,
+        sql_fingerprint: review.items[0]!.sql_fingerprint,
+        decision: "reject",
+      }],
+    }));
+
+    expect(result.current.availability).toBe("loaded");
+    expect(result.current.investigation?.status).toBe("expired");
+    expect(result.current.sqlWave).toBeNull();
+    expect(result.current.unconfirmed).toBeNull();
+  });
+
+  it("clears SQL and locks decisions when a retryable submission remains unconfirmed", async () => {
+    const waiting = waitingForSql();
+    const review = {
+      ...waiting.sql_wave!,
+      items: waiting.sql_wave!.items.map((item) => ({ ...item, sql: "SELECT month FROM uploaded_data" })),
+    };
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(waiting);
+    vi.mocked(getInvestigationSqlWave).mockResolvedValue(review);
+    vi.mocked(decideInvestigationSqlWave).mockRejectedValue(network());
+    vi.mocked(getInvestigation).mockResolvedValue(waiting);
+    const { result } = follow();
+    await waitFor(() => expect(result.current.sqlWave).not.toBeNull());
+
+    await act(() => result.current.submitSqlWave({
+      wave_id: review.wave_id,
+      wave_digest: review.wave_digest,
+      items: [{
+        task_id: review.items[0]!.task_id,
+        sql_fingerprint: review.items[0]!.sql_fingerprint,
+        decision: "approve",
+      }],
+    }));
+
+    expect(result.current.availability).toBe("unconfirmed");
+    expect(result.current.unconfirmed).toBe("sql_wave");
+    expect(result.current.sqlWave).toBeNull();
+    expect(decideInvestigationSqlWave).toHaveBeenCalledTimes(1);
   });
 });
 

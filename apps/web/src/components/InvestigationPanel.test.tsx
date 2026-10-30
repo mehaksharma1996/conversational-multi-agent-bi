@@ -14,6 +14,7 @@ const callbacks = {
   onCancel: vi.fn(),
   onCheckServerState: vi.fn(),
   onRefreshJob: vi.fn(),
+  onSubmitSqlWave: vi.fn(),
 };
 
 function pendingPlan(overrides: Partial<Investigation> = {}): Investigation {
@@ -253,5 +254,31 @@ describe("InvestigationPanel", () => {
 
     expect(screen.getByText(/outcome is unknown.*not restarted/i)).toBeInTheDocument();
     expect(screen.getByText(/durable server record; no work was restarted/i)).toBeInTheDocument();
+  });
+
+  it("removes statement SQL while a submitted wave awaits authoritative transition", () => {
+    const waiting = pendingPlan({ status: "awaiting_sql_approval", proposal: null });
+    render(
+      <InvestigationPanel
+        {...props(waiting)}
+        command="sql_submitted"
+        sqlWave={{
+          wave_id: "1".repeat(32),
+          wave_digest: "a".repeat(64),
+          sequence: 1,
+          deadline: "2026-10-30T14:00:00Z",
+          items: [{
+            task_id: "trend",
+            attempt: 1,
+            sql_fingerprint: "b".repeat(64),
+            policy_status: "allowed_read_only",
+            sql: "SELECT secret_statement FROM uploaded_data",
+          }],
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/statements are no longer kept in the browser/i)).toBeInTheDocument();
+    expect(screen.queryByText(/SELECT secret_statement/)).not.toBeInTheDocument();
   });
 });
