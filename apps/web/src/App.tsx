@@ -40,6 +40,7 @@ import { OperationAnnouncer, type Announcement } from "./components/OperationAnn
 import { ProductOverview } from "./components/ProductOverview";
 import { SchemaReview } from "./components/SchemaReview";
 import { StatusBanner } from "./components/StatusBanner";
+import { InvestigationPanel } from "./components/InvestigationPanel";
 import { UploadStep } from "./components/UploadStep";
 import { WorkbenchShell } from "./components/WorkbenchShell";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
@@ -61,6 +62,8 @@ import {
 } from "./demo/retailDemo";
 import { announcementFor } from "./operations/announcements";
 import { discardStale, useOperations, type OperationEvent } from "./operations/useOperations";
+import { INVESTIGATION_STATUS_LABEL } from "./investigations/model";
+import { useInvestigation } from "./investigations/useInvestigation";
 import { useWorkflowDrafts } from "./workspace/drafts";
 import {
   assessMarker,
@@ -91,6 +94,14 @@ function plural(count: number, one: string, many = `${one}s`): string {
 function normalizeError(error: unknown): ApiClientError {
   if (error instanceof ApiClientError) return error;
   return new ApiClientError("Something unexpected happened. Try again.");
+}
+
+function latestInvestigationProposal(messages: Message[]): Message | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.proposal) return message;
+  }
+  return null;
 }
 
 export default function App() {
@@ -142,6 +153,27 @@ export default function App() {
     () => sectionForHash(window.location.hash) ?? "overview",
   );
   const { drafts, updateDraft, resetDrafts } = useWorkflowDrafts();
+  const investigationProposal = latestInvestigationProposal(messages);
+  const investigation = useInvestigation({
+    workspaceId: workspace?.id ?? null,
+    conversationId: conversation?.id ?? null,
+    proposalMessageId: investigationProposal?.id ?? null,
+    beginCommand: () => begin("investigation"),
+  });
+  const previousInvestigationStatus = useRef<{ id: string; status: string } | null>(null);
+
+  useEffect(() => {
+    const current = investigation.investigation;
+    const previous = previousInvestigationStatus.current;
+    if (current === null) {
+      previousInvestigationStatus.current = null;
+      return;
+    }
+    if (previous?.id === current.id && previous.status !== current.status) {
+      announce(`Investigation status: ${INVESTIGATION_STATUS_LABEL[current.status]}.`);
+    }
+    previousInvestigationStatus.current = { id: current.id, status: current.status };
+  }, [investigation.investigation, announce]);
 
   useEffect(() => {
     workspaceId.current = workspace?.id ?? null;
@@ -255,6 +287,44 @@ export default function App() {
 
   const confirm = (request: ConfirmationRequest) =>
     new Promise<boolean>((resolve) => setConfirmation({ request, resolve }));
+
+  const handleInvestigationPlanDecision = async (decision: "approve" | "reject") => {
+    const approved = await confirm(
+      decision === "approve"
+        ? {
+            title: "Approve this investigation plan?",
+            consequences: [
+              "The server will bind approval to the exact plan shown and start its bounded execution job.",
+              "SQL that requires approval will still pause for a separate statement-level decision.",
+              "The displayed amount is a planning-phase estimate, not an execution-cost guarantee.",
+            ],
+            confirmLabel: "Approve and run plan",
+          }
+        : {
+            title: "Reject this investigation plan?",
+            consequences: [
+              "The plan will become terminally rejected and will not execute.",
+              "Rejecting cannot be undone from this proposal.",
+            ],
+            confirmLabel: "Reject plan",
+            tone: "danger",
+          },
+    );
+    if (approved) await investigation.decidePlan(decision);
+  };
+
+  const handleInvestigationCancel = async () => {
+    const approved = await confirm({
+      title: "Cancel this investigation?",
+      consequences: [
+        "The server will prevent further work and discard results that arrive after cancellation.",
+        "A provider or SQL call already in flight may finish before cancellation becomes terminal.",
+      ],
+      confirmLabel: "Cancel investigation",
+      tone: "danger",
+    });
+    if (approved) await investigation.cancel();
+  };
 
   const pendingApprovals = messages.filter((message) => message.status === "pending_approval").length;
 
@@ -1210,6 +1280,27 @@ export default function App() {
               onAsk={handleQuestion}
               onApproval={handleApproval}
               onExport={handleResultExport}
+              investigationMessageId={investigationProposal?.id ?? null}
+              investigationPanel={
+                investigationProposal?.proposal ? (
+                  <InvestigationPanel
+                    proposal={investigationProposal.proposal}
+                    availability={investigation.availability}
+                    investigation={investigation.investigation}
+                    sqlWave={investigation.sqlWave}
+                    command={investigation.command}
+                    unconfirmed={investigation.unconfirmed}
+                    error={investigation.error}
+                    job={investigation.job}
+                    busy={busy}
+                    onStart={() => void investigation.start()}
+                    onApprove={() => void handleInvestigationPlanDecision("approve")}
+                    onReject={() => void handleInvestigationPlanDecision("reject")}
+                    onCancel={() => void handleInvestigationCancel()}
+                    onCheckServerState={() => void investigation.checkServerState()}
+                  />
+                ) : null
+              }
             />
           ) : (
             <section className="empty-workspace-state"><h2>Workspace unavailable</h2><p>Retry workspace initialization before asking a question.</p></section>

@@ -379,6 +379,18 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .proposal-facts div { padding: .6rem; border-radius: var(--radius-sm); background: var(--surface-raised); }
 .proposal-facts dt { color: var(--muted); font-size: .7rem; font-weight: 800; text-transform: uppercase; }
 .proposal-facts dd { margin: .2rem 0 0; color: var(--text-secondary); }
+.investigation-workflow { display: grid; gap: .8rem; margin-top: .25rem; padding-top: .8rem; border-top: 1px solid var(--border); }
+.investigation-workflow p { margin: 0; }
+.investigation-status-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.investigation-status-row h5, .investigation-plan h5 { margin: 0; font-size: .95rem; }
+.investigation-plan { display: grid; gap: .8rem; padding: .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.investigation-plan h6 { margin: 0 0 .35rem; color: var(--text); font-size: .85rem; }
+.investigation-plan ol, .investigation-plan ul { margin: 0; padding-left: 1.25rem; }
+.investigation-task-list { display: grid; gap: .45rem; }
+.cost-estimate { padding: .65rem; border-left: 3px solid var(--accent); background: var(--surface-raised); color: var(--text-secondary); }
+.investigation-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.investigation-cancel { display: grid; justify-items: start; gap: .5rem; }
+.investigation-terminal { display: grid; gap: .45rem; padding: .7rem; border-radius: var(--radius-sm); background: var(--surface-raised); }
 .proposal-reasons { margin-bottom: 0; padding-left: 1.15rem; color: var(--text-secondary); line-height: 1.5; }
 .provenance { display: grid; gap: .4rem; margin: .75rem 0; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: #0b121b; font-size: .82rem; line-height: 1.45; }
 .provenance p { margin: 0; }

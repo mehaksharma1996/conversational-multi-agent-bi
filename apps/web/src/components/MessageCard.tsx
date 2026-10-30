@@ -22,6 +22,7 @@ interface MessageCardProps {
   onApprovalDraftChange: (draft: ApprovalDraft) => void;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
   onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
+  investigationPanel?: ReactNode;
 }
 
 /** Server time in the reader's locale; the date is added unless it is today. */
@@ -128,6 +129,7 @@ export function MessageCard({
   onApprovalDraftChange,
   onApproval,
   onExport,
+  investigationPanel,
 }: MessageCardProps) {
   const sources = message.sources.map((source) => parseSource(source.citation));
   const byNumber = new Map(
@@ -197,6 +199,7 @@ export function MessageCard({
                 ))}
               </ul>
             </details>
+            {investigationPanel}
           </section>
         ) : message.status === "pending_approval" ? (
           <p className="answer-text">
