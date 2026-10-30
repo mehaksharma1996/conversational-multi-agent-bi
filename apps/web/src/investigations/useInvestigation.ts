@@ -330,14 +330,15 @@ export function useInvestigation({
 
   const sqlTarget = state.investigation;
 
-  // SQL exists only in this scoped state, only while the matching authorized wave is pending.
+  // SQL exists only in this scoped state, only while the matching authorized wave is pending and
+  // no command is in flight: a submission or cancellation must not fetch the statements again.
   useEffect(() => {
     const summary = sqlTarget?.sql_wave;
     if (
       state.availability !== "loaded" ||
       sqlTarget?.status !== "awaiting_sql_approval" ||
       !summary ||
-      state.command === "sql_submitted"
+      state.command !== null
     ) {
       update((previous) => previous.sqlWave === null ? previous : { ...previous, sqlWave: null });
       return;

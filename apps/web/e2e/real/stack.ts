@@ -17,8 +17,31 @@ export const WEB_URL = `http://127.0.0.1:${WEB_PORT}`;
 const webRoot = resolve(import.meta.dirname, "../..");
 const repoRoot = resolve(webRoot, "../..");
 const stateDir = resolve(repoRoot, "work/e2e-stack");
-const dataDir = resolve(stateDir, "data");
 const apiPidFile = resolve(stateDir, "api.pid");
+
+/**
+ * The API factory the stack serves. `retail` is the scripted retail demo; the investigation
+ * factories (tests/e2e/investigation_app.py) enable investigation routing with scripted bounded
+ * adapters or, for `investigation-production`, with none, as production is configured. Each keeps
+ * its own data directory so the journeys never share workspaces.
+ */
+export type ApiFactory = "retail" | "investigation-scripted" | "investigation-production";
+
+const FACTORIES: Record<ApiFactory, { target: string; data: string }> = {
+  retail: { target: "tests.e2e.retail_app:build_app", data: "data" },
+  "investigation-scripted": {
+    target: "tests.e2e.investigation_app:build_scripted_app",
+    data: "investigation-scripted",
+  },
+  "investigation-production": {
+    target: "tests.e2e.investigation_app:build_production_app",
+    data: "investigation-production",
+  },
+};
+
+export function apiDataDir(factory: ApiFactory): string {
+  return resolve(stateDir, FACTORIES[factory].data);
+}
 const webPidFile = resolve(stateDir, "web.pid");
 
 function python(): string {
@@ -84,16 +107,16 @@ async function waitFor(url: string, up: boolean, timeoutMs = 60_000): Promise<vo
   throw new Error(`${url} did not become ${up ? "ready" : "unavailable"} within ${timeoutMs} ms`);
 }
 
-function startApi(): void {
+function startApi(factory: ApiFactory): void {
   startProcess(
     python(),
     [
-      "-m", "uvicorn", "--factory", "tests.e2e.retail_app:build_app",
+      "-m", "uvicorn", "--factory", FACTORIES[factory].target,
       "--host", "127.0.0.1", "--port", String(API_PORT), "--no-server-header",
     ],
     apiPidFile,
     "api.log",
-    { E2E_DATA_DIR: dataDir, PYTHONPATH: repoRoot, PYTHONUNBUFFERED: "1" },
+    { E2E_DATA_DIR: apiDataDir(factory), PYTHONPATH: repoRoot, PYTHONUNBUFFERED: "1" },
     repoRoot,
   );
 }
@@ -104,7 +127,7 @@ export async function startStack(): Promise<void> {
   rmSync(stateDir, { recursive: true, force: true });
   mkdirSync(stateDir, { recursive: true });
 
-  startApi();
+  startApi("retail");
   startProcess(
     process.execPath,
     [resolve(webRoot, "node_modules/vite/bin/vite.js"), "preview", "--host", "127.0.0.1",
@@ -118,11 +141,11 @@ export async function startStack(): Promise<void> {
   await waitFor(`${WEB_URL}/`, true);
 }
 
-/** Stops only the API process and starts a new one on the same data directory. */
-export async function restartApi(): Promise<void> {
+/** Stops only the API process and starts `factory` on that factory's (kept) data directory. */
+export async function restartApi(factory: ApiFactory = "retail"): Promise<void> {
   killFromPidFile(apiPidFile);
   await waitFor(`http://127.0.0.1:${API_PORT}/health/ready`, false);
-  startApi();
+  startApi(factory);
   await waitFor(`http://127.0.0.1:${API_PORT}/health/ready`, true);
 }
 

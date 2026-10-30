@@ -53,5 +53,12 @@ npm run test:e2e        # mocked API journeys + axe baselines (the Docker-only s
 npm run test:e2e:real   # real API with a scripted model (no Docker); builds the bundle first
 ```
 
+The real-stack run also includes the UI-6b investigation journeys
+(`e2e/real/investigation-journey.spec.ts`). They restart the API with the test-only factories in
+`tests/e2e/investigation_app.py`: investigation routing enabled, with scripted bounded adapters or,
+for the production-configuration journey, none. These factories use their own data directories
+under `work/e2e-stack/`. They prove wiring only; production investigation execution stays
+unavailable until PROD-1 (#198).
+
 `E2E_CAPTURE=1` additionally refreshes `docs/assets/demo/*.png`. The Docker-based real-stack specs
 (`E2E_REAL_STACK=local|fake`) still require Compose and were not run for this change.

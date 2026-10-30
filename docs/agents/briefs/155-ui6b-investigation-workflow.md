@@ -339,3 +339,52 @@ Docker-dependent checks when Docker is available.
   therefore keeps the unconfirmed lock until an explicit later check; it never auto-creates.
 - Scripted adapters validate the complete workflow but do not establish production model support.
   The final report must state this and #198 explicitly.
+
+## S6 delivery record (2026-10-30)
+
+**Status.** Production investigation execution remains unavailable until PROD-1 (#198), and
+investigation routing remains disabled by default. The scripted adapters prove browser and API
+wiring, not production model support. UI-6c (#156) report and evidence rendering is not part of
+this issue: completed investigations say so and show no report content.
+
+- **Mocked Playwright** (`apps/web/e2e/investigation-workflow.spec.ts`, 15 journeys):
+  - desktop and phone: keyboard-only start, planning, full plan review (cost wording, deadline,
+    requirements, missing information), and approval with task-owner progress;
+  - desktop and phone: a SQL wave with approve, reject, and edit. An unchanged edit is refused,
+    the exact wave/item binding is echoed, and SQL is removed before the server answers and never
+    stored;
+  - keyboard-only rejection (Escape sends nothing) and cancellation (requested, then confirmed;
+    too late);
+  - restart interruption, missing process-local job, and stale proposal and workspace lookups;
+  - uncertain creation, plan, and SQL-wave outcomes locked behind **Check server state**;
+  - a 409 after the SQL-wave deadline adopted from the server's expired record.
+
+  axe runs in every consequential decision state, including the open confirmation dialogs.
+- **Scripted real stack** (`apps/web/e2e/real/investigation-journey.spec.ts`, 5 journeys). These
+  run against the production API code. `tests/e2e/investigation_app.py` provides test-only
+  factories: routing enabled with the bounded scripted planning/execution adapters, consent
+  through the ordinary consent endpoint, and each factory with its own data directory. The
+  journeys cover:
+  - creation, plan approval, a SQL wave, and completion;
+  - rejection;
+  - cancellation while awaiting plan approval;
+  - an API restart (`interrupted`, nothing offered);
+  - the production configuration, which shows `failed` with the `metering_unbounded` explanation
+    and makes no model call (asserted through a content-free call log).
+
+  `tests/test_e2e_investigation_app.py` checks both factories over HTTP.
+- **Defect found and fixed.** Starting a SQL-wave submission or a cancellation re-ran the SQL fetch
+  effect, so the statements were fetched and shown again while the command was in flight. The
+  controller now fetches a wave only when no command is pending. Two Vitest regressions cover it.
+- **Review point confirmed.** Plan expiry is mirrored by the server during investigation GET (S1).
+  SQL-wave expiry is enforced by the server at decision time and adopted only from an
+  authoritative read after the 409. The browser clock never declares expiry. This is consistent
+  with D1 and D6.
+- **Final verification.**
+  - `python -m scripts.check_all --full` passed 10/10: Ruff, format, mypy, pytest, evaluations,
+    OpenAPI compatibility, web lint, typecheck, Vitest, and build.
+  - Vitest: 240 tests in 28 files.
+  - Mocked Playwright: 46 passed. The 30 skipped tests are the real-stack and Docker specs.
+  - Scripted real stack: 28 passed (23 retail and 5 investigation).
+  - `git diff --check` is clean.
+  - Docker-dependent journeys were not run: Docker is unavailable on this host.

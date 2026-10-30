@@ -397,9 +397,37 @@ describe("investigation SQL waves", () => {
     });
     expect(result.current.sqlWave).toBeNull();
     expect(decideInvestigationSqlWave).toHaveBeenCalledWith("inv_one", decision);
+    // The in-flight command must not fetch the statements again.
+    await act(async () => {});
+    expect(getInvestigationSqlWave).toHaveBeenCalledTimes(1);
+    expect(result.current.sqlWave).toBeNull();
     submitted.resolve(investigation({ status: "queued", updated_at: "2026-10-30T10:01:00Z" }));
     await act(() => request);
     expect(result.current.investigation?.status).toBe("queued");
+  });
+
+  it("does not fetch the statements again while cancellation of a paused wave is in flight", async () => {
+    const waiting = waitingForSql();
+    const cancelled = deferred<Investigation>();
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(waiting);
+    vi.mocked(getInvestigationSqlWave).mockResolvedValue({
+      ...waiting.sql_wave!,
+      items: waiting.sql_wave!.items.map((item) => ({ ...item, sql: "SELECT month FROM uploaded_data" })),
+    });
+    vi.mocked(cancelInvestigation).mockReturnValue(cancelled.promise);
+    const { result } = follow();
+    await waitFor(() => expect(result.current.sqlWave).not.toBeNull());
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.cancel();
+    });
+    await act(async () => {});
+    expect(result.current.sqlWave).toBeNull();
+    expect(getInvestigationSqlWave).toHaveBeenCalledTimes(1);
+    cancelled.resolve(investigation({ status: "cancelled", updated_at: "2026-10-30T10:01:00Z" }));
+    await act(() => request);
+    expect(result.current.cancellation).toBe("confirmed");
   });
 
   it("refuses a review whose item binding differs from the durable wave summary", async () => {
