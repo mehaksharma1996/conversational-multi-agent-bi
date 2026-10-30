@@ -805,7 +805,8 @@ Design E1 to E9: `docs/agents/briefs/144-inv11-investigation-api.md`; ADR 0024 A
 | Endpoint | Capability | Result |
 |---|---|---|
 | `POST /api/v1/conversations/{id}/investigations` (`Idempotency-Key`) | `analysis:run` | 202; `planning` job submitted |
-| `GET /api/v1/investigations/{id}` | `workspace:read` | status, plan, pending wave identity (no SQL), explanation, report |
+| `GET /api/v1/conversations/{id}/investigations/by-message/{message_id}` | `workspace:read` | newest exact source-message investigation; read-only recovery |
+| `GET /api/v1/investigations/{id}` | `workspace:read` | status, live proposal review, current job hint, validated task progress, plan, pending wave identity (no SQL), explanation, report |
 | `POST /api/v1/investigations/{id}/plan-decision` | `analysis:run` | approve (execution job) or reject |
 | `POST /api/v1/investigations/{id}/cancel` | `analysis:run` | 202; further work stops |
 | `GET /api/v1/investigations/{id}/sql-wave` | `analysis:run` | the pending wave with each statement |
@@ -824,3 +825,25 @@ plan, the verified report, and the typed evidence payloads. Workspace deletion r
 to `interrupted` (`interrupted_by_restart`), with one `agent.investigation_reconciled` event each
 (`service.started` reports `investigations_interrupted`). Decisions on an interrupted record are
 refused; creation with the same key replays it.
+
+## UI-6b read contract (#155)
+
+The investigation response additively exposes only server-trusted, read-side metadata needed by
+the approval UI:
+
+- the live validated proposal wrapper's planning `CostEstimate`, missing-information strings,
+  derived approval requirements, and registered plan deadline;
+- the current process-local job ID as an opaque hint, still tenant-authorized by `/jobs/{id}`;
+- task ID, kind, approved assignee, actual guarded-state status, and attempts, plus aggregates by
+  those task owners.
+
+Progress is read from `InvestigationExecutionRun.state()` and is null when the run or its validated
+checkpoint is absent or unreadable. It never claims live Supervisor, Critic, or Business
+Investigator phases. Proposal details and job/progress links are retained only in the live trusted
+runtime: after restart the durable `interrupted` record has all three as null and cannot become an
+actionable approval screen.
+
+Every status read first expires due plan approvals and mirrors the approval service's status into
+the durable record. The by-message endpoint chooses the newest owned record for the exact
+conversation/message tuple; unknown and foreign tuples are the same 404. It never creates or
+retries work, so it is safe for reload and uncertain-POST reconciliation.

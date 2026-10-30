@@ -30,6 +30,10 @@ from apps.api.serializers import is_investigation_proposal
 from packages.connectors import IdentityContext
 from packages.investigation import InvestigationStatus
 from packages.investigation.approval import SQLItemDecision
+from packages.investigation.budget import CostEstimate
+from packages.investigation.contracts import AgentRole, TaskKind
+from packages.investigation.planning import ApprovalRequirement
+from packages.investigation.state import TaskRunStatus
 
 router = APIRouter(prefix="/api/v1", tags=["investigations"])
 
@@ -121,6 +125,38 @@ class SQLWaveReviewResponse(BaseModel):
     items: list[SQLWaveReviewItem]
 
 
+class InvestigationProposalReviewResponse(BaseModel):
+    """Display-only proposal details; never approval or execution authority."""
+
+    cost_estimate: CostEstimate
+    missing_information: list[str]
+    approval_requirements: list[ApprovalRequirement]
+    plan_expires_at: datetime
+
+
+class InvestigationTaskProgressResponse(BaseModel):
+    task_id: str
+    kind: TaskKind
+    assignee: AgentRole
+    status: TaskRunStatus
+    attempts: int
+
+
+class InvestigationTaskOwnerProgressResponse(BaseModel):
+    assignee: AgentRole
+    total_tasks: int
+    completed_tasks: int
+    running_tasks: int
+    pending_tasks: int
+
+
+class InvestigationProgressResponse(BaseModel):
+    completed_tasks: int
+    total_tasks: int
+    tasks: list[InvestigationTaskProgressResponse]
+    task_owners: list[InvestigationTaskOwnerProgressResponse]
+
+
 class InvestigationResponse(BaseModel):
     id: str
     conversation_id: str
@@ -134,6 +170,9 @@ class InvestigationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     plan: dict[str, Any] | None = None
+    proposal: InvestigationProposalReviewResponse | None = None
+    job_id: str | None = None
+    progress: InvestigationProgressResponse | None = None
     sql_wave: SQLWaveSummary | None = None
     report: dict[str, Any] | None = None
 
@@ -152,6 +191,7 @@ def _owned(
 
 
 def _response(runtime: InvestigationRuntime, record: InvestigationRecord) -> InvestigationResponse:
+    record = runtime.synchronize(record)
     explanation = None
     if record.explanation_code is not None:
         explanation = EXPLANATIONS.get(record.explanation_code, _GENERIC)
@@ -179,6 +219,46 @@ def _response(runtime: InvestigationRuntime, record: InvestigationRecord) -> Inv
         report = runtime.report(record)
     except Exception:  # unreadable or tampered content is never returned
         plan, report = None, None
+    proposal_snapshot = runtime.proposal_review(record)
+    proposal = (
+        None
+        if proposal_snapshot is None
+        else InvestigationProposalReviewResponse(
+            cost_estimate=proposal_snapshot.cost_estimate,
+            missing_information=list(proposal_snapshot.missing_information),
+            approval_requirements=list(proposal_snapshot.approval_requirements),
+            plan_expires_at=proposal_snapshot.plan_expires_at,
+        )
+    )
+    progress_snapshot = runtime.progress(record)
+    progress = (
+        None
+        if progress_snapshot is None
+        else InvestigationProgressResponse(
+            completed_tasks=progress_snapshot.completed_tasks,
+            total_tasks=progress_snapshot.total_tasks,
+            tasks=[
+                InvestigationTaskProgressResponse(
+                    task_id=item.task_id,
+                    kind=item.kind,
+                    assignee=item.assignee,
+                    status=item.status,
+                    attempts=item.attempts,
+                )
+                for item in progress_snapshot.tasks
+            ],
+            task_owners=[
+                InvestigationTaskOwnerProgressResponse(
+                    assignee=item.assignee,
+                    total_tasks=item.total_tasks,
+                    completed_tasks=item.completed_tasks,
+                    running_tasks=item.running_tasks,
+                    pending_tasks=item.pending_tasks,
+                )
+                for item in progress_snapshot.task_owners
+            ],
+        )
+    )
     return InvestigationResponse(
         id=record.id,
         conversation_id=record.conversation_id,
@@ -192,6 +272,9 @@ def _response(runtime: InvestigationRuntime, record: InvestigationRecord) -> Inv
         created_at=record.created_at,
         updated_at=record.updated_at,
         plan=dict(plan) if plan is not None else None,
+        proposal=proposal,
+        job_id=runtime.job_id(record),
+        progress=progress,
         sql_wave=wave,
         report=dict(report) if report is not None else None,
     )
@@ -240,6 +323,28 @@ def create_investigation(
         )
     except InvestigationRequestError as error:
         raise _refused(error) from None
+    response.headers["Cache-Control"] = "no-store"
+    return _response(runtime, record)
+
+
+@router.get(
+    "/conversations/{conversation_id}/investigations/by-message/{message_id}",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
+    response_model=InvestigationResponse,
+    responses=STANDARD_ERROR_RESPONSES,
+)
+def get_investigation_by_message(
+    conversation_id: str,
+    message_id: str,
+    response: Response,
+    identity: IdentityDependency,
+    runtime: RuntimeDependency,
+) -> InvestigationResponse:
+    """Read the newest owned investigation for one exact source message; never create work."""
+    try:
+        record = runtime.records.latest_for_message(identity.tenant_id, conversation_id, message_id)
+    except InvestigationNotFoundError:
+        raise ResourceNotFoundError("Investigation") from None
     response.headers["Cache-Control"] = "no-store"
     return _response(runtime, record)
 

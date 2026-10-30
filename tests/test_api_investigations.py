@@ -196,12 +196,40 @@ def test_an_approved_investigation_runs_to_a_durable_verified_report() -> None:
         body = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
         assert body["status"] == "awaiting_plan_approval", body
         assert body["plan"]["tasks"][0]["id"] == "trend" and body["report"] is None
+        assert body["proposal"]["cost_estimate"]["kind"] == "estimate"
+        assert body["proposal"]["cost_estimate"]["bound"] == "enforced_upper_bound"
+        assert body["proposal"]["approval_requirements"][0] == {
+            "kind": "plan",
+            "status": "required",
+        }
+        assert body["proposal"]["plan_expires_at"]
+        assert body["job_id"]
+        assert body["progress"] is None
         assert _approve(client, body, plan_digest="0" * 64).status_code == 409
         approved = _approve(client, body)
         assert approved.status_code == 200, approved.text
         paused = _until(client, investigation_id, _status("awaiting_sql_approval", "failed"))
         assert paused["status"] == "awaiting_sql_approval", paused
         assert "SELECT" not in json.dumps(paused)  # the summary names the wave, never its SQL
+        assert paused["progress"]["total_tasks"] == 1
+        assert paused["progress"]["tasks"] == [
+            {
+                "task_id": "trend",
+                "kind": "sql_analysis",
+                "assignee": "sql_analyst",
+                "status": "running",
+                "attempts": 1,
+            }
+        ]
+        assert paused["progress"]["task_owners"] == [
+            {
+                "assignee": "sql_analyst",
+                "total_tasks": 1,
+                "completed_tasks": 0,
+                "running_tasks": 1,
+                "pending_tasks": 0,
+            }
+        ]
         review = client.get(f"/api/v1/investigations/{investigation_id}/sql-wave").json()
         assert review["items"][0]["sql"].startswith("SELECT")
         assert _approve_wave(client, investigation_id).status_code == 202
@@ -213,6 +241,7 @@ def test_an_approved_investigation_runs_to_a_durable_verified_report() -> None:
     with TestClient(deployment.app()) as client:  # a restart keeps the completed report
         kept = client.get(f"/api/v1/investigations/{investigation_id}").json()
         assert kept["status"] == "completed" and kept["report"] == report
+        assert kept["proposal"] is None and kept["job_id"] is None and kept["progress"] is None
 
     names = [event.name for event in deployment.audit.events]
     for action in (
@@ -277,6 +306,67 @@ def test_creation_is_idempotent_and_one_live_investigation_per_conversation() ->
         )
         busy = _create(client, conversation_id, other, key="k2")
         assert busy.status_code == 409 and busy.json()["error"]["code"] == "conversation_busy"
+
+
+def test_read_only_lookup_recovers_latest_exact_source_message() -> None:
+    deployment = Deployment("inv11_lookup")
+    app = deployment.app()
+    with TestClient(app) as client:
+        _, conversation_id, message_id = _proposal(client)
+        first = _create(client, conversation_id, message_id).json()
+        first = _until(client, first["id"], _status("awaiting_plan_approval", "failed"))
+        assert _approve(client, first, decision="reject").json()["status"] == "plan_rejected"
+        second = _create(client, conversation_id, message_id, key="second").json()
+        path = f"/api/v1/conversations/{conversation_id}/investigations/by-message/{message_id}"
+        recovered = client.get(path)
+        assert recovered.status_code == 200 and recovered.json()["id"] == second["id"]
+        assert client.get(path + "_stale").status_code == 404
+        assert (
+            client.get(
+                f"/api/v1/conversations/conv_stale/investigations/by-message/{message_id}"
+            ).status_code
+            == 404
+        )
+        _as(app, OTHER_TENANT)
+        assert client.get(path).status_code == 404
+
+
+def test_plan_expiry_is_synchronized_at_the_exact_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deployment = Deployment("inv11_expiry_read")
+    with TestClient(deployment.app()) as client:
+        _, conversation_id, message_id = _proposal(client)
+        investigation_id = _create(client, conversation_id, message_id).json()["id"]
+        body = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
+        deadline = datetime.fromisoformat(body["proposal"]["plan_expires_at"])
+        runtime = client.app.state.investigations
+        monkeypatch.setattr(runtime._clock, "now", lambda: deadline)
+        expired = client.get(f"/api/v1/investigations/{investigation_id}").json()
+        assert expired["status"] == "expired"
+        assert expired["proposal"] is None and expired["progress"] is None
+        assert _approve(client, body).status_code == 409
+
+
+def test_unreadable_execution_progress_returns_no_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+    deployment = Deployment("inv11_progress_unreadable")
+    with TestClient(deployment.app()) as client:
+        _, conversation_id, message_id = _proposal(client)
+        investigation_id = _create(client, conversation_id, message_id).json()["id"]
+        body = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
+        assert _approve(client, body).is_success
+        paused = _until(client, investigation_id, _status("awaiting_sql_approval", "failed"))
+        assert paused["progress"] is not None
+        run = client.app.state.investigations._live[investigation_id].run
+        assert run is not None
+
+        def unreadable() -> Any:
+            raise RuntimeError("test-only unreadable checkpoint")
+
+        monkeypatch.setattr(run, "state", unreadable)
+        reread = client.get(f"/api/v1/investigations/{investigation_id}").json()
+        assert reread["status"] == "awaiting_sql_approval"
+        assert reread["progress"] is None
 
 
 def test_only_a_proposal_message_can_start_an_investigation() -> None:
@@ -363,6 +453,7 @@ def test_a_restart_interrupts_a_pending_investigation_with_an_explanation() -> N
         assert after["status"] == "interrupted"
         assert after["explanation_code"] == "interrupted_by_restart"
         assert "restarted" in after["explanation"]
+        assert after["proposal"] is None and after["job_id"] is None and after["progress"] is None
         assert _approve(client, body).status_code == 409  # nothing resumes
         replay = _create(client, conversation_id, message_id)  # durable idempotency
         assert replay.json()["id"] == investigation_id

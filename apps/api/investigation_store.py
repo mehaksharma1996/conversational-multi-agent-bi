@@ -290,6 +290,26 @@ class InvestigationRecordStore:
                 raise InvestigationNotFoundError("Investigation not found.")
             return record
 
+    def latest_for_message(
+        self, tenant_id: str, conversation_id: str, message_id: str
+    ) -> InvestigationRecord:
+        """Newest owned investigation created from one exact conversation message.
+
+        This is a read-only recovery index.  It never treats the message as authority and uses the
+        same not-found result for an unknown tuple and for a tuple owned by another tenant.
+        """
+        with self._lock:
+            matches = [
+                record
+                for record in self._records.values()
+                if record.tenant_id == tenant_id
+                and record.conversation_id == conversation_id
+                and record.message_id == message_id
+            ]
+            if not matches:
+                raise InvestigationNotFoundError("Investigation not found.")
+            return max(matches, key=lambda record: (record.created_at, record.id))
+
     def update(
         self,
         investigation_id: str,

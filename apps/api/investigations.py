@@ -50,12 +50,14 @@ from packages.governance.audit import AuditRecorder
 from packages.investigation.approval import (
     ApprovalRefused,
     ApproverIdentity,
+    PendingPlanApproval,
     PlanApprovalGrant,
     PlanDecisionRequest,
     SQLItemDecision,
     SQLWaveDecisionRequest,
 )
-from packages.investigation.budget import ProviderPricingTable
+from packages.investigation.budget import CostEstimate, ProviderPricingTable
+from packages.investigation.contracts import AgentRole, TaskKind
 from packages.investigation.gateway import (
     ANALYSIS_RUN_CAPABILITY,
     AuthorityStatus,
@@ -67,11 +69,18 @@ from packages.investigation.gateway import (
 )
 from packages.investigation.lifecycle import TRANSITIONS, InvestigationStatus, is_terminal
 from packages.investigation.planning import (
+    ApprovalRequirement,
+    InvestigationProposal,
     PlanningContext,
     PlanningMetadata,
     SchemaFieldMetadata,
 )
-from packages.investigation.state import InvestigationScope, plan_digest
+from packages.investigation.state import (
+    TERMINAL_TASK_STATUSES,
+    InvestigationScope,
+    TaskRunStatus,
+    plan_digest,
+)
 from packages.jobs import InProcessJobExecutor, JobContext, JobQueueFullError, JobStatus
 from src.documents.retriever import Retriever
 from src.orchestration.investigation_approval import InvestigationApprovalService, SQLWaveReview
@@ -242,10 +251,48 @@ class _Live:
     conversation_id: str
     capabilities: frozenset[str]
     proposal: InvestigationProposalRun | None = None
+    proposal_review: InvestigationProposal | None = None
+    pending_plan: PendingPlanApproval | None = None
     grant: PlanApprovalGrant | None = None
     run: InvestigationExecutionRun | None = None
     job_id: str | None = None
     registered: bool = False
+
+
+@dataclass(frozen=True)
+class ProposalReviewSnapshot:
+    """Display-only proposal data retained by the trusted live runtime."""
+
+    cost_estimate: CostEstimate
+    missing_information: tuple[str, ...]
+    approval_requirements: tuple[ApprovalRequirement, ...]
+    plan_expires_at: datetime
+
+
+@dataclass(frozen=True)
+class TaskProgressSnapshot:
+    task_id: str
+    kind: TaskKind
+    assignee: AgentRole
+    status: TaskRunStatus
+    attempts: int
+
+
+@dataclass(frozen=True)
+class TaskOwnerProgressSnapshot:
+    assignee: AgentRole
+    total_tasks: int
+    completed_tasks: int
+    running_tasks: int
+    pending_tasks: int
+
+
+@dataclass(frozen=True)
+class InvestigationProgressSnapshot:
+    completed_tasks: int
+    total_tasks: int
+    tasks: tuple[TaskProgressSnapshot, ...]
+    task_owners: tuple[TaskOwnerProgressSnapshot, ...]
 
 
 class InvestigationRuntime:
@@ -418,8 +465,9 @@ class InvestigationRuntime:
         self._records.save_plan(record, plan.model_dump_json())
         with self._lock:
             live.proposal = run
+            live.proposal_review = result.proposal
         try:
-            self.approvals.register_proposal(
+            pending = self.approvals.register_proposal(
                 run,
                 conversation_id=live.conversation_id,
                 workspace_expires_at=workspace.expires_at,
@@ -428,6 +476,7 @@ class InvestigationRuntime:
             self._end(investigation_id, tenant, S.FAILED, explanation=refused.code)
             return
         with self._lock:
+            live.pending_plan = pending
             live.registered = True
         try:
             self._records.update(investigation_id, tenant, status=S.AWAITING_PLAN_APPROVAL)
@@ -655,6 +704,100 @@ class InvestigationRuntime:
         value: Mapping[str, Any] = json.loads(stored[0])
         return value
 
+    def synchronize(self, record: InvestigationRecord) -> InvestigationRecord:
+        """Apply due server-side approval expiry before publishing a status read."""
+        self.approvals.expire_due()
+        self._sync(record)
+        return self._records.get(record.id, record.tenant_id)
+
+    def proposal_review(self, record: InvestigationRecord) -> ProposalReviewSnapshot | None:
+        """The trusted live proposal wrapper, never reconstructed after a restart."""
+        if record.status is not S.AWAITING_PLAN_APPROVAL:
+            return None
+        with self._lock:
+            live = self._live.get(record.id)
+            if (
+                live is None
+                or live.scope.tenant_id != record.tenant_id
+                or not live.registered
+                or live.proposal_review is None
+                or live.pending_plan is None
+            ):
+                return None
+            proposal = live.proposal_review
+            pending = live.pending_plan
+        if pending.plan_digest != record.plan_digest:
+            return None
+        return ProposalReviewSnapshot(
+            cost_estimate=proposal.cost_estimate,
+            missing_information=tuple(proposal.missing_information),
+            approval_requirements=tuple(proposal.approval_requirements),
+            plan_expires_at=pending.expires_at,
+        )
+
+    def job_id(self, record: InvestigationRecord) -> str | None:
+        """The opaque current process-local job hint for this exact owned record."""
+        with self._lock:
+            live = self._live.get(record.id)
+            if live is None or live.scope.tenant_id != record.tenant_id:
+                return None
+            return live.job_id
+
+    def progress(self, record: InvestigationRecord) -> InvestigationProgressSnapshot | None:
+        """Content-free progress from a validated execution checkpoint, or no claim."""
+        with self._lock:
+            live = self._live.get(record.id)
+            run = None if live is None else live.run
+            scope = None if live is None else live.scope
+        if run is None or scope is None or scope.tenant_id != record.tenant_id:
+            return None
+        try:
+            view = run.state()
+        except Exception:
+            return None
+        if view.scope != scope or view.plan is None:
+            return None
+        task_snapshots: list[TaskProgressSnapshot] = []
+        owner_counts: dict[AgentRole, list[int]] = {}
+        for task in (*view.plan.tasks, *view.admitted_follow_ups):
+            task_record = view.tasks.get(task.id)
+            if task_record is None:
+                continue
+            terminal = task_record.status in TERMINAL_TASK_STATUSES
+            task_snapshots.append(
+                TaskProgressSnapshot(
+                    task_id=task.id,
+                    kind=task.kind,
+                    assignee=task.assignee,
+                    status=task_record.status,
+                    attempts=task_record.attempts,
+                )
+            )
+            counts = owner_counts.setdefault(task.assignee, [0, 0, 0, 0])
+            counts[0] += 1
+            counts[1] += int(terminal)
+            counts[2] += int(task_record.status == "running")
+            counts[3] += int(task_record.status == "pending")
+        if not task_snapshots:
+            return None
+        owners = tuple(
+            TaskOwnerProgressSnapshot(
+                assignee=assignee,
+                total_tasks=counts[0],
+                completed_tasks=counts[1],
+                running_tasks=counts[2],
+                pending_tasks=counts[3],
+            )
+            for assignee, counts in sorted(owner_counts.items(), key=lambda item: item[0].value)
+        )
+        completed = sum(task.status in TERMINAL_TASK_STATUSES for task in task_snapshots)
+        return InvestigationProgressSnapshot(
+            completed_tasks=completed,
+            total_tasks=len(task_snapshots),
+            tasks=tuple(task_snapshots),
+            task_owners=owners,
+        )
+
     # --- internals -----------------------------------------------------------------------------
 
     def _advance(
@@ -729,7 +872,11 @@ __all__ = [
     "ExecutionProvider",
     "FailClosedAdapters",
     "InvestigationAdapters",
+    "InvestigationProgressSnapshot",
     "InvestigationRequestError",
     "InvestigationRuntime",
     "PlanningProvider",
+    "ProposalReviewSnapshot",
+    "TaskOwnerProgressSnapshot",
+    "TaskProgressSnapshot",
 ]
