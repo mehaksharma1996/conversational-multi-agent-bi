@@ -13,6 +13,7 @@ const callbacks = {
   onReject: vi.fn(),
   onCancel: vi.fn(),
   onCheckServerState: vi.fn(),
+  onRefreshJob: vi.fn(),
 };
 
 function pendingPlan(overrides: Partial<Investigation> = {}): Investigation {
@@ -74,6 +75,7 @@ function props(
     sqlWave: null,
     command: null,
     unconfirmed: null,
+    cancellation: null,
     error: null,
     job: { state: "idle" } as const,
     busy: false,
@@ -162,5 +164,94 @@ describe("InvestigationPanel", () => {
     expect(screen.getByText("The API restarted. Nothing resumes automatically.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel investigation" })).not.toBeInTheDocument();
+  });
+
+  it("renders only server-recorded task and approved-owner progress", () => {
+    render(
+      <InvestigationPanel
+        {...props(pendingPlan({
+          status: "running",
+          proposal: null,
+          progress: {
+            completed_tasks: 1,
+            total_tasks: 2,
+            task_owners: [
+              {
+                assignee: "business_investigator",
+                completed_tasks: 1,
+                running_tasks: 1,
+                pending_tasks: 0,
+                total_tasks: 2,
+              },
+            ],
+            tasks: [
+              {
+                task_id: "task-1",
+                kind: "sql_analysis",
+                assignee: "business_investigator",
+                status: "succeeded",
+                attempts: 1,
+              },
+              {
+                task_id: "task-2",
+                kind: "hypothesis_test",
+                assignee: "business_investigator",
+                status: "running",
+                attempts: 2,
+              },
+            ],
+          },
+        }))}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Task-owner progress" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Investigation tasks completed" })).toHaveValue(1);
+    expect(screen.getByText(/1 completed; 1 running; 0 pending; 2 total/i)).toBeInTheDocument();
+    expect(screen.getByText("task-2")).toBeInTheDocument();
+    expect(screen.getByText("2 attempts")).toBeInTheDocument();
+    expect(screen.queryByText(/supervisor activity/i)).not.toBeInTheDocument();
+  });
+
+  it("does not synthesize progress when the guarded snapshot is absent", () => {
+    render(<InvestigationPanel {...props(pendingPlan({ status: "running", proposal: null, progress: null }))} />);
+
+    expect(screen.getByText(/No task percentage or agent activity is estimated/i)).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: "Investigation tasks completed" })).not.toBeInTheDocument();
+  });
+
+  it("distinguishes requested, confirmed, and too-late cancellation outcomes", () => {
+    const running = pendingPlan({ status: "running", proposal: null });
+    const view = render(<InvestigationPanel {...props(running)} cancellation="requested" />);
+    expect(screen.getByText(/has not yet reached a terminal cancelled state/i)).toBeInTheDocument();
+    expect(view.container.querySelector("[aria-live], [role='status'], [role='alert']")).toBeNull();
+
+    view.rerender(
+      <InvestigationPanel
+        {...props({ ...running, status: "cancelled" })}
+        cancellation="confirmed"
+      />,
+    );
+    expect(screen.getByText("Cancellation is confirmed by the server.")).toBeInTheDocument();
+
+    view.rerender(
+      <InvestigationPanel
+        {...props({ ...running, status: "completed" })}
+        cancellation="too_late"
+      />,
+    );
+    expect(screen.getByText(/reached completed before cancellation took effect/i)).toBeInTheDocument();
+  });
+
+  it("treats a missing process-local job as unknown while preserving durable lifecycle state", () => {
+    render(
+      <InvestigationPanel
+        {...props(pendingPlan({ status: "running", proposal: null }))}
+        job={{ state: "unknown", reason: "not_found", cancel: "failed" }}
+      />,
+    );
+
+    expect(screen.getByText(/outcome is unknown.*not restarted/i)).toBeInTheDocument();
+    expect(screen.getByText(/durable server record; no work was restarted/i)).toBeInTheDocument();
   });
 });

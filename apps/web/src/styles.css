@@ -391,6 +391,15 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .investigation-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
 .investigation-cancel { display: grid; justify-items: start; gap: .5rem; }
 .investigation-terminal { display: grid; gap: .45rem; padding: .7rem; border-radius: var(--radius-sm); background: var(--surface-raised); }
+.investigation-progress { display: grid; gap: .65rem; padding: .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.investigation-progress h5, .investigation-progress h6 { margin: 0; }
+.investigation-progress progress { width: 100%; }
+.investigation-owner-progress { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .5rem; margin: 0; }
+.investigation-owner-progress div { padding: .55rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.investigation-owner-progress dt { color: var(--text); font-weight: 750; text-transform: capitalize; }
+.investigation-owner-progress dd { margin: .2rem 0 0; color: var(--text-secondary); font-size: .8rem; }
+.investigation-progress-tasks { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
+.investigation-progress-tasks li { display: grid; grid-template-columns: minmax(7rem, 1.2fr) repeat(4, minmax(6rem, 1fr)); gap: .5rem; padding: .55rem; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: .8rem; }
 .proposal-reasons { margin-bottom: 0; padding-left: 1.15rem; color: var(--text-secondary); line-height: 1.5; }
 .provenance { display: grid; gap: .4rem; margin: .75rem 0; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: #0b121b; font-size: .82rem; line-height: 1.45; }
 .provenance p { margin: 0; }
@@ -505,6 +514,7 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
   .inline-control { grid-template-columns: 1fr; }
   .definition-grid { grid-template-columns: 1fr; }
   .proposal-facts { grid-template-columns: 1fr; }
+  .investigation-progress-tasks li { grid-template-columns: 1fr; }
   .demo-steps { grid-template-columns: 1fr; }
   .panel, .workspace-overview, .product-overview, .empty-workspace-state { padding: var(--space-4); }
   .chat-message { padding: .8rem; }

@@ -6,6 +6,7 @@ import App from "./App";
 import {
   ApiClientError,
   askQuestion,
+  cancelInvestigation,
   createConversation,
   decideInvestigationPlan,
   getAnalysis,
@@ -46,6 +47,7 @@ vi.mock("./api/client", async (importOriginal) => {
     decideInvestigationPlan: vi.fn(),
     listMessages: vi.fn(),
     askQuestion: vi.fn(),
+    cancelInvestigation: vi.fn(),
   };
 });
 
@@ -295,5 +297,22 @@ describe("investigation plan confirmation", () => {
         follow_up_rounds: 0,
       },
     ));
+  });
+
+  it("does not request cancellation until its in-flight-work warning is accepted", async () => {
+    const running = pendingInvestigation({ status: "running", proposal: null });
+    vi.mocked(listMessages).mockResolvedValue([investigationProposalMessageFixture]);
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(running);
+    vi.mocked(cancelInvestigation).mockResolvedValue(running);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel investigation" }));
+    const dialog = screen.getByRole("dialog", { name: "Cancel this investigation?" });
+    expect(within(dialog).getByText(/already in flight may finish/i)).toBeInTheDocument();
+    expect(cancelInvestigation).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel investigation" }));
+    await waitFor(() => expect(cancelInvestigation).toHaveBeenCalledWith("investigation-1"));
+    expect(await screen.findByText(/has not yet reached a terminal cancelled state/i)).toBeInTheDocument();
   });
 });

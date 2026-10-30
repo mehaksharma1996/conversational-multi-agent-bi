@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import type { Investigation, InvestigationSqlWave, Message } from "../api/client";
 import {
@@ -9,12 +9,12 @@ import {
 } from "../investigations/model";
 import type {
   InvestigationAvailability,
+  InvestigationCancellation,
   InvestigationCommand,
   InvestigationUnconfirmed,
 } from "../investigations/useInvestigation";
 import type { JobView } from "../operations/useJob";
 import { JobProgress } from "./JobProgress";
-import { StatusBanner } from "./StatusBanner";
 
 type Proposal = NonNullable<Message["proposal"]>;
 
@@ -25,6 +25,7 @@ interface InvestigationPanelProps {
   sqlWave: InvestigationSqlWave | null;
   command: InvestigationCommand;
   unconfirmed: InvestigationUnconfirmed | null;
+  cancellation: InvestigationCancellation;
   error: Error | null;
   job: JobView;
   busy: boolean;
@@ -33,6 +34,7 @@ interface InvestigationPanelProps {
   onReject: () => void;
   onCancel: () => void;
   onCheckServerState: () => void;
+  onRefreshJob: () => void;
 }
 
 interface DisplayTask {
@@ -48,6 +50,10 @@ interface DisplayHypothesis {
   statement: string;
   testability: string | null;
   tests: string[];
+}
+
+function Notice({ kind, children }: { kind: "info" | "error" | "success"; children: ReactNode }) {
+  return <div className={`status-banner status-banner--${kind}`}><div>{children}</div></div>;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -110,6 +116,10 @@ function readableToken(value: string): string {
   return value.replaceAll("_", " ");
 }
 
+function taskCount(value: number, noun: string): string {
+  return `${value} ${noun}${value === 1 ? "" : "s"}`;
+}
+
 function deadline(iso: string): string {
   const value = new Date(iso);
   return Number.isNaN(value.getTime()) ? "Server deadline unavailable" : value.toLocaleString();
@@ -121,6 +131,7 @@ export function InvestigationPanel({
   investigation,
   command,
   unconfirmed,
+  cancellation,
   error,
   job,
   busy,
@@ -129,6 +140,7 @@ export function InvestigationPanel({
   onReject,
   onCancel,
   onCheckServerState,
+  onRefreshJob,
 }: InvestigationPanelProps) {
   const planHeading = useRef<HTMLHeadingElement>(null);
   const statusHeading = useRef<HTMLHeadingElement>(null);
@@ -162,7 +174,7 @@ export function InvestigationPanel({
           This proposal has not started an investigation. Starting authorizes planning only; it
           does not approve or execute the resulting plan.
         </p>
-        {error ? <StatusBanner kind="error">{error.message}</StatusBanner> : null}
+        {error ? <Notice kind="error">{error.message}</Notice> : null}
         <button
           className="button button--primary"
           type="button"
@@ -178,14 +190,14 @@ export function InvestigationPanel({
   if (availability === "unconfirmed") {
     return (
       <div className="investigation-workflow">
-        <StatusBanner kind="error">
+        <Notice kind="error">
           <strong>The server has not confirmed the investigation command.</strong> Nothing is sent
           again automatically. Consequential controls stay locked until authoritative state is
           available.
           <button className="button button--link" type="button" onClick={onCheckServerState}>
             Check server state
           </button>
-        </StatusBanner>
+        </Notice>
       </div>
     );
   }
@@ -193,10 +205,10 @@ export function InvestigationPanel({
   if (availability === "unavailable" || investigation === null) {
     return (
       <div className="investigation-workflow">
-        <StatusBanner kind="error">
+        <Notice kind="error">
           <strong>Investigation state is unavailable.</strong>{" "}
           {error?.message ?? "Reload or request access before taking another action."}
-        </StatusBanner>
+        </Notice>
       </div>
     );
   }
@@ -206,6 +218,10 @@ export function InvestigationPanel({
   const decisionReady = needsPlanDecision(investigation);
   const active = !isTerminalInvestigation(investigation.status);
   const actionBusy = busy || command !== null || unconfirmed !== null;
+  const progress = investigation.progress;
+  const executionStatus = new Set(["queued", "running", "awaiting_sql_approval"]).has(
+    investigation.status,
+  );
 
   return (
     <div className="investigation-workflow" aria-busy={command !== null || undefined}>
@@ -218,13 +234,78 @@ export function InvestigationPanel({
         </span>
       </div>
 
-      {error ? <StatusBanner kind="error">{error.message}</StatusBanner> : null}
+      {error ? <Notice kind="error">{error.message}</Notice> : null}
 
       {investigation.status === "planning" ? (
         <p>The server is preparing a bounded plan. No plan has been approved or executed.</p>
       ) : null}
 
-      <JobProgress label="the investigation job" view={job} />
+      <JobProgress label="the investigation job" view={job} onRefresh={onRefreshJob} />
+
+      {job.state === "unknown" && job.reason === "not_found" ? (
+        <p className="field-hint">
+          The linked process-local job is unavailable. The investigation lifecycle shown here is
+          the durable server record; no work was restarted.
+        </p>
+      ) : null}
+
+      {cancellation === "requested" ? (
+        <Notice kind="info">
+          <strong>Cancellation requested.</strong> The investigation has not yet reached a terminal
+          cancelled state. A call already in flight may finish, and its result will be discarded.
+        </Notice>
+      ) : cancellation === "confirmed" ? (
+        <Notice kind="success">Cancellation is confirmed by the server.</Notice>
+      ) : cancellation === "too_late" ? (
+        <Notice kind="info">
+          {`The investigation reached ${INVESTIGATION_STATUS_LABEL[investigation.status].toLowerCase()} before cancellation took effect.`}
+        </Notice>
+      ) : null}
+
+      {progress ? (
+        <section className="investigation-progress" aria-labelledby={`progress-${investigation.id}`}>
+          <h5 id={`progress-${investigation.id}`}>Task-owner progress</h5>
+          <p>
+            {taskCount(progress.completed_tasks, "task")} completed out of {progress.total_tasks}.
+            These counts come from actual guarded task records, not elapsed time or polling.
+          </p>
+          {progress.total_tasks > 0 ? (
+            <progress
+              max={progress.total_tasks}
+              value={Math.min(progress.completed_tasks, progress.total_tasks)}
+              aria-label="Investigation tasks completed"
+            />
+          ) : null}
+          <h6>By approved task owner</h6>
+          <dl className="investigation-owner-progress">
+            {progress.task_owners.map((owner) => (
+              <div key={owner.assignee}>
+                <dt>{readableToken(owner.assignee)}</dt>
+                <dd>
+                  {`${owner.completed_tasks} completed; ${owner.running_tasks} running; ${owner.pending_tasks} pending; ${owner.total_tasks} total`}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <h6>Tasks</h6>
+          <ul className="investigation-progress-tasks">
+            {progress.tasks.map((task) => (
+              <li key={task.task_id}>
+                <strong>{task.task_id}</strong>
+                <span>{readableToken(task.kind)}</span>
+                <span>Owner: {readableToken(task.assignee)}</span>
+                <span>Status: {readableToken(task.status)}</span>
+                <span>{taskCount(task.attempts, "attempt")}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : executionStatus ? (
+        <p className="field-hint">
+          Detailed task-owner progress is unavailable. No task percentage or agent activity is
+          estimated.
+        </p>
+      ) : null}
 
       {investigation.status === "awaiting_plan_approval" ? (
         <section className="investigation-plan" aria-labelledby={`plan-${investigation.id}`}>
@@ -300,9 +381,9 @@ export function InvestigationPanel({
               ) : null}
             </>
           ) : (
-            <StatusBanner kind="error">
+            <Notice kind="error">
               Proposal review details are unavailable. This plan cannot be approved from the browser.
-            </StatusBanner>
+            </Notice>
           )}
           <div className="button-row investigation-actions">
             <button className="button button--primary" type="button" disabled={actionBusy || !decisionReady || plan.tasks.length === 0} onClick={onApprove}>

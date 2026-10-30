@@ -15,9 +15,10 @@ import {
 } from "../api/client";
 import { jitter, useJob } from "../operations/useJob";
 import type { OperationHandle } from "../operations/useOperations";
-import { needsPlanDecision, shouldPollInvestigation } from "./model";
+import { isTerminalInvestigation, needsPlanDecision, shouldPollInvestigation } from "./model";
 
 export type InvestigationUnconfirmed = "create" | "plan" | "sql_wave" | "cancel";
+export type InvestigationCancellation = "requested" | "confirmed" | "too_late" | null;
 export type InvestigationCommand =
   | "start"
   | "approve"
@@ -42,6 +43,7 @@ interface ControllerState {
   sqlWave: InvestigationSqlWave | null;
   command: InvestigationCommand;
   unconfirmed: InvestigationUnconfirmed | null;
+  cancellation: InvestigationCancellation;
   error: ApiClientError | null;
 }
 
@@ -77,6 +79,7 @@ function initialState(hasScope: boolean): ControllerState {
     sqlWave: null,
     command: null,
     unconfirmed: null,
+    cancellation: null,
     error: null,
   };
 }
@@ -102,6 +105,11 @@ function sameBinding(
     value.message_id === messageId &&
     (investigationId === undefined || value.id === investigationId)
   );
+}
+
+function cancellationAfterCancel(value: Investigation): Exclude<InvestigationCancellation, null> {
+  if (value.status === "cancelled") return "confirmed";
+  return isTerminalInvestigation(value.status) ? "too_late" : "requested";
 }
 
 export function useInvestigation({
@@ -145,7 +153,11 @@ export function useInvestigation({
   );
 
   const adopt = useCallback(
-    (value: Investigation, command: InvestigationCommand = null) => {
+    (
+      value: Investigation,
+      command: InvestigationCommand = null,
+      cancellation?: InvestigationCancellation,
+    ) => {
       update((current) => ({
         ...current,
         availability: "loaded",
@@ -158,6 +170,7 @@ export function useInvestigation({
             : null,
         command,
         unconfirmed: null,
+        cancellation: cancellation === undefined ? current.cancellation : cancellation,
         error: null,
       }));
     },
@@ -230,10 +243,20 @@ export function useInvestigation({
           return;
         }
         failures = 0;
+        const cancelFinished =
+          state.command === "cancel_requested" && isTerminalInvestigation(value.status);
         const keepCommand =
-          (state.command === "cancel_requested" && value.status !== "cancelled") ||
+          (state.command === "cancel_requested" && !cancelFinished) ||
           (state.command === "sql_submitted" && value.status === "awaiting_sql_approval");
-        adopt(value, keepCommand ? state.command : null);
+        const cancellation =
+          state.command === "cancel_requested"
+            ? value.status === "cancelled"
+              ? "confirmed"
+              : cancelFinished
+                ? "too_late"
+                : "requested"
+            : undefined;
+        adopt(value, keepCommand ? state.command : null, cancellation);
         if (!shouldPollInvestigation(value.status) && !keepCommand) return;
       } catch (caught) {
         if (stopped || current !== generation.current) return;
@@ -384,7 +407,12 @@ export function useInvestigation({
           return;
         }
         if (value.status !== before.status || value.updated_at !== before.updated_at) {
-          adopt(value);
+          if (kind === "cancel") {
+            const cancellation = cancellationAfterCancel(value);
+            adopt(value, cancellation === "requested" ? "cancel_requested" : null, cancellation);
+          } else {
+            adopt(value);
+          }
           return;
         }
       } catch {
@@ -459,7 +487,13 @@ export function useInvestigation({
     const operation = beginRef.current();
     if (!operation) return;
     const current = generation.current;
-    update((previous) => ({ ...previous, command: "cancel", error: null, sqlWave: null }));
+    update((previous) => ({
+      ...previous,
+      command: "cancel",
+      cancellation: null,
+      error: null,
+      sqlWave: null,
+    }));
     try {
       const value = await cancelInvestigation(before.id);
       if (current !== generation.current) return operation.finish("cancelled");
@@ -471,7 +505,8 @@ export function useInvestigation({
         markUnconfirmed("cancel", new ApiClientError("The server returned an unrelated investigation."));
         return operation.finish("interrupted");
       }
-      adopt(value, value.status === "cancelled" ? null : "cancel_requested");
+      const cancellation = cancellationAfterCancel(value);
+      adopt(value, cancellation === "requested" ? "cancel_requested" : null, cancellation);
       operation.finish("succeeded");
     } catch (caught) {
       if (current !== generation.current) return operation.finish("cancelled");
@@ -542,7 +577,12 @@ export function useInvestigation({
         );
         return;
       }
-      adopt(value);
+      if (state.unconfirmed === "cancel") {
+        const cancellation = cancellationAfterCancel(value);
+        adopt(value, cancellation === "requested" ? "cancel_requested" : null, cancellation);
+      } else {
+        adopt(value);
+      }
     } catch (caught) {
       if (current !== generation.current) return;
       if (state.unconfirmed === "create" && is404(caught)) {
@@ -563,12 +603,12 @@ export function useInvestigation({
   return {
     ...state,
     job: job.view,
+    refreshJob: job.refresh,
     start,
     decidePlan,
     cancel,
     submitSqlWave,
     checkServerState,
-    refreshJob: job.refresh,
   };
 }
 

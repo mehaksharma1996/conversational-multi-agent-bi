@@ -274,3 +274,68 @@ describe("investigation polling and decisions", () => {
   });
 });
 
+describe("investigation cancellation", () => {
+  it("keeps cancellation requested until a durable read confirms cancellation", async () => {
+    vi.useFakeTimers();
+    const running = investigation({ status: "running", updated_at: "2026-10-30T10:01:00Z" });
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(running);
+    vi.mocked(cancelInvestigation).mockResolvedValue(running);
+    vi.mocked(getInvestigation).mockResolvedValue(
+      investigation({
+        status: "cancelled",
+        updated_at: "2026-10-30T10:02:00Z",
+        explanation: "Cancellation completed.",
+      }),
+    );
+    const { result } = follow();
+    await act(async () => Promise.resolve());
+
+    await act(() => result.current.cancel());
+    expect(result.current.cancellation).toBe("requested");
+    expect(result.current.command).toBe("cancel_requested");
+    expect(result.current.investigation?.status).toBe("running");
+
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(result.current.cancellation).toBe("confirmed");
+    expect(result.current.command).toBeNull();
+    expect(result.current.investigation?.status).toBe("cancelled");
+  });
+
+  it("reports that terminal work finished before cancellation took effect and stops polling", async () => {
+    const running = investigation({ status: "running", updated_at: "2026-10-30T10:01:00Z" });
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(running);
+    vi.mocked(cancelInvestigation).mockResolvedValue(
+      investigation({
+        status: "completed",
+        updated_at: "2026-10-30T10:02:00Z",
+        explanation: "The investigation completed before cancellation took effect.",
+      }),
+    );
+    const { result } = follow();
+    await waitFor(() => expect(result.current.investigation?.status).toBe("running"));
+
+    await act(() => result.current.cancel());
+    expect(result.current.cancellation).toBe("too_late");
+    expect(result.current.command).toBeNull();
+    expect(result.current.investigation?.status).toBe("completed");
+    expect(getInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("recovers a proven cancellation after a retryable command failure", async () => {
+    const running = investigation({ status: "running", updated_at: "2026-10-30T10:01:00Z" });
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(running);
+    vi.mocked(cancelInvestigation).mockRejectedValue(network());
+    vi.mocked(getInvestigation).mockResolvedValue(
+      investigation({ status: "cancelled", updated_at: "2026-10-30T10:02:00Z" }),
+    );
+    const { result } = follow();
+    await waitFor(() => expect(result.current.investigation?.status).toBe("running"));
+
+    await act(() => result.current.cancel());
+    expect(result.current.availability).toBe("loaded");
+    expect(result.current.cancellation).toBe("confirmed");
+    expect(result.current.investigation?.status).toBe("cancelled");
+    expect(result.current.unconfirmed).toBeNull();
+  });
+});
+

@@ -1290,6 +1290,7 @@ export default function App() {
                     sqlWave={investigation.sqlWave}
                     command={investigation.command}
                     unconfirmed={investigation.unconfirmed}
+                    cancellation={investigation.cancellation}
                     error={investigation.error}
                     job={investigation.job}
                     busy={busy}
@@ -1298,6 +1299,7 @@ export default function App() {
                     onReject={() => void handleInvestigationPlanDecision("reject")}
                     onCancel={() => void handleInvestigationCancel()}
                     onCheckServerState={() => void investigation.checkServerState()}
+                    onRefreshJob={investigation.refreshJob}
                   />
                 ) : null
               }
