@@ -96,6 +96,8 @@ S = InvestigationStatus
 # INV-11 issues one authority epoch per investigation; the live check revokes it when the
 # workspace disappears, expires, or its consent no longer covers the recipients.
 AUTHORITY_EPOCH = 1
+# The only statuses a status read may move to ``expired`` (see ``synchronize``).
+_DECISION_STATUSES = frozenset({S.AWAITING_PLAN_APPROVAL, S.AWAITING_SQL_APPROVAL})
 MAX_EXECUTION_INPUT_TOKENS = 6_000
 
 ErrorCode = Literal[
@@ -705,9 +707,21 @@ class InvestigationRuntime:
         return value
 
     def synchronize(self, record: InvestigationRecord) -> InvestigationRecord:
-        """Apply due server-side approval expiry before publishing a status read."""
+        """Apply due server-side approval expiry before publishing a status read.
+
+        A read mirrors only ``expired``, and only into a record still awaiting a decision. Every
+        other terminal status belongs to the worker, which stores the report before publishing
+        it. A transition the worker made meanwhile wins; the read then returns what it wrote.
+        """
         self.approvals.expire_due()
-        self._sync(record)
+        live = self._live.get(record.id)
+        if live is not None and self.approvals.status(live.scope) is S.EXPIRED:
+            try:
+                current = self._records.get(record.id, record.tenant_id)
+                if current.status in _DECISION_STATUSES:
+                    self._records.update(record.id, record.tenant_id, status=S.EXPIRED)
+            except InvestigationConflictError:
+                pass
         return self._records.get(record.id, record.tenant_id)
 
     def proposal_review(self, record: InvestigationRecord) -> ProposalReviewSnapshot | None:

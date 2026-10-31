@@ -23,6 +23,7 @@ from apps.api.investigations import ExecutionProvider, PlanningProvider
 from apps.api.main import create_app
 from packages.connectors import IdentityContext
 from packages.governance import InMemoryAuditSink
+from packages.investigation import InvestigationStatus
 from packages.observability import InMemoryTelemetrySink
 from tests.investigation_execution_fakes import RoutedAdapter
 from tests.investigation_fixtures import plan_of, sql_task
@@ -367,6 +368,28 @@ def test_unreadable_execution_progress_returns_no_claim(monkeypatch: pytest.Monk
         reread = client.get(f"/api/v1/investigations/{investigation_id}").json()
         assert reread["status"] == "awaiting_sql_approval"
         assert reread["progress"] is None
+
+
+def test_a_status_read_never_publishes_a_worker_owned_terminal_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The approval service can reach ``completed`` before the worker stores the report; a read
+    must neither publish that status early nor attempt the illegal transition it implies."""
+    deployment = Deployment("inv11_read_sync_race")
+    with TestClient(deployment.app()) as client:
+        _, conversation_id, message_id = _proposal(client)
+        investigation_id = _create(client, conversation_id, message_id).json()["id"]
+        body = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
+        assert _approve(client, body).is_success
+        paused = _until(client, investigation_id, _status("awaiting_sql_approval", "failed"))
+        assert paused["status"] == "awaiting_sql_approval", paused
+        approvals = client.app.state.investigations.approvals
+        monkeypatch.setattr(approvals, "status", lambda _scope: InvestigationStatus.COMPLETED)
+
+        reread = client.get(f"/api/v1/investigations/{investigation_id}")
+        assert reread.status_code == 200
+        assert reread.json()["status"] == "awaiting_sql_approval"
+        assert reread.json()["report"] is None
 
 
 def test_only_a_proposal_message_can_start_an_investigation() -> None:

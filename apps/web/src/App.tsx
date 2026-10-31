@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ApiClientError,
@@ -40,7 +40,6 @@ import { OperationAnnouncer, type Announcement } from "./components/OperationAnn
 import { ProductOverview } from "./components/ProductOverview";
 import { SchemaReview } from "./components/SchemaReview";
 import { StatusBanner } from "./components/StatusBanner";
-import { InvestigationPanel } from "./components/InvestigationPanel";
 import { UploadStep } from "./components/UploadStep";
 import { WorkbenchShell } from "./components/WorkbenchShell";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
@@ -95,6 +94,12 @@ function normalizeError(error: unknown): ApiClientError {
   if (error instanceof ApiClientError) return error;
   return new ApiClientError("Something unexpected happened. Try again.");
 }
+
+// Investigation controls render only beside an INV-9 proposal (routing is off by default), so they
+// load on demand instead of growing the entry chunk.
+const InvestigationPanel = lazy(() =>
+  import("./components/InvestigationPanel").then((module) => ({ default: module.InvestigationPanel })),
+);
 
 function latestInvestigationProposal(messages: Message[]): Message | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1283,6 +1288,7 @@ export default function App() {
               investigationMessageId={investigationProposal?.id ?? null}
               investigationPanel={
                 investigationProposal?.proposal ? (
+                  <Suspense fallback={<p className="field-hint">Loading investigation controls...</p>}>
                   <InvestigationPanel
                     proposal={investigationProposal.proposal}
                     availability={investigation.availability}
@@ -1302,6 +1308,7 @@ export default function App() {
                     onRefreshJob={investigation.refreshJob}
                     onSubmitSqlWave={(decision) => void investigation.submitSqlWave(decision)}
                   />
+                  </Suspense>
                 ) : null
               }
             />
