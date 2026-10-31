@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Investigation } from "../api/client";
@@ -207,18 +207,58 @@ describe("InvestigationPanel", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Task-owner progress" })).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "Investigation tasks completed" })).toHaveValue(1);
-    expect(screen.getByText(/1 completed; 1 running; 0 pending; 2 total/i)).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Investigation tasks finished" })).toHaveValue(1);
+    expect(screen.getByText(/1 finished; 1 running; 0 pending; 2 total/i)).toBeInTheDocument();
     expect(screen.getByText("task-2")).toBeInTheDocument();
     expect(screen.getByText("2 attempts")).toBeInTheDocument();
     expect(screen.queryByText(/supervisor activity/i)).not.toBeInTheDocument();
+  });
+
+  it("counts failed and skipped tasks as finished, never as succeeded", () => {
+    render(
+      <InvestigationPanel
+        {...props(pendingPlan({
+          status: "running",
+          proposal: null,
+          progress: {
+            completed_tasks: 3,
+            total_tasks: 4,
+            task_owners: [
+              {
+                assignee: "sql_analyst",
+                completed_tasks: 3,
+                running_tasks: 1,
+                pending_tasks: 0,
+                total_tasks: 4,
+              },
+            ],
+            tasks: [
+              { task_id: "ok", kind: "sql_analysis", assignee: "sql_analyst", status: "succeeded", attempts: 1 },
+              { task_id: "broken", kind: "sql_analysis", assignee: "sql_analyst", status: "failed", attempts: 2 },
+              { task_id: "unused", kind: "sql_analysis", assignee: "sql_analyst", status: "skipped", attempts: 0 },
+              { task_id: "active", kind: "sql_analysis", assignee: "sql_analyst", status: "running", attempts: 1 },
+            ],
+          },
+        }))}
+      />,
+    );
+
+    const progress = screen.getByRole("heading", { name: "Task-owner progress" }).closest("section")!;
+    expect(progress).toHaveTextContent("3 tasks finished out of 4.");
+    expect(progress).toHaveTextContent(/Finished includes succeeded, failed, skipped/);
+    expect(progress).toHaveTextContent("3 finished; 1 running; 0 pending; 4 total");
+    expect(progress).not.toHaveTextContent(/completed/i);
+    // Each task keeps its own status: only one succeeded.
+    expect(within(progress).getAllByText(/^Status: succeeded$/)).toHaveLength(1);
+    expect(within(progress).getByText("Status: failed")).toBeInTheDocument();
+    expect(within(progress).getByText("Status: skipped")).toBeInTheDocument();
   });
 
   it("does not synthesize progress when the guarded snapshot is absent", () => {
     render(<InvestigationPanel {...props(pendingPlan({ status: "running", proposal: null, progress: null }))} />);
 
     expect(screen.getByText(/No task percentage or agent activity is estimated/i)).toBeInTheDocument();
-    expect(screen.queryByRole("progressbar", { name: "Investigation tasks completed" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: "Investigation tasks finished" })).not.toBeInTheDocument();
   });
 
   it("distinguishes requested, confirmed, and too-late cancellation outcomes", () => {

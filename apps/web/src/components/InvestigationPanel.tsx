@@ -275,14 +275,16 @@ export function InvestigationPanel({
         <section className="investigation-progress" aria-labelledby={`progress-${investigation.id}`}>
           <h5 id={`progress-${investigation.id}`}>Task-owner progress</h5>
           <p>
-            {taskCount(progress.completed_tasks, "task")} completed out of {progress.total_tasks}.
-            These counts come from actual guarded task records, not elapsed time or polling.
+            {taskCount(progress.completed_tasks, "task")} finished out of {progress.total_tasks}.
+            Finished includes succeeded, failed, skipped, refused, and cancelled tasks; each task's
+            own status is listed below. These counts come from actual guarded task records, not
+            elapsed time or polling.
           </p>
           {progress.total_tasks > 0 ? (
             <progress
               max={progress.total_tasks}
               value={Math.min(progress.completed_tasks, progress.total_tasks)}
-              aria-label="Investigation tasks completed"
+              aria-label="Investigation tasks finished"
             />
           ) : null}
           <h6>By approved task owner</h6>
@@ -291,7 +293,7 @@ export function InvestigationPanel({
               <div key={owner.assignee}>
                 <dt>{readableToken(owner.assignee)}</dt>
                 <dd>
-                  {`${owner.completed_tasks} completed; ${owner.running_tasks} running; ${owner.pending_tasks} pending; ${owner.total_tasks} total`}
+                  {`${owner.completed_tasks} finished; ${owner.running_tasks} running; ${owner.pending_tasks} pending; ${owner.total_tasks} total`}
                 </dd>
               </div>
             ))}

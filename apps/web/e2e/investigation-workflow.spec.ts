@@ -366,9 +366,9 @@ for (const [name, viewport] of VIEWPORTS) {
     expect(api.counts.plan).toBe(1);
 
     const progressSection = page.locator(".investigation-progress");
-    await expect(progressSection).toContainText("1 task completed out of 3.");
+    await expect(progressSection).toContainText("1 task finished out of 3.");
     await expect(progressSection.locator("progress")).toHaveAttribute("max", "3");
-    await expect(progressSection.locator(".investigation-owner-progress")).toContainText("1 completed; 1 running; 1 pending; 3 total");
+    await expect(progressSection.locator(".investigation-owner-progress")).toContainText("1 finished; 1 running; 1 pending; 3 total");
     await expect(page.getByTestId("operation-announcer")).not.toContainText("SELECT");
     await expectNoHorizontalOverflow(page);
     await expectNoAxeViolations(page);
