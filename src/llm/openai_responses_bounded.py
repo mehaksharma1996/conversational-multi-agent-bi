@@ -27,7 +27,9 @@ never extended. Create and polls must finish ``cancel_reserve_seconds`` before i
 cancel; cancel and the polls after it must finish before it. Each request's timeout is the time
 left, so no request is started that could outlive the hard stop (see the transport's phase
 split). ``generate_once`` has no deadline and therefore refuses (``deadline_required``) without
-sending anything: no adapter-chosen timeout stands in for the ledger.
+sending anything: no adapter-chosen timeout stands in for the ledger. ``count_input_tokens_within``
+(S3, what both gateways call) ends the count before the same deadline, using the shorter of the
+count timeout and the time left, and sends nothing when too little time remains.
 
 **Polling and cancellation.** Polls ``GET`` only the known response ID, at most ``max_polls``
 times, sleeping through an injected ``sleep``. States are ``queued`` → ``in_progress`` → one of
@@ -320,6 +322,25 @@ class OpenAIResponsesBoundedAdapter(DeadlineBoundedModelAdapter):
         if self._halted:
             raise ResponsesAdapterError(AdapterFailure.HALTED, delivery=Delivery.NOT_SENT)
         count = self._counter.count(self._request(prompt))
+        self._pending = count
+        return count.input_tokens
+
+    def count_input_tokens_within(self, prompt: str, *, deadline: PlanningDeadline) -> int:
+        """One exact count that ends before ``deadline``; no request is started without room."""
+        started = self._clock()
+        self._pending = None
+        if self._halted:
+            raise ResponsesAdapterError(AdapterFailure.HALTED, delivery=Delivery.NOT_SENT)
+        if type(deadline) is not PlanningDeadline:
+            raise ResponsesAdapterError(
+                AdapterFailure.DEADLINE_REQUIRED, delivery=Delivery.NOT_SENT
+            )
+        timeout = self._timeout(started + deadline.remaining_seconds)
+        if timeout is None:
+            raise ResponsesAdapterError(
+                AdapterFailure.DEADLINE_BEFORE_SEND, delivery=Delivery.NOT_SENT
+            )
+        count = self._counter.count(self._request(prompt), timeout_seconds=timeout)
         self._pending = count
         return count.input_tokens
 

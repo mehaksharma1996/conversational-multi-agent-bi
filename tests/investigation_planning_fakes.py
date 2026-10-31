@@ -198,6 +198,7 @@ class ScriptedDeadlineAdapter(DeadlineBoundedModelAdapter):
     count_reports: bool = False
     script: Script | None = None
     counted_prompts: list[str] = field(default_factory=list)
+    count_deadlines: list[PlanningDeadline] = field(default_factory=list)
     calls: list[Call] = field(default_factory=list)
 
     @property
@@ -211,6 +212,10 @@ class ScriptedDeadlineAdapter(DeadlineBoundedModelAdapter):
         if isinstance(self.count, BaseException):
             raise self.count
         return self.count  # type: ignore[return-value]
+
+    def count_input_tokens_within(self, prompt: str, *, deadline: PlanningDeadline) -> int:
+        self.count_deadlines.append(deadline)
+        return self.count_input_tokens(prompt)
 
     def generate_once(self, prompt: str, *, max_output_tokens: int) -> LLMResponse:
         raise AssertionError("planning must use the deadline call")

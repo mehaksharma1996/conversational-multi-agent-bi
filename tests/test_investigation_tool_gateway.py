@@ -1068,7 +1068,11 @@ def test_a_sealed_client_cannot_reach_the_provider_after_settlement() -> None:
     h = _harness()
     h.research(h.begin().attempt)
     client = tool_gateway._AdmittedLLMClient(
-        h.llm, max_input_tokens=MAX_INPUT, max_output_tokens=CAP
+        h.llm,
+        max_input_tokens=MAX_INPUT,
+        max_output_tokens=CAP,
+        remaining=h.ledger.remaining_wall_clock,
+        cancellation=h.cancellation,
     )
     client.sealed = True
     with pytest.raises(tool_gateway._Refused):

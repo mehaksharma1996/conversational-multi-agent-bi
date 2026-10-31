@@ -348,11 +348,17 @@ class ResponsesInputTokenCounter:
         self._max_input_tokens = max_input_tokens
         self._timeout_seconds = timeout_seconds
 
-    def count(self, request: CanonicalResponsesRequest) -> InputTokenCount:
+    def count(
+        self, request: CanonicalResponsesRequest, *, timeout_seconds: float | None = None
+    ) -> InputTokenCount:
+        """``timeout_seconds`` (the caller's deadline, S3) can only shorten the configured one."""
         payload = count_payload(request)
+        timeout = self._timeout_seconds
+        if timeout_seconds is not None:
+            timeout = min(timeout, timeout_seconds)
         try:
             document = self._transport.post_json(
-                INPUT_TOKENS_PATH, payload, timeout_seconds=self._timeout_seconds
+                INPUT_TOKENS_PATH, payload, timeout_seconds=timeout
             )
         except ResponsesTransportError as error:
             raise TokenCountError(_FROM_TRANSPORT[error.failure], delivery=error.delivery) from None

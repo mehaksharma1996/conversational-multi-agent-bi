@@ -755,6 +755,15 @@ Items 2 and 3 are not implemented, because the execution gateway is unchanged, s
 stays Proposed. It can be accepted once a slice changes `_AdmittedLLMClient` and
 `admitted_model_adapter` and proves the classification above with deterministic gateway tests.
 
+**S3 progress (2026-10-31, still Proposed).** Item 2 is implemented in the execution gateway:
+`_AdmittedLLMClient` counts a `DeadlineBoundedModelAdapter` with `count_input_tokens_within` and
+calls only `generate_once_with_deadline`, with the execution ledger's remaining time (never
+extended) and the run's cancellation token, and classifies the result as above
+(`tests/test_prod1_gateway_integration.py`). Both gateways now also bound the exact count by the
+ledger deadline. Item 3 is not implemented: admission still accepts a plain `BoundedModelAdapter`
+through an explicitly separate legacy branch, and no reviewed execution capability exists, so the
+amendment stays Proposed.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

@@ -4,9 +4,11 @@ Issue: https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/1
 Tier: strongest. Check mode: --full (S4 onward touches `apps/api`).
 
 **Status: S0 reviewed; S1 implemented offline and CI-verified (2026-10-31, run 41210001295, 10/10
-green including Python 3.12); S2 implemented offline (2026-10-31), unpushed. The adapter exists but
-is wired to nothing, no snapshot is reviewed, no live model call was made, no API key was used, and
-external spend is $0.** S3–S6 each need approval first.
+green including Python 3.12); S2 implemented offline and CI-verified (2026-10-31, run
+41214782753, 10/10 green); S3 implemented offline (2026-10-31), unpushed. The adapter runs through
+the real gateways in tests only: production still uses `FailClosedAdapters`, no snapshot is
+reviewed, no live model call was made, no API key was used, and external spend is $0.** S4–S6
+each need approval first.
 
 **Approved decisions (2026-10-31):** D1 OpenAI Responses (direct) as a provisional implementation
 target, *not* a live-validated or admissible provider. D2 one pinned dated snapshot, left
@@ -153,6 +155,61 @@ importer.
    transports: response shapes, state names, cancel idempotency and its answer for an
    already-completed response, usage on cancelled responses, whether polling a `store=false`
    background response works, latency against the 30-second ledger, and DNS time.
+
+## S3 record (real gateways, offline)
+
+**Files.** `src/llm/bounded.py` (contract), `src/llm/openai_responses.py` (count timeout),
+`src/llm/openai_responses_bounded.py`, `src/orchestration/investigation_planning.py`,
+`src/orchestration/tool_gateway.py`, the two deadline fakes, and
+`tests/test_prod1_gateway_integration.py` (40 offline tests through the real
+`InvestigationPlanningGateway`, `InvestigationToolGateway`, and the API job runtime).
+
+1. **Defect: the count was outside the planning deadline.** The ledger starts when the gateway is
+   built, but the count used the adapter's fixed timeout (default 5 s, at most 30 s). A count
+   started with 1 s left could run 4 s past the 30-second ledger (no generation followed, because
+   the gateway re-reads the ledger before the create). Fixed: `DeadlineBoundedModelAdapter` gains
+   the abstract `count_input_tokens_within(prompt, *, deadline)`, and both gateways count a
+   deadline adapter only through it, with the ledger's remaining time. The adapter uses the
+   shorter of its count timeout and the time left and sends nothing below the minimum request
+   time. A count that fails once the ledger has expired is `budget_exhausted`; otherwise
+   `metering_unbounded` (the gateway does not take the adapter's word for the reason). The
+   published 30-second limit is unchanged. Regression:
+   `test_the_planning_count_is_bounded_by_the_ledger_deadline` failed before the fix (a request
+   at t=1029 with a 5 s budget against a 1030 deadline).
+2. **Execution (Amendment 11, item 2).** `_AdmittedLLMClient` now receives the execution ledger's
+   `remaining_wall_clock` and the run's cancellation token. A `DeadlineBoundedModelAdapter` is
+   counted within the deadline and called only through `generate_once_with_deadline` with the
+   remaining ledger time, sampled after the count (never extended), after a cancellation check.
+   The result is classified like planning: an answer after the deadline, an unconfirmed
+   termination, an unenforced bound, a malformed result, or an unrequested cancellation is
+   `metering_violation`; a confirmed requested cancellation (or a late answer to a cancelled
+   call) is `cancelled`; a confirmed provider deadline is `budget_exhausted`. A confirmed stop
+   settles measured usage when reported and the full reservation (`unverified`) otherwise. A plain
+   `BoundedModelAdapter` keeps the legacy `generate_once` call, an explicit separate branch, so
+   the deterministic suites are unchanged. Regression: the execution tests failed before the
+   change (the gateway called `generate_once`, which this adapter refuses).
+3. **Amendment 11 stays Proposed.** Item 3 is not done: `admitted_model_adapter` still admits a
+   plain `BoundedModelAdapter`, and there is no reviewed execution capability equivalent to
+   `ReviewedPlanningCapability`. Requiring both would move every scripted execution adapter to
+   the deadline contract; that is S5 scope (with the reviewed evidence).
+4. **Duplicate generation (S3.4).** Shown by tests, with no new persistence: the runtime calls
+   `InvestigationAdapters.execution()` and `planning()` once per investigation, and resume reuses
+   the same run, so the adapter's halt after an uncertain create covers every later model call of
+   that investigation (a task retry is refused before any I/O and its reservation released). The
+   planning gateway closes after `provider_failure`, so no repair follows. A provider failure is
+   not in `RETRYABLE_CATEGORIES`. A restart never rebuilds a run: reconciliation makes the record
+   `interrupted` (terminal), and a retry is a new investigation, which is a new logical
+   operation. **S4 prerequisite:** `ConfiguredInvestigationAdapters` must keep this: each
+   `planning()` or `execution()` call returns one adapter instance that serves the whole
+   investigation, and no model call may obtain a fresh instance mid-investigation.
+5. **Budget.** The gateway charges the full reservation (`unverified`) for any entered call
+   without complete usage, including an adapter-reported `create_not_sent`: the gateway cannot
+   verify that claim, so the adapter's `release` disposition is advisory and the gateway's is
+   stricter. Measured usage settles only with exactly one complete report, reported input equal to
+   the count (planning) or within it (execution), and output within the cap. No new price or
+   token estimate exists.
+6. **Live-unverified.** As in S2, every provider behaviour is proven against scripted transports
+   only.
 
 ## Outcome
 

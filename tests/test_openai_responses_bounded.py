@@ -290,8 +290,10 @@ def fails(
 def assert_within(provider: Provider, hard_stop: float) -> None:
     """No generation request started after, or could run past, the hard stop.
 
-    The count precedes the deadline (the gateway reads the ledger after counting), so it is
-    bounded by the adapter's fixed count timeout instead.
+    These adapter tests count with ``count_input_tokens`` before the call's deadline exists, so
+    the count is bounded by the adapter's fixed count timeout here. The gateways count with
+    ``count_input_tokens_within`` (PROD-1 S3), which bounds it by the same deadline; see
+    ``tests/test_prod1_gateway_integration.py``.
     """
     for _, path, at, read in provider.calls:
         if path != INPUT_TOKENS_PATH:

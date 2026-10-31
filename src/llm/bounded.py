@@ -146,7 +146,14 @@ class DeadlineBoundedModelAdapter(BoundedModelAdapter):
     Implementing this class is not proof of provider-side enforcement. Admission also requires a
     separately constructed ``ReviewedPlanningCapability`` whose evidence is reviewed for the exact
     provider/model. Production remains fail closed until both exist.
+
+    The gateways count a deadline adapter's input with ``count_input_tokens_within`` and never
+    with ``count_input_tokens``, so the count, too, ends before the ledger's deadline (PROD-1 S3).
     """
+
+    @abstractmethod
+    def count_input_tokens_within(self, prompt: str, *, deadline: PlanningDeadline) -> int:
+        """``count_input_tokens``, finished within ``deadline``; refuses rather than outlive it."""
 
     @abstractmethod
     def generate_once_with_deadline(
