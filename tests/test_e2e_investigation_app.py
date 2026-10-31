@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.e2e import investigation_app
-from tests.test_utils import isolated_directory_path
+from tests.test_utils import isolated_directory_path, thread_stacks
 
 QUESTION = "Why did customer churn increase last quarter?"
 CSV = (
@@ -70,8 +70,13 @@ def _until(client: TestClient, investigation_id: str, *statuses: str) -> Any:
     deadline = time.monotonic() + 60
     while True:
         body = client.get(f"/api/v1/investigations/{investigation_id}").json()
-        if body["status"] in statuses or time.monotonic() > deadline:
+        if body["status"] in statuses:
             return body
+        if time.monotonic() > deadline:
+            job = client.get(f"/api/v1/jobs/{body['job_id']}").json() if body["job_id"] else None
+            raise AssertionError(
+                f"investigation {body['status']!r} timed out; job={job}\n{thread_stacks()}"
+            )
         time.sleep(0.05)
 
 

@@ -31,7 +31,7 @@ from tests.investigation_planning_fakes import ENVELOPE, ScriptedDeadlineAdapter
 from tests.test_api_features import FakeEmbedder, FakeLLM, _settings
 from tests.test_investigation_sql_gateway import GOOD_SQL
 from tests.test_investigation_tool_gateway import EXACT_ENVELOPE, MAX_INPUT
-from tests.test_utils import isolated_directory_path
+from tests.test_utils import isolated_directory_path, thread_stacks
 
 QUESTION = "Why did customer churn increase last quarter?"
 OTHER_TENANT = "b" * 32
@@ -145,9 +145,19 @@ def _until(
     deadline = time.monotonic() + 60  # generous: a cold first job imports models
     while True:
         body = client.get(f"/api/v1/investigations/{investigation_id}").json()
-        if done(body) or time.monotonic() > deadline:
+        if done(body):
             return body
+        if time.monotonic() > deadline:
+            raise AssertionError(_stalled(client, body))
         time.sleep(0.05)
+
+
+def _stalled(client: TestClient, body: dict[str, Any]) -> str:
+    """Why a wait timed out: the record, its linked job, and every thread's stack."""
+    job = None
+    if body.get("job_id"):
+        job = client.get(f"/api/v1/jobs/{body['job_id']}").json()
+    return f"investigation {body.get('status')!r} timed out; job={job}\n{thread_stacks()}"
 
 
 def _status(*statuses: str) -> Callable[[dict[str, Any]], bool]:
