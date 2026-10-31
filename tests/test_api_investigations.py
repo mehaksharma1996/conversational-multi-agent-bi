@@ -280,6 +280,28 @@ def test_rejecting_the_plan_runs_nothing() -> None:
         assert _approve(client, body).status_code == 409
 
 
+def test_unexpected_plan_finalization_failure_ends_the_investigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed job must not leave its investigation in ``planning`` forever."""
+    deployment = Deployment("inv11_plan_finalization_failure")
+    app = deployment.app()
+
+    def fail_save(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("storage failed")
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.investigations.records, "save_plan", fail_save)
+        _, conversation_id, message_id = _proposal(client)
+        investigation_id = _create(client, conversation_id, message_id).json()["id"]
+
+        body = _until(client, investigation_id, _status("failed"))
+        assert body["explanation_code"] == "planning_failed"
+        job = client.get(f"/api/v1/jobs/{body['job_id']}").json()
+        assert job["status"] == "failed"
+        assert job["error_category"] == "internal"
+
+
 # --- isolation, idempotency, and validation -------------------------------------------------------
 
 

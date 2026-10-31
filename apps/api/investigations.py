@@ -81,7 +81,13 @@ from packages.investigation.state import (
     TaskRunStatus,
     plan_digest,
 )
-from packages.jobs import InProcessJobExecutor, JobContext, JobQueueFullError, JobStatus
+from packages.jobs import (
+    InProcessJobExecutor,
+    JobCancelledError,
+    JobContext,
+    JobQueueFullError,
+    JobStatus,
+)
 from src.documents.retriever import Retriever
 from src.orchestration.investigation_approval import InvestigationApprovalService, SQLWaveReview
 from src.orchestration.investigation_execution import (
@@ -99,6 +105,11 @@ AUTHORITY_EPOCH = 1
 # The only statuses a status read may move to ``expired`` (see ``synchronize``).
 _DECISION_STATUSES = frozenset({S.AWAITING_PLAN_APPROVAL, S.AWAITING_SQL_APPROVAL})
 MAX_EXECUTION_INPUT_TOKENS = 6_000
+_JOB_FAILURE_EXPLANATIONS = {
+    "investigation.plan": "planning_failed",
+    "investigation.execute": "execution_failed",
+    "investigation.resume": "execution_failed",
+}
 
 ErrorCode = Literal[
     "investigations_disabled",
@@ -411,12 +422,29 @@ class InvestigationRuntime:
     def _submit(
         self, record: InvestigationRecord, operation: str, work: Callable[[JobContext], None]
     ) -> None:
+        def guarded_work(ctx: JobContext) -> None:
+            try:
+                work(ctx)
+            except JobCancelledError:
+                raise
+            except Exception:
+                # The generic executor can record only the job failure. Mirror every unexpected
+                # investigation-handler failure into the durable lifecycle before re-raising so
+                # a client never polls a stale non-terminal investigation beside a failed job.
+                self._end(
+                    record.id,
+                    record.tenant_id,
+                    S.FAILED,
+                    explanation=_JOB_FAILURE_EXPLANATIONS[operation],
+                )
+                raise
+
         try:
             job, _ = self._executor.submit(
                 tenant_id=record.tenant_id,
                 workspace_id=record.workspace_id,
                 operation=operation,
-                work=work,
+                work=guarded_work,
                 max_attempts=1,
             )
         except JobQueueFullError:
