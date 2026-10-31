@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -155,8 +157,6 @@ def test_reports_survive_a_restart_and_are_digest_checked(tmp_path: Path) -> Non
     loaded = restarted.get(record.id, TENANT)
     assert restarted.load_report(loaded) == ('{"report": 1}', '{"ev_1": {}}')
     assert restarted.load_plan(loaded) == '{"plan": "text"}'
-    import sqlite3
-
     path = tmp_path / TENANT / WORKSPACE / "investigations.db"
     with sqlite3.connect(path) as connection:  # tamper with the stored report
         connection.execute("UPDATE investigation_reports SET report = '{\"report\": 9}'")
@@ -173,6 +173,31 @@ def test_content_is_encrypted_when_a_key_is_configured(tmp_path: Path) -> None:
     raw = (tmp_path / TENANT / WORKSPACE / "investigations.db").read_bytes()
     assert b"CANARY-plan-text" not in raw
     assert store.load_plan(record) == '{"plan": "CANARY-plan-text"}'
+
+
+@pytest.mark.parametrize("first_access", ["save_plan", "load_plan"])
+def test_content_opened_mid_initialisation_is_still_usable(
+    tmp_path: Path, first_access: str
+) -> None:
+    """A status read and the planning worker can both open a fresh content file (UI-6b CI).
+
+    The other opener has created a table but not yet stamped ``user_version``; neither the
+    worker's ``save_plan`` nor the read's ``load_plan`` may fail on the existing schema.
+    """
+    store = _store(tmp_path, _metadata(tmp_path))
+    record, _ = _create(store)
+    record = store.update(record.id, TENANT, plan_digest=DIGEST)
+    path = tmp_path / TENANT / WORKSPACE / "investigations.db"
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "CREATE TABLE investigation_plans "
+            "(investigation_id TEXT PRIMARY KEY, plan TEXT NOT NULL)"
+        )
+        connection.commit()
+    if first_access == "load_plan":
+        assert store.load_plan(record) is None  # the read sees no plan yet, and does not fail
+    store.save_plan(record, '{"plan": 1}')
+    assert store.load_plan(record) == '{"plan": 1}'
 
 
 def test_metadata_rows_hold_no_content(tmp_path: Path) -> None:
