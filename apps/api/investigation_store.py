@@ -51,13 +51,13 @@ _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 _SCHEMA = (
     """
-    CREATE TABLE investigation_plans (
+    CREATE TABLE IF NOT EXISTS investigation_plans (
         investigation_id TEXT PRIMARY KEY,
         plan TEXT NOT NULL
     )
     """,
     """
-    CREATE TABLE investigation_reports (
+    CREATE TABLE IF NOT EXISTS investigation_reports (
         investigation_id TEXT PRIMARY KEY,
         report TEXT NOT NULL,
         evidence TEXT NOT NULL
@@ -488,14 +488,17 @@ class InvestigationRecordStore:
             raise InvestigationContentError("content_unreadable") from exc
         with closing(connection):
             try:
-                version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-                if version > CONTENT_VERSION:
-                    raise InvestigationContentError("content_newer")
-                if version == 0:
-                    for statement in _SCHEMA:
-                        connection.execute(statement)
-                    connection.execute(f"PRAGMA user_version = {CONTENT_VERSION}")
-                    connection.commit()
+                # A status read can open the file the planning worker has just created; initialise
+                # it once, under the store lock, so the two never race on the schema.
+                with self._lock:
+                    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                    if version > CONTENT_VERSION:
+                        raise InvestigationContentError("content_newer")
+                    if version == 0:
+                        for statement in _SCHEMA:
+                            connection.execute(statement)
+                        connection.execute(f"PRAGMA user_version = {CONTENT_VERSION}")
+                        connection.commit()
                 yield connection
                 connection.commit()
             except _DB_ERRORS as exc:
