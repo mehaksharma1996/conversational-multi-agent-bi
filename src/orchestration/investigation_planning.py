@@ -41,7 +41,7 @@ Both stages run the same pre-flight, stopping at the first failure before any mo
 Then, with a provider-call meter installed, the adapter counts the complete request exactly
 (a non-integer or non-positive count, or a counter that raises, is ``metering_unbounded``; a count
 above 6,000 is ``budget_exhausted``), cancellation and the remaining deadline are sampled again,
-and exactly one ``generate_once_with_deadline`` is made with ``max_output_tokens=1000`` and the
+and exactly one ``generate_once_with_deadline`` is made with ``max_output_tokens=2000`` and the
 ledger's remaining duration.
 
 Settlement happens on every path. A reservation is released only when no invocation was entered

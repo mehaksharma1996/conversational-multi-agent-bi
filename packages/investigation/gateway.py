@@ -205,7 +205,7 @@ class PlanningStageReservation:
 
 
 def reserve_planning_stage(ledger: BudgetLedger, stage: PlanningStage) -> PlanningStageReservation:
-    """Reserve one fixed 6k/1k stage against the caller's cumulative planning ledger.
+    """Reserve one fixed 6k/2k stage against the caller's cumulative planning ledger.
 
     The function accepts no caller-supplied amounts. It deliberately does not implement the
     initial/repair state machine; the S2 gateway will own that sequencing while retaining this

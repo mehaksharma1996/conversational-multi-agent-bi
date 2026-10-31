@@ -3,8 +3,97 @@
 Issue: https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/198
 Tier: strongest. Check mode: --full (S4 onward touches `apps/api`).
 
-**Status: S0 design review only. No adapter code exists, no live model call was made, and no
-provider was charged.** Each implementation slice below needs approval first.
+**Status: S0 reviewed; S1 implemented offline (2026-10-31). No adapter exists, no live model call
+was made, no API key was used, and external spend is $0.** S2–S6 each need approval first.
+
+**Approved decisions (2026-10-31):** D1 OpenAI Responses (direct) as a provisional implementation
+target, *not* a live-validated or admissible provider. D2 one pinned dated snapshot, left
+unresolved without evidence. D3 execution calls receive the ledger deadline (ADR 0024 Amendment
+11, proposed). D4 keep the 30-second planning ledger. D5 no activation. D6 live validation
+deferred, with no spend and no credentials.
+
+## S1 record (what exists now)
+
+**$0 constraint.** Every S1 path runs offline. Tests use `httpx.MockTransport` only, need no API
+key, and open no socket. The test placeholder key is deliberately not key-shaped. No paid
+dependency, account, or credential was added, and nothing falls back to a real endpoint: with no
+injected transport and no key, a count is `not_configured` before any I/O.
+
+**Files.** `src/llm/responses_transport.py` (the HTTP seam), `src/llm/openai_responses.py`
+(canonical request, count, and parity binding), and `tests/test_openai_responses.py` (78 offline
+tests). Neither module is imported by `src/llm/factory.py`, `apps/api`, or any gateway.
+
+1. **Canonical request.** `CanonicalResponsesRequest` (frozen pydantic, `extra="forbid"`) is built
+   by `build_request(profile, ...)` from a trusted `ResponsesModelProfile` (a pinned dated
+   snapshot ID, the profile output cap, the allowed reasoning efforts, and temperature support),
+   the trusted `instructions`, and the prompt as a single `user` message. It refuses: tools,
+   unknown formats, a schema without `json_schema` (or the reverse), reasoning on a non-reasoning
+   profile or a missing or disallowed effort on a reasoning profile, temperature where
+   unsupported, an output cap above the profile or below 1, empty content, and `store=true`.
+   Prompt, instructions, and schema are excluded from `repr`. A `model_construct` bypass is
+   re-validated and fails closed (`request_invalid`).
+2. **Fingerprint and parity.** `_input_fields` is the single root of both payloads. Sent to both
+   and token-affecting: `model`, `instructions`, `input`, `text.format` (a strict JSON schema in
+   canonical key order), `reasoning`, and `truncation="disabled"` (`auto` could silently drop
+   input). Generation only, because the `input_tokens` reference does not list them:
+   `max_output_tokens`, `store=false`, `background`, and `temperature`. `input_fingerprint` is an
+   HMAC-SHA256 under a per-process random key over the canonical count bytes. It is compared
+   in-process only and is never logged, persisted, or exported.
+3. **Exact-counting interface.** `ResponsesInputTokenCounter.count(request)` makes one `POST
+   /v1/responses/input_tokens` and returns an `InputTokenCount` (model, tokens, fingerprint) that
+   only this module can issue. `generation_payload(request, count)` is the only way to obtain a
+   create body, and it refuses any count whose fingerprint or model differs (`request_changed`).
+   S1 builds that body but never sends it.
+4. **Counting failure taxonomy** (fixed codes, no retry, no local tokenizer or length estimate):
+   `not_configured`, `not_sent`, `timeout`, `outcome_unknown`, `redirect_rejected`,
+   `provider_error` (any non-200, including an unknown model), `response_too_large`,
+   `malformed_response` (non-JSON, non-object, duplicate keys, NaN), `ambiguous_response` (wrong
+   `object` or unexpected fields), `invalid_count` (missing, non-int, bool, or <1),
+   `input_over_bound`, `request_invalid`, and `request_changed`. Each error also carries
+   `delivery`: `not_sent`, `unknown`, or `received`. S2 maps every count failure to
+   `metering_unbounded` (the gateway already does this for a raising counter).
+5. **Transport boundaries.** One base URL (`https://api.openai.com/v1`), a path allowlist (S1:
+   `/responses/input_tokens` only), exactly one `POST`, no redirects (3xx refused), a 64 KiB
+   response cap, a ≤30-second timeout plus a total deadline checked while streaming, canonical JSON
+   bytes, a key held privately (not in `repr` or errors), code-only errors with the cause
+   suppressed, no logging, and no I/O at import or construction.
+6. **Model compatibility evidence (documentation only, no calls).**
+
+   | Candidate | Responses API | `input_tokens` | Background + cancel | Output cap | Reasoning | Price (official) |
+   |---|---|---|---|---|---|---|
+   | `gpt-4.1-mini-2025-04-14` | listed on the model page | endpoint is model-generic; snapshot support unverified | **unverified** for this model | 32,768 max output | none (non-reasoning) | not confirmed from OpenAI's page (third parties: $0.40 / $1.60 per 1M) |
+   | `gpt-5-mini-2025-08-07` | yes | unverified | unverified | yes | reasoning; whether `minimal` or `none` is accepted is unconfirmed | not confirmed (third parties: $0.25 / $2.00 per 1M) |
+
+   **Result:** D2 stays unresolved, and `REVIEWED_MODEL_PROFILES` is empty. The leading candidate
+   is the non-reasoning `gpt-4.1-mini-2025-04-14`, pending confirmation of background mode on that
+   snapshot and the official price.
+7. **Unproven provider capabilities.** Count equals billed `usage.input_tokens`; whether the count
+   endpoint is billable; background mode and cancel for the chosen snapshot; whether cancelled
+   responses report usage; latency within 30 seconds; and how the endpoint treats unlisted fields.
+   None of these may be claimed before an approved S6.
+8. **Ledger deadline amendment.** ADR 0024 Amendment 11 (proposed): execution calls get the
+   remaining ledger deadline and the planning termination classification. Runtime is unchanged
+   in S1.
+9. **Future cancellation and unknown usage.** A client timeout is not a provider stop. S2 must
+   request the provider cancel, read the provider's terminal status, set `termination_confirmed`
+   only from it, and otherwise report it unconfirmed (`metering_violation`, full-reservation
+   charge). Reserved, measured, and unknown usage stay distinct (the existing ledger semantics). A
+   `delivery=unknown` outcome never releases budget and never permits a second create request.
+10. **Consent versioning.** Activation (S4) must add the `OpenAI` recipient, publish a new consent
+    notice version that discloses external processing and background retention, require
+    re-consent for existing workspaces (the existing `ConsentSnapshot.satisfies` check), and keep
+    activation server-side only. S1 changes no consent requirement.
+11. **Background retention.** OpenAI documents that background responses are kept roughly 10
+    minutes for polling, even with `store=false`. This is a documented provider practice, **not a
+    guaranteed deletion time**, and it must be disclosed as such.
+12. **Offline reproducibility.** `python -m scripts.run_pytest --target
+    tests/test_openai_responses.py`. Deterministic, with no sleeps, keys, or network.
+13. **Discrepancies with S0.** §4 below said the count call sends "exactly the payload" of
+    generation, including `max_output_tokens`, `store`, and `background`. The `input_tokens`
+    reference does not list those fields, so S1 sends only the token-affecting fields and records
+    the difference. The adapter class and `bound` property (S0 slice S1) move to S2 together with
+    the identity and envelope binding, so nothing adapter-shaped exists before the generation
+    path is reviewed.
 
 ## Outcome
 

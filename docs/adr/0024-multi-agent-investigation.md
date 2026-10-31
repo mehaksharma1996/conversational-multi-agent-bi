@@ -718,6 +718,36 @@ SQL remains available only from the authorized pending-wave endpoint. This amend
 report/evidence UI, a production model adapter, durable checkpoints, default feature activation, or
 new telemetry/audit content.
 
+## Amendment 11: execution calls receive the ledger deadline (PROD-1, #198, 2026-10-31)
+
+- Status: **Proposed** (approved as direction, decision D3; not in effect). Runtime behaviour is
+  unchanged until the S2 or later slice that implements it is reviewed.
+
+1. **Problem.** Planning passes the ledger's remaining deadline into
+   `generate_once_with_deadline` and classifies the provider's termination. Execution
+   (`_AdmittedLLMClient.generate` in `src/orchestration/tool_gateway.py`) calls `generate_once`
+   with no deadline. The 240-second execution wall clock is checked only between operations, so a
+   hung call is bounded only by the adapter's own transport timeout, which the gateway cannot see
+   or review.
+2. **Decision.** The reviewed execution contract will require the planning shape: one call that
+   receives `PlanningDeadline` (the remaining execution-ledger time, never extended) and the job's
+   cancellation token, and returns a `DeadlineModelResult`. The existing classification applies
+   unchanged: an answer after the deadline, an unconfirmed termination, or an unrequested
+   cancellation is `metering_violation`, charged at least the full reservation; a confirmed
+   provider deadline with an enforced bound is `budget_exhausted`; and a confirmed cancellation
+   after a request is `cancelled`.
+3. **Admission.** `admitted_model_adapter` will require a `DeadlineBoundedModelAdapter` plus
+   reviewed execution evidence equivalent to `ReviewedPlanningCapability` for the exact member.
+   This is strictly stronger than today. A `BoundedModelAdapter` without deadline support stays
+   unadmitted (`metering_unbounded`), and the scripted adapters used by the deterministic suites
+   gain the deadline method.
+4. **Unchanged.** Planning's 30-second ledger (D4), every budget limit, reservation, and
+   settlement rule, the feature flag (off by default), and `FailClosedAdapters` as the production
+   default.
+
+The S1 groundwork for the adapter (`src/llm/openai_responses.py`, `src/llm/responses_transport.py`)
+is not an adapter and changes no admission path.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,
