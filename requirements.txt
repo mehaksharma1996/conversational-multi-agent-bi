@@ -19,7 +19,7 @@ mcp==2.3.0
 opentelemetry-sdk==1.45.1
 opentelemetry-exporter-otlp-proto-grpc==1.45.1
 chromadb==1.5.9
-sentence-transformers==6.1.0
+sentence-transformers==6.2.0
 pypdf==6.21.4
 reportlab==5.0.1
 sqlparse==0.6.0
