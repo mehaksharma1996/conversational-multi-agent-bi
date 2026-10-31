@@ -411,7 +411,7 @@ def test_redirects_are_rejected_and_never_followed(status: int) -> None:
 def test_transport_refuses_unlisted_paths_and_unbounded_timeouts() -> None:
     transport = ResponsesTransport(FAKE_KEY, transport=Wire(_count_response()).transport)
     with pytest.raises(ValueError):
-        transport.post_json("/responses", {}, timeout_seconds=1.0)  # create is S2, not S1
+        transport.post_json("/responses", {}, timeout_seconds=1.0)  # create has its own method
     for timeout in (0, -1, 31, float("inf"), float("nan"), True):
         with pytest.raises(ValueError):
             transport.post_json(INPUT_TOKENS_PATH, {}, timeout_seconds=timeout)

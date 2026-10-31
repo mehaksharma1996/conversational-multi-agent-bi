@@ -748,6 +748,13 @@ new telemetry/audit content.
 The S1 groundwork for the adapter (`src/llm/openai_responses.py`, `src/llm/responses_transport.py`)
 is not an adapter and changes no admission path.
 
+**S2 progress (2026-10-31, still Proposed).** `OpenAIResponsesBoundedAdapter`
+(`src/llm/openai_responses_bounded.py`) implements the adapter side offline: it takes the caller's
+remaining deadline, never extends it, and refuses `generate_once` (no deadline) before any I/O.
+Items 2 and 3 are not implemented, because the execution gateway is unchanged, so the amendment
+stays Proposed. It can be accepted once a slice changes `_AdmittedLLMClient` and
+`admitted_model_adapter` and proves the classification above with deterministic gateway tests.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

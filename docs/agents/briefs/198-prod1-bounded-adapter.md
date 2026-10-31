@@ -3,8 +3,10 @@
 Issue: https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/198
 Tier: strongest. Check mode: --full (S4 onward touches `apps/api`).
 
-**Status: S0 reviewed; S1 implemented offline (2026-10-31). No adapter exists, no live model call
-was made, no API key was used, and external spend is $0.** S2–S6 each need approval first.
+**Status: S0 reviewed; S1 implemented offline and CI-verified (2026-10-31, run 41210001295, 10/10
+green including Python 3.12); S2 implemented offline (2026-10-31), unpushed. The adapter exists but
+is wired to nothing, no snapshot is reviewed, no live model call was made, no API key was used, and
+external spend is $0.** S3–S6 each need approval first.
 
 **Approved decisions (2026-10-31):** D1 OpenAI Responses (direct) as a provisional implementation
 target, *not* a live-validated or admissible provider. D2 one pinned dated snapshot, left
@@ -94,6 +96,63 @@ tests). Neither module is imported by `src/llm/factory.py`, `apps/api`, or any g
     the difference. The adapter class and `bound` property (S0 slice S1) move to S2 together with
     the identity and envelope binding, so nothing adapter-shaped exists before the generation
     path is reviewed.
+
+## S2 record (bounded adapter, offline)
+
+**Files.** `src/llm/openai_responses_bounded.py` (new), `src/llm/responses_transport.py`
+(extended), and `tests/test_openai_responses_bounded.py` (85 offline tests). Nothing outside the
+tests imports the adapter (a test enforces this); production keeps `FailClosedAdapters`.
+The production boundary guard (`tests/test_investigation_boundaries.py`) refuses any production
+`DeadlineBoundedModelAdapter`. With approval (2026-10-31), it now exempts exactly
+`src/llm/openai_responses_bounded.py::OpenAIResponsesBoundedAdapter`. Tests pin the exemption to
+that one module and class, and assert it has no reviewed capability profile and no production
+importer.
+
+1. **Identity.** `ResponsesCapabilityProfile` = the snapshot's `ResponsesModelProfile`, an input
+   limit, a `review` reference, and `Literal[True]` evidence for exact counting, background mode,
+   provider cancel, and usage on completion. A before-validator requires `is True`: pydantic's
+   `Literal[True]` alone accepted `1` (regression-tested). `REVIEWED_CAPABILITY_PROFILES` is
+   empty. `bound` is fixed (`openai`, snapshot, `OpenAI`, 1 attempt, cap, bounded input). Planning
+   admission still needs a separately reviewed `ReviewedPlanningCapability`.
+2. **Create.** Needs the single-use count from `count_input_tokens` for the same token-affecting
+   input (`count_required`, `request_changed`). One `POST /responses` (`background=true`,
+   `store=false`), with a timeout of the remaining deadline minus the cancel reserve. `not_sent`
+   is `create_not_sent` (budget `release`); `unknown` or `received` with an error **halts** the
+   instance: no further count or create, ever (`halted`).
+3. **Polling.** `GET /responses/{id}` for the known ID only, at most `max_polls`, sleeping through
+   an injected `sleep`. Only `queued → in_progress → completed | incomplete | failed | cancelled`
+   moves forward; anything else is `unknown_state`, never success. A document for another ID or
+   object is `malformed_response`; another model is `identity_mismatch` (reported via
+   `report_served_by` so the gateway sees it).
+4. **Cancellation.** On a cancellation request, the deadline, poll exhaustion, or any fault:
+   `POST /responses/{id}/cancel` for the same ID, repeated after a timeout up to
+   `max_cancel_attempts` (cancel is documented idempotent). A refused cancel is resolved by
+   polling. Termination is confirmed only by a provider-reported terminal status; otherwise the
+   result is `termination_confirmed=False` (the gateway's `metering_violation`) and the instance
+   halts.
+5. **Deadline.** The caller's `PlanningDeadline` sets a hard stop that is never extended; create
+   and polls end `cancel_reserve_seconds` before it, cancel and later polls before it.
+   `generate_once` (no deadline) refuses `deadline_required` before any I/O. The count is outside
+   the deadline (the gateways read the ledger after counting) and uses a fixed count timeout.
+6. **Transport.** `create_response`, `retrieve_response`, `cancel_response` beside S1's
+   `post_json`; IDs must fully match `resp_[A-Za-z0-9]{1,128}`. Requests now go straight to the
+   `httpx` transport rather than through `httpx.Client`: no redirect is possible, the client's
+   INFO request line (URL with the response ID) is never logged, and environment proxies are not
+   read. Each phase timeout is a fifth of the request timeout, so a request ends within it (DNS
+   excepted).
+7. **Usage and budget.** `report_usage` once, only with both provider counts, verbatim (a count
+   mismatch is left for the gateway). `last_outcome` (content-free): `release` only when the create
+   provably never left; `settle_measured` for a confirmed terminal status with usage;
+   `hold_reservation` otherwise. No prices.
+8. **ADR 0024 Amendment 11 stays Proposed.** S2 implements the adapter half (deadline in, no
+   deadline-less call). The gateway half is not done: `admitted_model_adapter` still accepts a
+   plain `BoundedModelAdapter`, `_AdmittedLLMClient` still calls `generate_once`, there is no
+   reviewed execution capability, and the scripted execution adapters have no deadline method. So
+   this adapter, if wired into execution today, would fail closed on every call.
+9. **Live-unverified.** Every provider behaviour above is proven only against scripted
+   transports: response shapes, state names, cancel idempotency and its answer for an
+   already-completed response, usage on cancelled responses, whether polling a `store=false`
+   background response works, latency against the 30-second ledger, and DNS time.
 
 ## Outcome
 
