@@ -98,7 +98,7 @@ Design record: `docs/agents/briefs/132-ui2-operation-state-recovery.md`.
     success.
   - Cancellation reports requested, acknowledged, completed, or too late, and never claims an
     immediate stop.
-  - `JobProgress` renders the status for UI-6b.
+  - `JobProgress` renders the linked investigation job status (UI-6b).
 
 ## Ask workspace (UI-6a, #154)
 
@@ -141,9 +141,55 @@ Design record: `docs/agents/briefs/154-ui6a-ask-conversations.md`.
     running.
   - The click is never authority: the server re-checks the request, the policy, and the read-only
     guards.
-  - This covers v1 message approval only; investigation SQL-wave approval belongs to UI-6b.
+  - This covers v1 message approval only; investigation SQL waves have their own review (below).
 - **Announcements.** The panel has no live region of its own. Question and decision outcomes go
   once through `OperationAnnouncer` in the outcome's own words, replacing the generic "finished".
+
+## Investigation workflow (UI-6b, #155)
+
+Design record: `docs/agents/briefs/155-ui6b-investigation-workflow.md`. API read contract:
+`docs/architecture/investigation-workflow.md` ("UI-6b read contract").
+
+**Availability.** Production investigation execution is unavailable until PROD-1 (#198): with no
+reviewed bounded adapter, planning fails closed as `failed / metering_unbounded`, and the UI shows
+the server's explanation. Investigation routing is off by default
+(`INVESTIGATION_ROUTING_ENABLED`). The scripted adapters used by the browser journeys prove wiring,
+not production model support.
+
+- **Scope.** `InvestigationPanel` attaches to the latest INV-9 proposal message in Ask. It shows,
+  in order: an explicit **Start investigation** (planning only), planning, the full plan review,
+  execution with cancellation, the SQL-wave review, and terminal status. It does not render the
+  verified report or evidence; that is UI-6c (#156).
+- **Controller.** `src/investigations/useInvestigation.ts` owns one in-memory idempotency key, the
+  latest authoritative response, and one-at-a-time bounded polling (1–10 s, as UI-2). It never
+  retries a POST.
+  - Discovery and recovery use only the read-only by-message lookup.
+  - A generation counter plus the workspace, conversation, proposal, investigation, and job IDs
+    drop late responses.
+  - Commands use a short-lived `investigation` operation in the mutation lane. The background job
+    does not hold the lane.
+- **Plan review.** Objective, sub-questions, dependency-ordered tasks, hypotheses, missing
+  information, approval requirements, the planning-phase cost estimate worded by its bound, and
+  the server deadline. Approval is refused in the browser when trusted review details or task
+  details are missing. Approve, reject, and cancel use `ConfirmDialog`.
+- **Progress.** Only server-recorded task status and approved-task-owner counts ("task-owner
+  progress", not "all agents"). A native `<progress>` appears only with a real total. Absent data
+  is stated as unavailable; nothing is simulated. A missing process-local job is an unknown job
+  outcome beside the durable lifecycle record.
+- **Cancellation.** Uses the investigation endpoint and always says an in-flight provider or SQL
+  call may finish. The UI distinguishes requested, server-confirmed, and too late.
+- **SQL waves.** Statements come only from the authorized SQL-wave endpoint and must match the
+  durable wave summary exactly. Every item needs approve, reject, or a material edit, and nothing
+  is sent before **Submit decisions**. The submission echoes only the server's wave and item
+  bindings, and edits are revalidated by the server. SQL lives only in React memory. It is cleared
+  on submission, cancellation, workspace or scope change, an unconfirmed outcome, or a lifecycle
+  change, and it is not fetched again while a command is in flight. The server decides expiry: a
+  409 is reconciled by an authoritative read, never by the browser clock.
+- **Uncertain outcomes.** A retryable failure triggers one read-only reconciliation. If that read
+  does not prove a transition, every consequential control stays locked behind **Check server
+  state**.
+- **Restart.** The durable record reads `interrupted` with its fixed explanation. Nothing resumes,
+  and no resume action is offered.
 
 ## Workspace context
 

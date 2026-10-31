@@ -695,6 +695,29 @@ Document display titles are not passed to planning, because only filenames are s
 authority epoch is fixed per investigation; the live check revokes on workspace deletion or
 expiry. The approval and report UI is UI-6b/UI-6c, and default activation is DEP-1.
 
+## Amendment 10: UI-6b trusted read model (UI-6b, #155, 2026-10-30)
+
+UI-6b adds no authority. It exposes the minimum additive read model needed to present and reconcile
+INV-11 investigations truthfully:
+
+1. The live runtime may return its already validated proposal wrapper (planning cost estimate,
+   missing information, derived approval requirements, and pending-plan expiry), its current opaque
+   job ID, and content-free task progress derived from the guarded execution checkpoint.
+2. Progress names only actual task records and their approved assignees. An absent, inconsistent,
+   or unreadable state returns no progress; Supervisor, Critic, and Business Investigator phases
+   are not invented.
+3. A tenant-scoped, read-only conversation/message lookup returns the newest exact source-message
+   investigation for reload and uncertain-create reconciliation. It never repeats a mutation.
+4. Status reads expire due plan approvals on the server before responding. Browser clocks remain
+   display aids only.
+5. Proposal details, job links, and live progress are process-local trusted data. After restart an
+   interrupted durable record returns none of them and cannot reconstruct approval or execution
+   authority from chat or browser state.
+
+SQL remains available only from the authorized pending-wave endpoint. This amendment does not add
+report/evidence UI, a production model adapter, durable checkpoints, default feature activation, or
+new telemetry/audit content.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

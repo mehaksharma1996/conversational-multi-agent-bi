@@ -79,6 +79,12 @@ export type WorkspaceOverview = components["schemas"]["WorkspaceOverviewResponse
 export type BrowserSession = components["schemas"]["SessionResponse"];
 export type Job = components["schemas"]["JobResponse"];
 export type JobStatus = components["schemas"]["JobStatus"];
+export type Investigation = components["schemas"]["InvestigationResponse"];
+export type InvestigationStatus = components["schemas"]["InvestigationStatus"];
+export type InvestigationCostEstimate = components["schemas"]["CostEstimate"];
+export type InvestigationPlanDecision = components["schemas"]["PlanDecisionBody"];
+export type InvestigationSqlWave = components["schemas"]["SQLWaveReviewResponse"];
+export type InvestigationSqlWaveDecision = components["schemas"]["SQLWaveDecisionBody"];
 
 export class ApiClientError extends Error {
   readonly code: string;
@@ -208,6 +214,87 @@ export async function listMessages(conversationId: string): Promise<Message[]> {
     cursor = page.next_cursor ?? undefined;
   } while (cursor);
   return messages;
+}
+
+/** Starts planning from one proposal; the key makes this exact creation durable and idempotent. */
+export async function createInvestigation(
+  conversationId: string,
+  messageId: string,
+  idempotencyKey: string,
+): Promise<Investigation> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/conversations/{conversation_id}/investigations",
+    {
+      params: {
+        path: { conversation_id: conversationId },
+        header: { "Idempotency-Key": idempotencyKey },
+      },
+      body: { message_id: messageId },
+    },
+  );
+  return unwrap(data, error, response);
+}
+
+/** Read-only recovery by the exact tenant-owned conversation and source proposal message. */
+export async function getInvestigationByMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<Investigation> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/conversations/{conversation_id}/investigations/by-message/{message_id}",
+    { params: { path: { conversation_id: conversationId, message_id: messageId } } },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function getInvestigation(investigationId: string): Promise<Investigation> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/investigations/{investigation_id}",
+    { params: { path: { investigation_id: investigationId } } },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function decideInvestigationPlan(
+  investigationId: string,
+  decision: InvestigationPlanDecision,
+): Promise<Investigation> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/investigations/{investigation_id}/plan-decision",
+    { params: { path: { investigation_id: investigationId } }, body: decision },
+  );
+  return unwrap(data, error, response);
+}
+
+/** Requests cancellation; a non-terminal response is not confirmation that work stopped. */
+export async function cancelInvestigation(investigationId: string): Promise<Investigation> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/investigations/{investigation_id}/cancel",
+    { params: { path: { investigation_id: investigationId } } },
+  );
+  return unwrap(data, error, response);
+}
+
+/** The only client read that returns investigation SQL; callers must keep it in memory only. */
+export async function getInvestigationSqlWave(
+  investigationId: string,
+): Promise<InvestigationSqlWave> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/investigations/{investigation_id}/sql-wave",
+    { params: { path: { investigation_id: investigationId } } },
+  );
+  return unwrap(data, error, response);
+}
+
+export async function decideInvestigationSqlWave(
+  investigationId: string,
+  decision: InvestigationSqlWaveDecision,
+): Promise<Investigation> {
+  const { data, error, response } = await api.POST(
+    "/api/v1/investigations/{investigation_id}/sql-wave",
+    { params: { path: { investigation_id: investigationId } }, body: decision },
+  );
+  return unwrap(data, error, response);
 }
 
 export async function uploadTabular(

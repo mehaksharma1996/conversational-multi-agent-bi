@@ -63,7 +63,7 @@ after `npm run build`) fails when any is exceeded:
 
 | Measure | Budget | Measured |
 |---|---:|---:|
-| Entry chunk, gzip | 100 KiB | 78 KiB |
+| Entry chunk, gzip | 105 KiB | 78 KiB at introduction; 102.7 KiB after UI-6b (see below) |
 | Largest (chart) chunk, raw | 1,600 KiB | 1,409 KiB |
 | Largest (chart) chunk, gzip | 520 KiB | 460 KiB |
 | All JavaScript, gzip | 620 KiB | 538 KiB |
@@ -72,6 +72,19 @@ Budgets leave about 10 to 15 percent of headroom so an ordinary dependency updat
 build, while adding a heavy dependency or reverting to the full Plotly entry does. Raising a budget
 needs a justification in this file. The checker was exercised with a deliberately tight budget to confirm
 that it fails.
+
+### Entry budget raised to 105 KiB (UI-6b, #155, 2026-10-30)
+
+Before UI-6b the entry chunk had grown to 97.2 KiB gzip through UI-2 and UI-6a. UI-6b added the
+investigation controller and client in `src/investigations/` and `api/client.ts`, which brought it to
+106.2 KiB. The investigation panels, which render only beside an INV-9 proposal, are now lazy-loaded
+(`InvestigationPanel-*.js`, 4.5 KiB gzip). That leaves the entry at 102.7 KiB.
+
+The remaining growth is the controller hook that `App` needs to discover and reconcile an
+investigation, so it cannot be deferred without restructuring `App`. The entry budget is therefore
+raised from 100 to 105 KiB. This is a deliberate, recorded decision; the other three budgets are
+unchanged. The roughly 2 KiB of headroom is small: the next feature that adds to the entry chunk
+(for example UI-6c, #156) should load its UI lazily or revisit this budget with its own measurement.
 
 ## What was not measured
 

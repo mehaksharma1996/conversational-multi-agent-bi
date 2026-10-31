@@ -1,6 +1,18 @@
 {
   "components": {
     "schemas": {
+      "AgentRole": {
+        "description": "The five roles of the approved architecture. None may be removed (see ADR 0024).",
+        "enum": [
+          "supervisor",
+          "sql_analyst",
+          "document_research",
+          "business_investigator",
+          "critic"
+        ],
+        "title": "AgentRole",
+        "type": "string"
+      },
       "AnalysisCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -238,6 +250,34 @@
           "limitations"
         ],
         "title": "AnomalyResponse",
+        "type": "object"
+      },
+      "ApprovalRequirement": {
+        "additionalProperties": false,
+        "description": "A requirement, never an approval or an authority grant.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "plan",
+              "statement_sql"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "required",
+              "deferred_to_statement_preparation"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "status"
+        ],
+        "title": "ApprovalRequirement",
         "type": "object"
       },
       "AuthConfigResponse": {
@@ -789,6 +829,77 @@
           "created_at"
         ],
         "title": "ConversationResponse",
+        "type": "object"
+      },
+      "CostEstimate": {
+        "additionalProperties": false,
+        "description": "Always an estimate. ``enforced_upper_bound`` only when the ledger can actually hold it.",
+        "properties": {
+          "amount_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Usd"
+          },
+          "basis": {
+            "const": "token_limits_x_highest_eligible_price",
+            "default": "token_limits_x_highest_eligible_price",
+            "title": "Basis",
+            "type": "string"
+          },
+          "bound": {
+            "enum": [
+              "enforced_upper_bound",
+              "indicative",
+              "unavailable"
+            ],
+            "title": "Bound",
+            "type": "string"
+          },
+          "kind": {
+            "const": "estimate",
+            "default": "estimate",
+            "title": "Kind",
+            "type": "string"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "enum": [
+                "no_eligible_provider",
+                "pricing_unknown",
+                "output_cap_not_enforced",
+                "input_not_bounded",
+                "retries_not_metered"
+              ],
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "price_table_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Table Version"
+          }
+        },
+        "required": [
+          "bound"
+        ],
+        "title": "CostEstimate",
         "type": "object"
       },
       "DataProfileResponse": {
@@ -1368,6 +1479,40 @@
         "title": "InvestigationCreateRequest",
         "type": "object"
       },
+      "InvestigationProgressResponse": {
+        "properties": {
+          "completed_tasks": {
+            "title": "Completed Tasks",
+            "type": "integer"
+          },
+          "task_owners": {
+            "items": {
+              "$ref": "#/components/schemas/InvestigationTaskOwnerProgressResponse"
+            },
+            "title": "Task Owners",
+            "type": "array"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/InvestigationTaskProgressResponse"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "total_tasks": {
+            "title": "Total Tasks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "completed_tasks",
+          "total_tasks",
+          "tasks",
+          "task_owners"
+        ],
+        "title": "InvestigationProgressResponse",
+        "type": "object"
+      },
       "InvestigationProposalMessage": {
         "additionalProperties": false,
         "description": "A read-only recommendation, never an approval or execution handle.",
@@ -1427,6 +1572,41 @@
         "title": "InvestigationProposalMessage",
         "type": "object"
       },
+      "InvestigationProposalReviewResponse": {
+        "description": "Display-only proposal details; never approval or execution authority.",
+        "properties": {
+          "approval_requirements": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalRequirement"
+            },
+            "title": "Approval Requirements",
+            "type": "array"
+          },
+          "cost_estimate": {
+            "$ref": "#/components/schemas/CostEstimate"
+          },
+          "missing_information": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Information",
+            "type": "array"
+          },
+          "plan_expires_at": {
+            "format": "date-time",
+            "title": "Plan Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cost_estimate",
+          "missing_information",
+          "approval_requirements",
+          "plan_expires_at"
+        ],
+        "title": "InvestigationProposalReviewResponse",
+        "type": "object"
+      },
       "InvestigationResponse": {
         "properties": {
           "authority_epoch": {
@@ -1475,6 +1655,17 @@
             "title": "Id",
             "type": "string"
           },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
           "message_id": {
             "title": "Message Id",
             "type": "string"
@@ -1501,6 +1692,26 @@
               }
             ],
             "title": "Plan Digest"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationProgressResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationProposalReviewResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "report": {
             "anyOf": [
@@ -1574,6 +1785,78 @@
         ],
         "title": "InvestigationStatus",
         "type": "string"
+      },
+      "InvestigationTaskOwnerProgressResponse": {
+        "properties": {
+          "assignee": {
+            "$ref": "#/components/schemas/AgentRole"
+          },
+          "completed_tasks": {
+            "title": "Completed Tasks",
+            "type": "integer"
+          },
+          "pending_tasks": {
+            "title": "Pending Tasks",
+            "type": "integer"
+          },
+          "running_tasks": {
+            "title": "Running Tasks",
+            "type": "integer"
+          },
+          "total_tasks": {
+            "title": "Total Tasks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assignee",
+          "total_tasks",
+          "completed_tasks",
+          "running_tasks",
+          "pending_tasks"
+        ],
+        "title": "InvestigationTaskOwnerProgressResponse",
+        "type": "object"
+      },
+      "InvestigationTaskProgressResponse": {
+        "properties": {
+          "assignee": {
+            "$ref": "#/components/schemas/AgentRole"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "skipped",
+              "refused",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "kind",
+          "assignee",
+          "status",
+          "attempts"
+        ],
+        "title": "InvestigationTaskProgressResponse",
+        "type": "object"
       },
       "JobListResponse": {
         "additionalProperties": false,
@@ -2671,6 +2954,15 @@
         ],
         "title": "TabularUploadResponse",
         "type": "object"
+      },
+      "TaskKind": {
+        "enum": [
+          "sql_analysis",
+          "document_research",
+          "hypothesis_test"
+        ],
+        "title": "TaskKind",
+        "type": "string"
       },
       "ValidationError": {
         "properties": {
@@ -3791,6 +4083,146 @@
           }
         ],
         "summary": "Create Investigation",
+        "tags": [
+          "investigations"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/investigations/by-message/{message_id}": {
+      "get": {
+        "description": "Read the newest owned investigation for one exact source message; never create work.",
+        "operationId": "get_investigation_by_message_api_v1_conversations__conversation_id__investigations_by_message__message_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestigationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Investigation By Message",
         "tags": [
           "investigations"
         ]

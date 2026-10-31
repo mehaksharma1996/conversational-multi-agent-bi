@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import type { Message, Workspace } from "../api/client";
 import { QUESTION_MAX_LENGTH, threadEntries, type AskResult, type LocalEntry } from "../conversation/thread";
@@ -46,6 +46,8 @@ interface ConversationPanelProps {
   onAsk: (question: string, requireSqlApproval: boolean) => Promise<AskResult>;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
   onExport: (message: Message, format: "csv" | "xlsx") => Promise<void>;
+  investigationMessageId?: string | null;
+  investigationPanel?: ReactNode;
 }
 
 function sampleAvailable(item: DemoQuestion, demo: DemoContext): boolean {
@@ -82,6 +84,8 @@ export function ConversationPanel({
   onAsk,
   onApproval,
   onExport,
+  investigationMessageId = null,
+  investigationPanel = null,
 }: ConversationPanelProps) {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const reasonId = useId();
@@ -203,6 +207,9 @@ export function ConversationPanel({
                   onApprovalDraftChange={(draft) => onApprovalDraftChange(entry.message.id, draft)}
                   onApproval={onApproval}
                   onExport={onExport}
+                  investigationPanel={
+                    entry.message.id === investigationMessageId ? investigationPanel : null
+                  }
                 />
               </li>
             ) : (

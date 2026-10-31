@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,20 +6,25 @@ import App from "./App";
 import {
   ApiClientError,
   askQuestion,
+  cancelInvestigation,
   createConversation,
+  decideInvestigationPlan,
   getAnalysis,
   getConversation,
   getDataset,
   getDocumentCollection,
+  getInvestigationByMessage,
   getWorkspaceOverview,
   listMessages,
   listWorkspaces,
+  type Investigation,
   type Message,
 } from "./api/client";
 import {
   analysisFixture,
   conversationFixture,
   documentCollectionFixture,
+  investigationProposalMessageFixture,
   messageFixture,
   readyDatasetFixture,
   workspaceFixture,
@@ -37,9 +42,12 @@ vi.mock("./api/client", async (importOriginal) => {
     getAnalysis: vi.fn(),
     getDocumentCollection: vi.fn(),
     getConversation: vi.fn(),
+    getInvestigationByMessage: vi.fn(),
     createConversation: vi.fn(),
+    decideInvestigationPlan: vi.fn(),
     listMessages: vi.fn(),
     askQuestion: vi.fn(),
+    cancelInvestigation: vi.fn(),
   };
 });
 
@@ -79,6 +87,38 @@ const stored: Message = {
   question: QUESTION,
   created_at: new Date(Date.now() + 60_000).toISOString(),
 };
+
+function pendingInvestigation(overrides: Partial<Investigation> = {}): Investigation {
+  return {
+    id: "investigation-1",
+    conversation_id: conversationFixture.id,
+    message_id: investigationProposalMessageFixture.id,
+    status: "awaiting_plan_approval",
+    created_at: "2026-10-30T10:00:00Z",
+    updated_at: "2026-10-30T10:01:00Z",
+    plan: {
+      schema_version: 1,
+      objective: "Explain the churn increase",
+      sub_questions: ["Which segment changed most?"],
+      tasks: [{ id: "task-1", kind: "sql_analysis", assignee: "business_investigator", depends_on: [] }],
+    },
+    plan_digest: "a".repeat(64),
+    authority_epoch: 1,
+    proposal: {
+      cost_estimate: {
+        kind: "estimate",
+        basis: "token_limits_x_highest_eligible_price",
+        bound: "enforced_upper_bound",
+        amount_usd: 0.12,
+        limitations: [],
+      },
+      missing_information: [],
+      approval_requirements: [{ kind: "plan", status: "required" }],
+      plan_expires_at: "2026-10-31T10:00:00Z",
+    },
+    ...overrides,
+  };
+}
 
 async function ask(text = QUESTION) {
   const box = await screen.findByLabelText("Business question");
@@ -230,5 +270,49 @@ describe("asking a question", () => {
     await waitFor(() => expect(screen.getByLabelText("Business question")).toBeEnabled());
     expect(document.querySelector('[data-message-id="msg-foreign"]')).toBeNull();
     expect(document.querySelectorAll(".message-list .message-pair")).toHaveLength(1);
+  });
+});
+
+describe("investigation plan confirmation", () => {
+  it("does not approve until the exact-plan confirmation is accepted", async () => {
+    vi.mocked(listMessages).mockResolvedValue([investigationProposalMessageFixture]);
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(pendingInvestigation());
+    vi.mocked(decideInvestigationPlan).mockResolvedValue(
+      pendingInvestigation({ status: "queued", proposal: null }),
+    );
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve and run plan" }));
+    const dialog = screen.getByRole("dialog", { name: "Approve this investigation plan?" });
+    expect(within(dialog).getByText(/planning-phase estimate/i)).toBeInTheDocument();
+    expect(decideInvestigationPlan).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve and run plan" }));
+    await waitFor(() => expect(decideInvestigationPlan).toHaveBeenCalledWith(
+      "investigation-1",
+      {
+        decision: "approve",
+        plan_digest: "a".repeat(64),
+        authority_epoch: 1,
+        follow_up_rounds: 0,
+      },
+    ));
+  });
+
+  it("does not request cancellation until its in-flight-work warning is accepted", async () => {
+    const running = pendingInvestigation({ status: "running", proposal: null });
+    vi.mocked(listMessages).mockResolvedValue([investigationProposalMessageFixture]);
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(running);
+    vi.mocked(cancelInvestigation).mockResolvedValue(running);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel investigation" }));
+    const dialog = screen.getByRole("dialog", { name: "Cancel this investigation?" });
+    expect(within(dialog).getByText(/already in flight may finish/i)).toBeInTheDocument();
+    expect(cancelInvestigation).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel investigation" }));
+    await waitFor(() => expect(cancelInvestigation).toHaveBeenCalledWith("investigation-1"));
+    expect(await screen.findByText(/has not yet reached a terminal cancelled state/i)).toBeInTheDocument();
   });
 });

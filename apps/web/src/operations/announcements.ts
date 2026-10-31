@@ -11,6 +11,7 @@ const LABELS: Record<OperationKind, string> = {
   consent: "Consent update",
   conversation: "Question",
   approval: "SQL decision",
+  investigation: "Investigation command",
   download: "Download",
   export: "Workspace export",
   reset: "Workspace reset",

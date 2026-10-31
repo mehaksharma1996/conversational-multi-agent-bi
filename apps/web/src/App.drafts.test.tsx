@@ -210,7 +210,8 @@ describe("unsaved workflow drafts across section navigation", () => {
     render(<App />);
     await screen.findByText("Local workspace ready");
     await startAsk(user);
-    await user.type(screen.getByLabelText("Business question"), messageFixture.question);
+    await user.click(screen.getByLabelText("Business question"));
+    await user.paste(messageFixture.question);
     await user.click(screen.getByRole("button", { name: "Ask workbench" }));
     await screen.findByRole("button", { name: "Approve SQL" });
 
@@ -220,7 +221,7 @@ describe("unsaved workflow drafts across section navigation", () => {
     await user.click(screen.getByRole("button", { name: "Edit SQL" }));
     const edited = "SELECT merchant FROM uploaded_data LIMIT 5";
     await user.clear(screen.getByLabelText("Edit SQL"));
-    await user.type(screen.getByLabelText("Edit SQL"), edited);
+    await user.paste(edited);
     await goTo(user, /Overview/);
     await goTo(user, /Ask/);
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import threading
+import traceback
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -37,3 +40,12 @@ def isolated_directory_path(test_name: str) -> Path:
 def test_sha256_bytes_is_content_stable() -> None:
     assert sha256_bytes(b"business data") == sha256_bytes(b"business data")
     assert sha256_bytes(b"business data") != sha256_bytes(b"different data")
+
+
+def thread_stacks() -> str:
+    """Every live thread's current stack, for diagnosing a background job that never progresses."""
+    names = {thread.ident: thread.name for thread in threading.enumerate()}
+    return "\n".join(
+        f"--- thread {names.get(ident, ident)} ---\n" + "".join(traceback.format_stack(frame))
+        for ident, frame in sys._current_frames().items()
+    )

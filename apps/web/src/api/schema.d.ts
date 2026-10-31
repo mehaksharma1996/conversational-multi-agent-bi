@@ -169,6 +169,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conversations/{conversation_id}/investigations/by-message/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Investigation By Message
+         * @description Read the newest owned investigation for one exact source message; never create work.
+         */
+        get: operations["get_investigation_by_message_api_v1_conversations__conversation_id__investigations_by_message__message_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversations/{conversation_id}/messages": {
         parameters: {
             query?: never;
@@ -779,6 +799,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentRole
+         * @description The five roles of the approved architecture. None may be removed (see ADR 0024).
+         * @enum {string}
+         */
+        AgentRole: "supervisor" | "sql_analyst" | "document_research" | "business_investigator" | "critic";
         /** AnalysisCreateRequest */
         AnalysisCreateRequest: {
             /**
@@ -871,6 +897,22 @@ export interface components {
             };
             /** Total Flagged Count */
             total_flagged_count: number;
+        };
+        /**
+         * ApprovalRequirement
+         * @description A requirement, never an approval or an authority grant.
+         */
+        ApprovalRequirement: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "plan" | "statement_sql";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "required" | "deferred_to_statement_preparation";
         };
         /**
          * AuthConfigResponse
@@ -1069,6 +1111,38 @@ export interface components {
             status: "active";
             /** Workspace Id */
             workspace_id: string;
+        };
+        /**
+         * CostEstimate
+         * @description Always an estimate. ``enforced_upper_bound`` only when the ledger can actually hold it.
+         */
+        CostEstimate: {
+            /** Amount Usd */
+            amount_usd?: number | null;
+            /**
+             * Basis
+             * @default token_limits_x_highest_eligible_price
+             * @constant
+             */
+            basis: "token_limits_x_highest_eligible_price";
+            /**
+             * Bound
+             * @enum {string}
+             */
+            bound: "enforced_upper_bound" | "indicative" | "unavailable";
+            /**
+             * Kind
+             * @default estimate
+             * @constant
+             */
+            kind: "estimate";
+            /**
+             * Limitations
+             * @default []
+             */
+            limitations: ("no_eligible_provider" | "pricing_unknown" | "output_cap_not_enforced" | "input_not_bounded" | "retries_not_metered")[];
+            /** Price Table Version */
+            price_table_version?: string | null;
         };
         /** DataProfileResponse */
         DataProfileResponse: {
@@ -1283,6 +1357,17 @@ export interface components {
             /** Message Id */
             message_id: string;
         };
+        /** InvestigationProgressResponse */
+        InvestigationProgressResponse: {
+            /** Completed Tasks */
+            completed_tasks: number;
+            /** Task Owners */
+            task_owners: components["schemas"]["InvestigationTaskOwnerProgressResponse"][];
+            /** Tasks */
+            tasks: components["schemas"]["InvestigationTaskProgressResponse"][];
+            /** Total Tasks */
+            total_tasks: number;
+        };
         /**
          * InvestigationProposalMessage
          * @description A read-only recommendation, never an approval or execution handle.
@@ -1315,6 +1400,22 @@ export interface components {
              */
             type: "investigation_proposed";
         };
+        /**
+         * InvestigationProposalReviewResponse
+         * @description Display-only proposal details; never approval or execution authority.
+         */
+        InvestigationProposalReviewResponse: {
+            /** Approval Requirements */
+            approval_requirements: components["schemas"]["ApprovalRequirement"][];
+            cost_estimate: components["schemas"]["CostEstimate"];
+            /** Missing Information */
+            missing_information: string[];
+            /**
+             * Plan Expires At
+             * Format: date-time
+             */
+            plan_expires_at: string;
+        };
         /** InvestigationResponse */
         InvestigationResponse: {
             /** Authority Epoch */
@@ -1332,6 +1433,8 @@ export interface components {
             explanation_code?: string | null;
             /** Id */
             id: string;
+            /** Job Id */
+            job_id?: string | null;
             /** Message Id */
             message_id: string;
             /** Plan */
@@ -1340,6 +1443,8 @@ export interface components {
             } | null;
             /** Plan Digest */
             plan_digest?: string | null;
+            progress?: components["schemas"]["InvestigationProgressResponse"] | null;
+            proposal?: components["schemas"]["InvestigationProposalReviewResponse"] | null;
             /** Report */
             report?: {
                 [key: string]: unknown;
@@ -1359,6 +1464,32 @@ export interface components {
          * @enum {string}
          */
         InvestigationStatus: "planning" | "awaiting_plan_approval" | "queued" | "running" | "awaiting_sql_approval" | "completed" | "completed_partial" | "budget_exhausted" | "plan_invalid" | "plan_rejected" | "cancelled" | "failed" | "interrupted" | "expired";
+        /** InvestigationTaskOwnerProgressResponse */
+        InvestigationTaskOwnerProgressResponse: {
+            assignee: components["schemas"]["AgentRole"];
+            /** Completed Tasks */
+            completed_tasks: number;
+            /** Pending Tasks */
+            pending_tasks: number;
+            /** Running Tasks */
+            running_tasks: number;
+            /** Total Tasks */
+            total_tasks: number;
+        };
+        /** InvestigationTaskProgressResponse */
+        InvestigationTaskProgressResponse: {
+            assignee: components["schemas"]["AgentRole"];
+            /** Attempts */
+            attempts: number;
+            kind: components["schemas"]["TaskKind"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "succeeded" | "failed" | "skipped" | "refused" | "cancelled";
+            /** Task Id */
+            task_id: string;
+        };
         /** JobListResponse */
         JobListResponse: {
             /** Items */
@@ -1757,6 +1888,11 @@ export interface components {
             /** Workspace Id */
             workspace_id: string;
         };
+        /**
+         * TaskKind
+         * @enum {string}
+         */
+        TaskKind: "sql_analysis" | "document_research" | "hypothesis_test";
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -2461,6 +2597,110 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestigationResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_investigation_by_message_api_v1_conversations__conversation_id__investigations_by_message__message_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

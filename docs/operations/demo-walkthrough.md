@@ -79,5 +79,5 @@ the scripted results transfer.
 ```powershell
 cd apps/web
 npm run build
-npm run test:e2e:real      # 20 journeys; starts and stops its own API and web server
+npm run test:e2e:real      # 23 retail + 5 investigation journeys; starts and stops its own API and web server
 ```
