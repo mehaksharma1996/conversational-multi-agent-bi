@@ -776,6 +776,20 @@ workspace consent, and both gateways re-check authority immediately before each 
 An execution run allows one `run`/`resume` at a time. Neither change touches item 3, so the
 amendment stays Proposed.
 
+**S5b progress (2026-11-01, still Proposed).** Requirement-by-requirement, against code and
+deterministic tests only:
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Item 2: execution receives the remaining ledger deadline, never extended, with the run's cancellation token and the planning classification | Implemented and tested (S3) | `tests/test_prod1_gateway_integration.py`, now on the strict path |
+| Item 3a: execution admission requires a `DeadlineBoundedModelAdapter` | Implemented and tested (S5b) | `admit_execution_adapter`; `tests/test_prod1_s5b_execution_admission.py` |
+| Item 3b: reviewed execution evidence for the exact member | Implemented and tested (S5b): `ReviewedExecutionCapability` / `ReviewedExecutionEvidence` | Same file; production registry `REVIEWED_EXECUTION_EVIDENCE` is empty |
+| Item 3c: "the scripted adapters ... gain the deadline method" | **Not done as written.** Scripted suites instead opt in through the single test-only `SCRIPTED_EXECUTION_ADMISSION`, which no production module may reference (boundary-tested) | Needs a decision: accept this deviation, or migrate every scripted adapter |
+| Reviewed evidence for a real provider and snapshot | **Missing** (needs S6 live evidence under a separate spend approval) | None; synthetic test records only |
+
+The amendment stays Proposed because item 3c deviates from its text and no real reviewed
+execution evidence exists.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

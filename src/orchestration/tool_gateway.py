@@ -174,7 +174,7 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from numbers import Integral, Real
-from typing import Annotated, Any, Literal, NoReturn, Protocol, cast, get_args
+from typing import Annotated, Any, Literal, NoReturn, Protocol, cast, final, get_args
 
 import numpy as np
 import pandas as pd
@@ -237,6 +237,7 @@ from packages.investigation.gateway import (
     InvestigationAuthority,
     MeteringUnbounded,
     ProviderEnvelope,
+    ReviewedExecutionEvidence,
     WallClock,
     check_authority,
     check_binding,
@@ -295,6 +296,7 @@ from src.llm.bounded import (
     DeadlineModelResult,
     DeadlineTermination,
     PlanningDeadline,
+    admit_execution_adapter,
 )
 from src.llm.observability import MeterHealth, meter_provider_calls
 from src.orchestration.document_research import (
@@ -630,16 +632,63 @@ class _CallMeter:
         self.served.append((provider, model))
 
 
+@final
+class ScriptedExecutionAdmission:
+    """Test and scripted-evaluation only: admit an unreviewed scripted ``BoundedModelAdapter``.
+
+    PROD-1 S5b (ADR 0024 Amendment 11, item 3) makes reviewed, deadline-bounded admission the
+    only production path. The deterministic suites drive the real gateway with scripted adapters
+    that have no reviewed capability, so they opt in with the single instance
+    ``SCRIPTED_EXECUTION_ADMISSION``. No production module may reference that instance
+    (``tests/test_investigation_boundaries.py`` enforces it), and the gateway accepts only it.
+    """
+
+    __slots__ = ()
+    _created = False
+
+    def __init__(self) -> None:
+        if ScriptedExecutionAdmission._created:
+            raise TypeError("SCRIPTED_EXECUTION_ADMISSION is the only instance.")
+        ScriptedExecutionAdmission._created = True
+
+    def __repr__(self) -> str:
+        return "SCRIPTED_EXECUTION_ADMISSION"
+
+
+SCRIPTED_EXECUTION_ADMISSION = ScriptedExecutionAdmission()
+
+
 def admitted_model_adapter(
-    client: object, envelope: ProviderEnvelope
+    client: object,
+    envelope: ProviderEnvelope,
+    *,
+    evidence: ReviewedExecutionEvidence | None = None,
+    scripted: ScriptedExecutionAdmission | None = None,
 ) -> BoundedModelAdapter | None:
     """``client`` if the gateway can enforce its limits for ``envelope``; otherwise ``None``.
 
-    The client must be a ``BoundedModelAdapter`` whose declared bound is the envelope's only
-    member, with one attempt, an output cap, and bounded input. Anything else (an existing provider
-    client, a wrapper, a fallback chain, or an envelope that under- or over-declares the adapter)
-    is unsupported: model-executing operations are refused with ``metering_unbounded``.
+    Production (PROD-1 S5b): the client must be a ``DeadlineBoundedModelAdapter`` admitted by
+    ``admit_execution_adapter`` against the reviewed capability in ``evidence`` that covers the
+    envelope's only member exactly. Without evidence nothing is admitted, so a plain
+    ``BoundedModelAdapter`` (no deadline, no review) is refused with ``metering_unbounded``.
+
+    ``scripted`` is the test-only opt-in (``ScriptedExecutionAdmission``). It keeps the earlier
+    structural rule for scripted adapters: a ``BoundedModelAdapter`` whose declared bound is the
+    envelope's only member, with one attempt, an output cap, and bounded input. Anything else (an
+    existing provider client, a wrapper, a fallback chain, or an envelope that under- or
+    over-declares the adapter) is refused either way.
     """
+    if evidence is not None:
+        if type(evidence) is not ReviewedExecutionEvidence or len(envelope.members) != 1:
+            return None
+        try:
+            return admit_execution_adapter(
+                client, envelope=envelope, capability=evidence.covering(envelope.members[0])
+            )
+        except MeteringUnbounded:
+            return None
+    if scripted is not SCRIPTED_EXECUTION_ADMISSION:
+        return None
     if not isinstance(client, BoundedModelAdapter):
         return None
     try:
@@ -970,8 +1019,14 @@ class InvestigationToolGateway:
         fingerprint_key: bytes | None = None,
         retry_categories: frozenset[str] | None = None,
         numeric_fields: frozenset[str] = frozenset(),
+        execution_evidence: ReviewedExecutionEvidence | None = None,
+        scripted_admission: ScriptedExecutionAdmission | None = None,
     ) -> None:
         """``llm_client`` that is not an admitted adapter leaves model-executing tools disabled.
+
+        Admission (PROD-1 S5b, ``admitted_model_adapter``) needs ``execution_evidence`` covering
+        the envelope's member and a deadline-bounded adapter. ``scripted_admission`` is accepted
+        only as the test-only ``SCRIPTED_EXECUTION_ADMISSION``.
 
         Without a ``table_resolver`` no SQL task can resolve a table (``resource_absent``).
         ``fingerprint_key`` keys the SQL fingerprints recorded in state; by default it is random
@@ -994,6 +1049,16 @@ class InvestigationToolGateway:
             or not all(type(category) is str for category in retry_categories)
         ):
             raise TypeError("retry_categories must be a frozenset of category names.")
+        if execution_evidence is not None and type(execution_evidence) is not (
+            ReviewedExecutionEvidence
+        ):
+            raise TypeError("execution_evidence must be ReviewedExecutionEvidence.")
+        if scripted_admission is not None and scripted_admission is not (
+            SCRIPTED_EXECUTION_ADMISSION
+        ):
+            raise TypeError("scripted_admission must be SCRIPTED_EXECUTION_ADMISSION.")
+        self._execution_evidence = execution_evidence
+        self._scripted_admission = scripted_admission
         self._authority = authority
         self._live = live
         self._clock = clock
@@ -1675,7 +1740,12 @@ class InvestigationToolGateway:
             )
         except MeteringUnbounded:
             raise _Refused(RefusalCode.METERING_UNBOUNDED) from None
-        adapter = admitted_model_adapter(self._llm_client, envelope)
+        adapter = admitted_model_adapter(
+            self._llm_client,
+            envelope,
+            evidence=self._execution_evidence,
+            scripted=self._scripted_admission,
+        )
         if adapter is None:
             raise _Refused(RefusalCode.METERING_UNBOUNDED)  # limits this gateway cannot enforce
         return adapter, model_request

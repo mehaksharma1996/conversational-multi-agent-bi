@@ -170,6 +170,7 @@ from packages.investigation.gateway import (
     AuthorityCheck,
     CancellationToken,
     InvestigationAuthority,
+    ReviewedExecutionEvidence,
     WallClock,
 )
 from packages.investigation.hypotheses import (
@@ -255,6 +256,7 @@ from src.orchestration.tool_gateway import (
     PolicyCriteriaSource,
     RejectSQL,
     ReviewFindings,
+    ScriptedExecutionAdmission,
     SkipTask,
     TableResolver,
     _random_hex,
@@ -498,6 +500,8 @@ class InvestigationExecutionRun:
         fingerprint_key: bytes | None = None,
         follow_up_authorizer: FollowUpAuthorizer | None = None,
         narrative: bool = True,
+        execution_evidence: ReviewedExecutionEvidence | None = None,
+        scripted_admission: ScriptedExecutionAdmission | None = None,
     ) -> None:
         try:
             check_execution_limits(limits)
@@ -546,6 +550,8 @@ class InvestigationExecutionRun:
             fingerprint_key=fingerprint_key,
             retry_categories=RETRYABLE_CATEGORIES,
             numeric_fields=self._numeric_fields,
+            execution_evidence=execution_evidence,
+            scripted_admission=scripted_admission,
         )
         self._port = self._gateway.specialist_port()
         scope = handoff.scope

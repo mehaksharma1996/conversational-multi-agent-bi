@@ -26,6 +26,7 @@ from src.orchestration.investigation_approval import InvestigationApprovalServic
 from src.orchestration.investigation_execution import InvestigationExecutionRun
 from src.orchestration.investigation_proposal import InvestigationProposalRun
 from src.orchestration.review_prompts import CRITIC_MARKER, FINDINGS_MARKER
+from src.orchestration.tool_gateway import SCRIPTED_EXECUTION_ADMISSION
 from src.storage.query_executor import QueryTimeoutError
 from src.storage.sqlite_store import StoredTable
 from tests.investigation_fixtures import APPROVED_AT, SCOPE, LiveAuthority, churn_plan
@@ -281,6 +282,7 @@ def execution(
         document_resolver=resolver,
         llm_client=llm,
         max_input_tokens_per_call=max_input,
+        scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         table_resolver=tables,
         sql_executor=executor,
         limits=limits,

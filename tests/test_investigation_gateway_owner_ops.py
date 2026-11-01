@@ -33,6 +33,7 @@ from packages.investigation.gateway import AuthorityStatus
 from packages.investigation.state import restore_state
 from src.llm.base import LLMGenerationError
 from src.orchestration.tool_gateway import (
+    SCRIPTED_EXECUTION_ADMISSION,
     BeginAttempt,
     ExecuteSQL,
     FinishAttempt,
@@ -165,6 +166,7 @@ def owner(
         resolver=resolver,
         llm_client=llm,
         max_input_tokens_per_call=MAX_INPUT,
+        scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         table_resolver=tables,
         sql_executor=executor,
         retry_categories=retry_categories,

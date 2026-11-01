@@ -68,6 +68,7 @@ from packages.investigation.gateway import (
     InvestigationAuthority,
     PlanningAuthority,
     ProviderEnvelope,
+    ReviewedExecutionEvidence,
     ReviewedPlanningEvidence,
 )
 from packages.investigation.lifecycle import TRANSITIONS, InvestigationStatus, is_terminal
@@ -99,6 +100,7 @@ from src.orchestration.investigation_execution import (
     InvestigationExecutionRun,
 )
 from src.orchestration.investigation_proposal import InvestigationProposalRun
+from src.orchestration.tool_gateway import ScriptedExecutionAdmission
 from src.storage.sqlite_store import StoredTable
 
 S = InvestigationStatus
@@ -155,11 +157,18 @@ class PlanningProvider:
 
 @dataclass(frozen=True)
 class ExecutionProvider:
-    """What the trusted configuration supplies for execution (INV-5 inputs)."""
+    """What the trusted configuration supplies for execution (INV-5 inputs).
+
+    PROD-1 S5b: a model call is admitted only with ``evidence`` (reviewed execution capability
+    covering the envelope's member) and a deadline-bounded ``llm_client``. ``scripted_admission``
+    exists for test configurations only; no production configuration sets it.
+    """
 
     llm_client: object | None
     envelope: ProviderEnvelope
     max_input_tokens_per_call: int = MAX_EXECUTION_INPUT_TOKENS
+    evidence: ReviewedExecutionEvidence | None = None
+    scripted_admission: ScriptedExecutionAdmission | None = None
 
 
 class InvestigationAdapters(Protocol):
@@ -304,6 +313,10 @@ class _Live:
     run_jobs: set[int] = field(default_factory=set)
     job_claim: int | None = None
     stop_explanation: str | None = None  # why a revoked pause was closed (S5a)
+    # PROD-1 S5b: the investigation's one execution provider, resolved at plan approval so its
+    # consent recipients are checked there; the execute job uses this instance, never a new one.
+    execution: ExecutionProvider | None = None
+    execution_resolved: bool = False
 
 
 @dataclass(frozen=True)
@@ -605,9 +618,9 @@ class InvestigationRuntime:
         grant, proposal = live.grant, live.proposal
         assert grant is not None and proposal is not None
         try:
-            provider = self._adapters.execution()
-            with self._lock:
-                live.recipients |= provider.envelope.data_recipients
+            provider = live.execution
+            if provider is None:  # resolution failed at approval: never resolve a second one
+                raise ExecutionRunError("execution_provider_unavailable")
             workspace = self._repository.get_workspace(live.scope.workspace_id, tenant)
             authority = InvestigationAuthority(
                 scope=grant.scope,
@@ -633,6 +646,8 @@ class InvestigationRuntime:
                 llm_client=provider.llm_client,
                 max_input_tokens_per_call=provider.max_input_tokens_per_call,
                 table_resolver=_TableResolver(self._repository),
+                execution_evidence=provider.evidence,
+                scripted_admission=provider.scripted_admission,
             )
             with self._lock:
                 live.run = run
@@ -767,10 +782,19 @@ class InvestigationRuntime:
         approver = ApproverIdentity(
             tenant_id=tenant_id, subject_id=subject_id, capabilities=capabilities
         )
+        if decision == "approve":
+            self._resolve_execution(live)  # its recipients join the live check before approval
         try:
             grant = self.approvals.decide_plan(request, approver, consent=_consent(workspace))
         except ApprovalRefused as refused:
-            self._sync(record)
+            if refused.code == "authority_revoked":
+                # PROD-1 S5b: consent no longer covers a recipient this investigation would use
+                # (or the workspace expired). The approval can never proceed, so the proposal is
+                # revoked and ends here; nothing executes.
+                self.approvals.revoke(live.scope)
+                self._end(record.id, tenant_id, S.FAILED, explanation="authority_revoked")
+            else:
+                self._sync(record)
             raise InvestigationRequestError(refused.code, 409) from None
         if grant is None:
             return self._end(record.id, tenant_id, S.PLAN_REJECTED, explanation=None) or record
@@ -786,6 +810,25 @@ class InvestigationRuntime:
             claim=claim,
         )
         return self._records.get(record.id, tenant_id)
+
+    def _resolve_execution(self, live: _Live) -> None:
+        """Call ``InvestigationAdapters.execution()`` at most once per investigation (S5b).
+
+        At plan approval, so the execution provider's consent recipients are part of the live
+        check that approval runs. The trusted configuration builds the provider without I/O. The
+        execute job and every resume use this one provider (and so one owned adapter); a failed
+        resolution is remembered and never retried, so no replacement can be built later.
+        """
+        with self._lock:
+            if live.execution_resolved:
+                return
+            live.execution_resolved = True
+            try:
+                provider = self._adapters.execution()
+            except Exception:
+                return  # the execute job fails closed (``execution_provider_unavailable``)
+            live.execution = provider
+            live.recipients |= provider.envelope.data_recipients
 
     def pending_wave(self, tenant_id: str, investigation_id: str) -> SQLWaveReview | None:
         record = self._records.get(investigation_id, tenant_id)

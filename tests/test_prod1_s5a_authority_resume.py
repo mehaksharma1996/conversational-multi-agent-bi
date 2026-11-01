@@ -375,17 +375,20 @@ def test_consent_withdrawn_before_planning_sends_nothing() -> None:
 
 
 def test_consent_withdrawn_while_awaiting_plan_approval_sends_nothing() -> None:
-    """The plan names no recipient here, so approval itself can pass; execution then refuses
-    before any model request (the execution provider's recipient is no longer consented)."""
+    """S5b: approval checks the execution provider's recipients too, so it is refused and the
+    investigation ends ``authority_revoked`` (before S5b it passed and execution then failed)."""
     adapters = TwoWaves()
     d = Deployment("s5a_plan_approval", adapters=adapters)
     with TestClient(d.app()) as client:
         flow = Flow(client, d)
         body = flow.to_plan_approval()
         flow.withdraw()
-        _approve(client, body)
+        refused = _approve(client, body)
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "authority_revoked"
         ended = flow.until(*TERMINAL)
         assert ended["status"] == "failed", ended
+        assert ended["explanation_code"] == "authority_revoked"
         assert adapters.llm.counts == 0 and adapters.llm.sql_prompts == []
 
 

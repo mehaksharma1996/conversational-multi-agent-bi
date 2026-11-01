@@ -42,6 +42,8 @@ from packages.governance import InMemoryAuditSink
 from packages.investigation.budget import ProviderCostProfile, ProviderPricingTable
 from packages.investigation.gateway import (
     PLANNING_STAGE_OUTPUT_TOKENS,
+    ReviewedExecutionCapability,
+    ReviewedExecutionEvidence,
     ReviewedPlanningCapability,
     ReviewedPlanningEvidence,
 )
@@ -125,10 +127,27 @@ def configured(root: Path, **changes: Any) -> Settings:
     return replace(_settings(root), **values)
 
 
+def reviewed_execution(version: str = REVIEW, bound: Any = None) -> ReviewedExecutionEvidence:
+    """A SYNTHETIC execution review record (tests only; production registries stay empty)."""
+    return ReviewedExecutionEvidence(
+        evidence_version=version,
+        capabilities=(
+            ReviewedExecutionCapability(
+                bound=EXEC_BOUND if bound is None else bound,
+                evidence_version=version,
+                provider_deadline_enforced=True,
+                termination_confirmed=True,
+                usage_reported=True,
+            ),
+        ),
+    )
+
+
 def reviewed() -> dict[str, Any]:
     return {
         "profiles": {SNAPSHOT: capabilities()},
         "planning_evidence": reviewed_evidence(),
+        "execution_evidence": reviewed_execution(),
         "pricing": reviewed_pricing(),
     }
 
@@ -137,6 +156,7 @@ def config() -> ReviewedProviderConfig:
     return ReviewedProviderConfig(
         capabilities=capabilities(),
         planning_evidence=reviewed_evidence(),
+        execution_evidence=reviewed_execution(),
         pricing=reviewed_pricing(),
         api_key=FAKE_KEY,
     )
@@ -252,6 +272,15 @@ def test_each_configuration_step_is_required(
             {"profiles": {SNAPSHOT: capabilities(review="other-review-2")}},
             AdmissionDecision.REVIEW_MISMATCH,
         ),
+        ({"execution_evidence": None}, AdmissionDecision.EXECUTION_EVIDENCE_UNREVIEWED),
+        (
+            {"execution_evidence": reviewed_execution("other-review-2")},
+            AdmissionDecision.EXECUTION_EVIDENCE_UNREVIEWED,
+        ),
+        (
+            {"execution_evidence": reviewed_execution(bound=PLAN_BOUND)},  # the planning cap
+            AdmissionDecision.EXECUTION_EVIDENCE_UNREVIEWED,
+        ),
         ({"pricing": None}, AdmissionDecision.PRICING_UNREVIEWED),
         (
             {"pricing": reviewed_pricing("test-model-2099-02-02")},
@@ -273,6 +302,7 @@ def test_production_records_are_empty_so_valid_settings_admit_nothing(root: Path
     assert selection.decision is AdmissionDecision.CAPABILITY_UNREVIEWED
     assert type(selection.adapters) is FailClosedAdapters
     assert providers.REVIEWED_PLANNING_EVIDENCE is None and providers.REVIEWED_PRICING is None
+    assert providers.REVIEWED_EXECUTION_EVIDENCE is None
 
 
 def test_the_release_gate_blocks_even_a_fully_reviewed_configuration(root: Path) -> None:

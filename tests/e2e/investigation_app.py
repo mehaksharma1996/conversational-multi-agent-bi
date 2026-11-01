@@ -28,6 +28,7 @@ from apps.api.investigations import ExecutionProvider, PlanningProvider
 from apps.api.main import create_app
 from config.settings import Settings
 from src.llm.base import LLMGenerationError, LLMResponse
+from src.orchestration.tool_gateway import SCRIPTED_EXECUTION_ADMISSION
 from tests.e2e.retail_app import ScriptedRetailEmbedder
 from tests.investigation_execution_fakes import RoutedAdapter
 from tests.investigation_fixtures import plan_of, sql_task
@@ -90,6 +91,7 @@ class ScriptedInvestigationAdapters:
             llm_client=RoutedAdapter(script=[GOOD_SQL]),
             envelope=EXACT_ENVELOPE,
             max_input_tokens_per_call=MAX_INPUT,
+            scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         )
 
 

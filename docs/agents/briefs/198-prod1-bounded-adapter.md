@@ -7,8 +7,9 @@ Tier: strongest. Check mode: --full (S4 onward touches `apps/api`).
 green including Python 3.12); S2 implemented offline and CI-verified (2026-10-31, run
 41214782753, 10/10 green); S3 implemented offline and CI-verified (2026-10-31, run 41256414712,
 10/10 green, 40/40 S3 tests on Python 3.12); S4 implemented offline and CI-verified (2026-10-31,
-run 41260961042, 10/10 green, 49/49 S4 tests on Python 3.12); S5a implemented offline (2026-11-01),
-unpushed.
+run 41260961042, 10/10 green, 49/49 S4 tests on Python 3.12); S5a implemented offline and
+CI-verified (2026-11-01, run 41268269115 at `c2cddff`, 10/10 green, 22/22 S5a tests on Ubuntu and
+Windows 3.12); S5b implemented offline (2026-11-01), unpushed.
 Production still uses `FailClosedAdapters` (S4 adds a selection path that admits nothing), no
 snapshot is reviewed, no live model call was made, no API key was used, and external spend is
 $0.** S5 and S6 each need approval first.
@@ -348,6 +349,65 @@ telemetry change.
    stay empty. S5d: a consent notice API, a revoke endpoint, a UI that shows the OpenAI notice,
    and recipients in the consent audit. Plan approval does not yet know execution recipients when
    the planning provider names none, so it can pass; execution then refuses before any request.
+
+## S5b record (strict execution admission and approval consent, offline)
+
+**Files.** `packages/investigation/gateway.py` (contract), `src/llm/bounded.py`
+(`admit_execution_adapter`), `src/orchestration/tool_gateway.py` (admission and the test-only
+opt-in), `src/orchestration/investigation_execution.py` (pass-through), `apps/api/investigations.py`
+(`ExecutionProvider`, approval-time resolution), `apps/api/investigation_providers.py`
+(execution-evidence step), test configurations that now opt in explicitly, and
+`tests/test_prod1_s5b_execution_admission.py` (33 tests). No OpenAPI, web, schema, evaluation, or
+telemetry change.
+
+1. **Before.** `admitted_model_adapter` accepted any `BoundedModelAdapter` whose declared bound
+   was the envelope's only member (one attempt, an output cap, bounded input). A plain adapter
+   had no deadline method and no reviewed evidence, and it was admitted for production execution.
+2. **Strict admission (production).** A model call is admitted only through
+   `admit_execution_adapter`: a `DeadlineBoundedModelAdapter`, its bound equal to the envelope's
+   only member and to a reviewed capability's bound, its reported identity equal to that bound,
+   one attempt, bounded input, an output cap, and all three review flags. The capability comes
+   from `ReviewedExecutionEvidence.covering(member)` by exact equality. Anything else is
+   `metering_unbounded`. A plain adapter is refused even when evidence exists for its bound.
+3. **Contract.** `ReviewedExecutionCapability`: `bound` (exact provider, dated snapshot,
+   recipient, one attempt, bounded input, output cap), `evidence_version`, and literal-`True`
+   `provider_deadline_enforced`, `termination_confirmed`, and `usage_reported` (a truthy `1` is
+   refused). `ReviewedExecutionEvidence`: one version for every member, unique provider/model,
+   exact `covering`. Both are frozen and reject extra fields. Admission re-checks the flags, so a
+   `model_construct` bypass fails closed, and the gateway accepts only the exact evidence type.
+4. **Scripted boundary.** Deterministic suites drive the real gateway with unreviewed scripted
+   adapters through `SCRIPTED_EXECUTION_ADMISSION`, the only instance of
+   `ScriptedExecutionAdmission` (a second instance cannot be created, and the gateway rejects any
+   other object). A test fails if any module under `apps`, `src`, `packages`, `config`, or
+   `scripts` other than its definition names it. `FailClosedAdapters` and
+   `ConfiguredInvestigationAdapters` never set it. This replaces Amendment 11's "scripted adapters
+   gain the deadline method" (a decision for review). The S3 OpenAI-adapter suite now runs on the
+   strict path with a synthetic review record.
+5. **Provider admission.** A new step: reviewed execution evidence must cover the exact execution
+   bound with the configured review ID (`execution_evidence_unreviewed`). The production registry
+   `REVIEWED_EXECUTION_EVIDENCE` is empty, beside the other empty registries and the closed release
+   gate.
+6. **Plan-approval consent gap (confirmed, fixed).** Approval checked consent only for the
+   planning recipients, because `execution()` was first called by the execute job. With a
+   recipient-free planning provider, approval after withdrawal returned 200 and was audited, and
+   execution then failed generically. This broke the contract that approval grants authority to
+   execute: it granted authority that could not be used. The runtime now resolves
+   `InvestigationAdapters.execution()` once at plan approval, adds its recipients to the live check
+   that approval runs, and stores the provider for the execute job and every resume. Withdrawn
+   consent gives `409 authority_revoked`, the proposal is revoked, and the investigation ends
+   `failed` (explanation `authority_revoked`) with no grant, run, or model request. An
+   investigation whose execution provider names no hosted recipient still needs no consent.
+7. **Ownership.** `execution()` is called at most once per investigation: a refused approval
+   attempt and a later approval share it, a failed resolution is remembered (the execute job then
+   ends `execution_provider_unavailable`, with no second attempt), and two investigations get two
+   providers. Resolution builds the adapter without I/O (the S4 construction tests). The S5a lock,
+   claims, and consent re-checks are unchanged.
+8. **Evidence.** Against the pre-S5b tree, a plain adapter is admitted without review, and
+   approval after withdrawal returns 200; both probes fail there and pass on S5b. 33 S5b tests and
+   22 S5a tests pass on three consecutive runs.
+9. **Remaining.** S5c: typed price and evidence registries bound by one review ID (still empty).
+   S5d: consent notice API, revoke endpoint, UI, and recipients in the consent audit. S6 (separate
+   spend approval): live evidence for every provider claim. Only a single process is supported.
 
 ## Outcome
 

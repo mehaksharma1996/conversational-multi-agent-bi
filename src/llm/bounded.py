@@ -53,6 +53,7 @@ from packages.investigation.gateway import (
     MeteringUnbounded,
     ProviderAttemptBound,
     ProviderEnvelope,
+    ReviewedExecutionCapability,
     ReviewedPlanningCapability,
 )
 from src.llm.base import LLMResponse
@@ -165,6 +166,46 @@ class DeadlineBoundedModelAdapter(BoundedModelAdapter):
         cancellation: CancellationToken,
     ) -> DeadlineModelResult:
         """Make one request without extending ``deadline`` and confirm its termination state."""
+
+
+def admit_execution_adapter(
+    adapter: object,
+    *,
+    envelope: ProviderEnvelope,
+    capability: ReviewedExecutionCapability | None,
+) -> DeadlineBoundedModelAdapter:
+    """Admit only an exact adapter/envelope/review tuple for execution (Amendment 11, item 3).
+
+    The adapter must take the ledger deadline (``DeadlineBoundedModelAdapter``), declare exactly
+    the envelope's only member, and match a separately reviewed capability for that member with
+    the same identity. Anything else is ``MeteringUnbounded``.
+    """
+    try:
+        if not isinstance(adapter, DeadlineBoundedModelAdapter):
+            raise MeteringUnbounded()
+        if type(capability) is not ReviewedExecutionCapability:
+            raise MeteringUnbounded()
+        if not isinstance(envelope, ProviderEnvelope) or len(envelope.members) != 1:
+            raise MeteringUnbounded()
+        bound = adapter.bound
+        if (
+            not isinstance(bound, ProviderAttemptBound)
+            or bound != envelope.members[0]
+            or bound != capability.bound
+            or (adapter.provider, adapter.model) != (bound.provider, bound.model)
+            or bound.max_attempts != 1
+            or bound.input_bounded is not True
+            or bound.max_output_tokens is None
+            or capability.provider_deadline_enforced is not True
+            or capability.termination_confirmed is not True
+            or capability.usage_reported is not True
+        ):
+            raise MeteringUnbounded()
+    except MeteringUnbounded:
+        raise
+    except Exception:
+        raise MeteringUnbounded() from None
+    return adapter
 
 
 def admit_planning_adapter(

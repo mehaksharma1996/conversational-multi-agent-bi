@@ -48,6 +48,7 @@ from src.llm.providers import AnthropicClient, ModelTiers, OllamaClient
 from src.orchestration import tool_gateway
 from src.orchestration.document_research import DocumentResearchOutcome
 from src.orchestration.tool_gateway import (
+    SCRIPTED_EXECUTION_ADMISSION,
     AttemptToken,
     BeginAttempt,
     GatewayResult,
@@ -271,6 +272,7 @@ def _harness(
         resolver=resolver,
         llm_client=llm,
         max_input_tokens_per_call=max_input,
+        scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
     )
     return Harness(
         gateway=gateway,
@@ -825,8 +827,11 @@ def test_an_envelope_that_misdeclares_the_adapter_is_refused_before_any_service(
 def test_an_envelope_with_a_fallback_member_is_not_supported() -> None:
     other = EXACT_BOUND.model_copy(update={"model": "exact-fallback"})
     envelope = ProviderEnvelope(members=(EXACT_BOUND, other))
-    assert admitted_model_adapter(ExactAdapter(), envelope) is None
-    assert admitted_model_adapter(ExactAdapter(), EXACT_ENVELOPE) is not None
+    scripted = SCRIPTED_EXECUTION_ADMISSION
+    assert admitted_model_adapter(ExactAdapter(), envelope, scripted=scripted) is None
+    assert admitted_model_adapter(ExactAdapter(), EXACT_ENVELOPE, scripted=scripted)
+    # PROD-1 S5b: without the test-only opt-in or reviewed evidence nothing is admitted
+    assert admitted_model_adapter(ExactAdapter(), EXACT_ENVELOPE) is None
 
 
 @pytest.mark.parametrize(

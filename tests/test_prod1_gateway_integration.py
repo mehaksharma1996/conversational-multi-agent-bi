@@ -27,6 +27,8 @@ from packages.investigation.gateway import (
     PlanningOutcomeCode,
     ProviderAttemptBound,
     ProviderEnvelope,
+    ReviewedExecutionCapability,
+    ReviewedExecutionEvidence,
 )
 from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.refusals import RefusalCode
@@ -96,6 +98,19 @@ PLAN_BOUND = ProviderAttemptBound(
     input_bounded=True,
 )
 EXEC_BOUND = PLAN_BOUND.model_copy(update={"max_output_tokens": EXEC_CAP})
+# SYNTHETIC, test-only review records (PROD-1 S5b). They are never production registry entries
+# and prove nothing about a live provider; production registries stay empty.
+SYNTHETIC_EXEC_REVIEW = "synthetic-exec-review-1"
+EXEC_CAPABILITY = ReviewedExecutionCapability(
+    bound=EXEC_BOUND,
+    evidence_version=SYNTHETIC_EXEC_REVIEW,
+    provider_deadline_enforced=True,
+    termination_confirmed=True,
+    usage_reported=True,
+)
+EXEC_EVIDENCE = ReviewedExecutionEvidence(
+    evidence_version=SYNTHETIC_EXEC_REVIEW, capabilities=(EXEC_CAPABILITY,)
+)
 CONSENT = ConsentSnapshot(
     accepted_at=NOW - timedelta(hours=4), notice_version="v1", recipients=("OpenAI",)
 )
@@ -432,6 +447,7 @@ def exec_harness(
         llm_client=model,
         max_input_tokens_per_call=EXEC_MAX_INPUT,
         retry_categories=retry_categories,
+        execution_evidence=EXEC_EVIDENCE,  # S5b: the strict, reviewed path (synthetic review)
     )
     harness = ToolHarness(
         gateway=gateway,

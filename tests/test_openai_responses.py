@@ -50,7 +50,7 @@ from src.llm.responses_transport import (
     TransportFailure,
     canonical_json,
 )
-from src.orchestration.tool_gateway import admitted_model_adapter
+from src.orchestration.tool_gateway import SCRIPTED_EXECUTION_ADMISSION, admitted_model_adapter
 
 # Deliberately not key-shaped: it cannot authenticate anywhere, and only mock transports see it.
 FAKE_KEY = "offline-test-placeholder-not-a-credential"
@@ -554,6 +554,7 @@ def test_the_counter_is_not_an_adapter_and_admission_still_fails_closed() -> Non
     envelope = ProviderEnvelope(members=(member,))
     assert not isinstance(counter, BoundedModelAdapter)
     assert admitted_model_adapter(counter, envelope) is None
+    assert admitted_model_adapter(counter, envelope, scripted=SCRIPTED_EXECUTION_ADMISSION) is None
     with pytest.raises(MeteringUnbounded):
         admit_planning_adapter(counter, envelope=envelope, capability=None)
 

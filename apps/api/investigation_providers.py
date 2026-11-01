@@ -14,16 +14,18 @@ admission sequence passes, in this order, and reports the first failing step as 
    lookup, so a different snapshot cannot silently change limits, prices, or behaviour;
 7. ``INVESTIGATION_MODEL_REVIEW`` equals the profile's and the planning evidence's review version;
 8. reviewed planning evidence covers the exact planning bound;
-9. a reviewed price entry exists for the exact provider and snapshot (``LLM_*_COST_*`` settings
-   are never used);
-10. the release gate ``LIVE_ADMISSION_RELEASED`` is open. It is a code constant, not a setting:
+9. reviewed execution evidence (``ReviewedExecutionEvidence``, PROD-1 S5b) covers the exact
+   execution bound, with the same review ID;
+10. a reviewed price entry exists for the exact provider and snapshot (``LLM_*_COST_*`` settings
+    are never used);
+11. the release gate ``LIVE_ADMISSION_RELEASED`` is open. It is a code constant, not a setting:
     no release has passed live validation (S6) or activation review (DEP-1), so it is ``False``.
 
-S4 therefore admits nothing. The reviewed registries (``REVIEWED_CAPABILITY_PROFILES``,
-``REVIEWED_PLANNING_EVIDENCE``, ``REVIEWED_PRICING``) are empty, and the gate is closed; any one
-of these blocks admission on its own. Budget, consent, authorization and approvals, and the
-operation deadline are not admission-time facts: the planning and tool gateways check them before
-every model call, unchanged.
+Nothing is admitted today. The reviewed registries (``REVIEWED_CAPABILITY_PROFILES``,
+``REVIEWED_PLANNING_EVIDENCE``, ``REVIEWED_EXECUTION_EVIDENCE``, ``REVIEWED_PRICING``) are empty,
+and the gate is closed; any one of these blocks admission on its own. Budget, consent,
+authorization and approvals, and the operation deadline are not admission-time facts: the
+planning and tool gateways check them before every model call, unchanged.
 
 Selection does no I/O and builds no adapter or transport. Nothing a request carries reaches it:
 the provider, snapshot, endpoint (fixed in ``src.llm.responses_transport``), and key come only
@@ -63,6 +65,7 @@ from packages.investigation.gateway import (
     PLANNING_STAGE_OUTPUT_TOKENS,
     ProviderAttemptBound,
     ProviderEnvelope,
+    ReviewedExecutionEvidence,
     ReviewedPlanningEvidence,
 )
 from src.llm.openai_responses import OPENAI_DATA_RECIPIENT, OPENAI_PROVIDER
@@ -80,8 +83,10 @@ EXECUTION_CALL_OUTPUT_TOKENS = 1_000
 # Admission step 10. Only a reviewed code change, after S6 and DEP-1, may open it.
 LIVE_ADMISSION_RELEASED: Final = False
 
-# Reviewed planning evidence and price entry for the configured snapshot (S5). None exist.
+# Reviewed planning and execution evidence and price entry for the configured snapshot. None
+# exist: they need reviewed provider evidence (S5c/S6), never a synthetic record.
 REVIEWED_PLANNING_EVIDENCE: ReviewedPlanningEvidence | None = None
+REVIEWED_EXECUTION_EVIDENCE: ReviewedExecutionEvidence | None = None
 REVIEWED_PRICING: ProviderPricingTable | None = None
 
 
@@ -97,6 +102,7 @@ class AdmissionDecision(StrEnum):
     CAPABILITY_UNREVIEWED = "capability_unreviewed"
     REVIEW_MISMATCH = "review_mismatch"
     PLANNING_EVIDENCE_UNREVIEWED = "planning_evidence_unreviewed"
+    EXECUTION_EVIDENCE_UNREVIEWED = "execution_evidence_unreviewed"
     PRICING_UNREVIEWED = "pricing_unreviewed"
     LIVE_VALIDATION_REQUIRED = "live_validation_required"
     ADMITTED = "admitted"
@@ -119,6 +125,7 @@ class ReviewedProviderConfig:
 
     capabilities: ResponsesCapabilityProfile
     planning_evidence: ReviewedPlanningEvidence
+    execution_evidence: ReviewedExecutionEvidence
     pricing: ProviderPricingTable
     api_key: str = field(repr=False)
 
@@ -127,12 +134,18 @@ class ReviewedProviderConfig:
             raise TypeError("capabilities must be a reviewed ResponsesCapabilityProfile.")
         if type(self.planning_evidence) is not ReviewedPlanningEvidence:
             raise TypeError("planning_evidence must be ReviewedPlanningEvidence.")
+        if type(self.execution_evidence) is not ReviewedExecutionEvidence:
+            raise TypeError("execution_evidence must be ReviewedExecutionEvidence.")
         if type(self.pricing) is not ProviderPricingTable:
             raise TypeError("pricing must be a ProviderPricingTable.")
         if type(self.api_key) is not str or not self.api_key:
             raise ValueError("credential_missing")
         refusal = _reviewed_refusal(
-            self.capabilities, self.planning_evidence, self.pricing, self.capabilities.review
+            self.capabilities,
+            self.planning_evidence,
+            self.execution_evidence,
+            self.pricing,
+            self.capabilities.review,
         )
         if refusal is not None:
             raise ValueError(refusal.value)
@@ -153,10 +166,11 @@ class ReviewedProviderConfig:
 def _reviewed_refusal(
     capabilities: ResponsesCapabilityProfile,
     evidence: ReviewedPlanningEvidence | None,
+    execution: ReviewedExecutionEvidence | None,
     pricing: ProviderPricingTable | None,
     review: str | None,
 ) -> AdmissionDecision | None:
-    """Steps 7 to 9 for one reviewed profile; ``None`` when all pass."""
+    """Steps 7 to 10 for one reviewed profile; ``None`` when all pass."""
     snapshot = capabilities.profile.model
     if review is None or capabilities.review != review:
         return AdmissionDecision.REVIEW_MISMATCH
@@ -166,6 +180,12 @@ def _reviewed_refusal(
         or evidence.covering(_bound(snapshot, PLANNING_STAGE_OUTPUT_TOKENS)) is None
     ):
         return AdmissionDecision.PLANNING_EVIDENCE_UNREVIEWED
+    if (
+        execution is None
+        or execution.evidence_version != review
+        or execution.covering(_bound(snapshot, EXECUTION_CALL_OUTPUT_TOKENS)) is None
+    ):
+        return AdmissionDecision.EXECUTION_EVIDENCE_UNREVIEWED
     if pricing is None or pricing.profile_for(provider=OPENAI_PROVIDER, model=snapshot) is None:
         return AdmissionDecision.PRICING_UNREVIEWED
     return None
@@ -182,6 +202,7 @@ def admit_investigation_provider(
     *,
     profiles: Mapping[str, ResponsesCapabilityProfile] = REVIEWED_CAPABILITY_PROFILES,
     planning_evidence: ReviewedPlanningEvidence | None = REVIEWED_PLANNING_EVIDENCE,
+    execution_evidence: ReviewedExecutionEvidence | None = REVIEWED_EXECUTION_EVIDENCE,
     pricing: ProviderPricingTable | None = REVIEWED_PRICING,
 ) -> ProviderAdmission:
     """Run the admission sequence (module docstring) without I/O; see ``AdmissionDecision``."""
@@ -207,16 +228,22 @@ def admit_investigation_provider(
     ):
         return ProviderAdmission(AdmissionDecision.CAPABILITY_UNREVIEWED)
     refusal = _reviewed_refusal(
-        capabilities, planning_evidence, pricing, settings.investigation_model_review
+        capabilities,
+        planning_evidence,
+        execution_evidence,
+        pricing,
+        settings.investigation_model_review,
     )
     if refusal is not None:
         return ProviderAdmission(refusal)
     if LIVE_ADMISSION_RELEASED is not True:
         return ProviderAdmission(AdmissionDecision.LIVE_VALIDATION_REQUIRED)
-    assert planning_evidence is not None and pricing is not None
+    assert planning_evidence is not None and execution_evidence is not None
+    assert pricing is not None
     config = ReviewedProviderConfig(
         capabilities=capabilities,
         planning_evidence=planning_evidence,
+        execution_evidence=execution_evidence,
         pricing=pricing,
         api_key=settings.openai_api_key,
     )
@@ -277,6 +304,7 @@ class ConfiguredInvestigationAdapters:
             llm_client=adapter,
             envelope=ProviderEnvelope(members=(adapter.bound,)),
             max_input_tokens_per_call=MAX_EXECUTION_INPUT_TOKENS,
+            evidence=self._config.execution_evidence,
         )
 
 

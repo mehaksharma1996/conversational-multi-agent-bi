@@ -25,6 +25,7 @@ from packages.connectors import IdentityContext
 from packages.governance import InMemoryAuditSink
 from packages.investigation import InvestigationStatus
 from packages.observability import InMemoryTelemetrySink
+from src.orchestration.tool_gateway import SCRIPTED_EXECUTION_ADMISSION
 from tests.investigation_execution_fakes import RoutedAdapter
 from tests.investigation_fixtures import plan_of, sql_task
 from tests.investigation_planning_fakes import ENVELOPE, ScriptedDeadlineAdapter, evidence, pricing
@@ -62,7 +63,10 @@ class ScriptedAdapters:
 
     def execution(self) -> ExecutionProvider:
         return ExecutionProvider(
-            llm_client=self.llm, envelope=EXACT_ENVELOPE, max_input_tokens_per_call=MAX_INPUT
+            llm_client=self.llm,
+            envelope=EXACT_ENVELOPE,
+            max_input_tokens_per_call=MAX_INPUT,
+            scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         )
 
 
