@@ -6,7 +6,9 @@ Tier: strongest. Check mode: --full (S4 onward touches `apps/api`).
 **Status: S0 reviewed; S1 implemented offline and CI-verified (2026-10-31, run 41210001295, 10/10
 green including Python 3.12); S2 implemented offline and CI-verified (2026-10-31, run
 41214782753, 10/10 green); S3 implemented offline and CI-verified (2026-10-31, run 41256414712,
-10/10 green, 40/40 S3 tests on Python 3.12); S4 implemented offline (2026-10-31), unpushed.
+10/10 green, 40/40 S3 tests on Python 3.12); S4 implemented offline and CI-verified (2026-10-31,
+run 41260961042, 10/10 green, 49/49 S4 tests on Python 3.12); S5a implemented offline (2026-11-01),
+unpushed.
 Production still uses `FailClosedAdapters` (S4 adds a selection path that admits nothing), no
 snapshot is reviewed, no live model call was made, no API key was used, and external spend is
 $0.** S5 and S6 each need approval first.
@@ -280,6 +282,72 @@ web, schema, evaluation, or telemetry changes.
    egress; and opening the release gate.
 8. **Zero cost.** No key, account, network, or spend. A non-loopback connection fails every S4
    test, and CI needs no credential.
+
+## S5a record (consent authority and resume serialization, offline)
+
+**Files.** `apps/api/investigations.py`, `apps/api/investigation_routes.py` (one explanation
+string), `src/orchestration/investigation_execution.py`, `src/orchestration/investigation_planning.py`,
+`src/orchestration/tool_gateway.py`, `src/orchestration/investigation_approval.py`
+(`stop_requested`), three adjusted assertions in existing tests, and
+`tests/test_prod1_s5a_authority_resume.py` (22 tests). No OpenAPI, web, schema, evaluation, or
+telemetry change.
+
+1. **C1 root cause (confirmed).** Consent was a snapshot taken when the plan or execute job
+   started. `AUTHORITY_EPOCH` is the constant `1`, and `_WorkspaceAuthority.current` checked only
+   workspace existence, expiry, and epoch. `InvestigationApprovalService.revoke`, documented for
+   "a consent or role change", was never called on a consent change. Reproduced before the fix:
+   with consent withdrawn while paused, the SQL wave was accepted (202) and task 2's SQL prompt was
+   sent. Further, a withdrawal while a count was in flight did not stop the create in either
+   gateway.
+2. **C1 fix.** The live check now also requires the workspace's *current* consent
+   (`_consent(workspace)`, which already applies the S4 notice-version rule) to cover every
+   recipient of the providers this investigation was given (recorded on `_Live.recipients` when
+   `planning()` and `execution()` are called). An unknown investigation, another tenant's scope,
+   and a withdrawn, cleared, stale, or tampered record are each `REVOKED`. It reads the same
+   workspace record the check already read, so there is no extra database read. Revalidation
+   boundaries: each planning stage start and again immediately before its create; each execution
+   gateway action; immediately before every execution count and every create
+   (`_AdmittedLLMClient(authorize=...)`); plan approval (unchanged, it already used current
+   consent); and SQL-wave approval (via the service's live check). A wave refused
+   `authority_revoked` now revokes and closes the paused run (`cancelled`, explanation
+   `authority_revoked`), sending nothing.
+3. **What revocation means in flight.** A check and a send are separate operations. Consent
+   withdrawn after the last check has passed, or after a request was sent, does not recall that
+   request: it completes, and the next check (the next count, create, or action) refuses. That is
+   the guarantee: no new provider request starts after a check that observed the withdrawal.
+4. **Concurrent resume (confirmed, with a second defect).** Cancel during an active resume
+   queued a second resume. With the first resume past its pause, the second failed
+   `sql_approval_not_pending` and `_resume` marked the investigation `failed` while the first was
+   still running (the audit said `cancelled`). With the first resume held between its pause check
+   and its graph call, the second passed the same check and resumed the wave, and the first then
+   resumed it again (three graph invocations for one wave). Nothing serialized `resume()`, and the
+   executor has two workers. Overlapping graph execution inside one node was not observed: once a
+   resume starts, LangGraph no longer reports the run as paused. The race was in `resume()`'s own
+   check-then-act.
+5. **Serialization fix.** `InvestigationExecutionRun.run()` and `resume()` take a per-run lock
+   without blocking: a second caller gets `ExecutionRunError("run_busy")` and never waits, so
+   cancellation cannot deadlock, and the lock is released on any exception. The runtime gives
+   each execute and resume job a claim from admission until it settles. `cancel` and the
+   revoke-close submit a closing resume only when no claim is held. A job re-checks, under the
+   runtime lock and together with releasing its claim, whether its pause was overtaken by a stop or
+   a wave decision, and if so resumes it itself. So a stopped pause always has exactly one owner.
+   A resume job that finds the run busy or already advanced (`run_busy`,
+   `sql_approval_pending`, `sql_approval_not_pending`) ends quietly: the holder owns the outcome.
+   Cancellation still signals the running operation immediately through the service's stop flag.
+   The live recipients lookup is lock-free because the approval service calls the live check under
+   its own lock.
+6. **Single process only.** The lock, the claims, and `_live` are in-process. Two API processes
+   sharing a data directory are unsupported, as before.
+7. **Evidence.** The six key tests fail against `c52b44b` (unfixed) for the defect itself: the
+   uncaught count-to-create revocation in execution and planning, the accepted wave and sent
+   prompt, the extra create during execution, the `failed` record under a running resume, and two
+   resume jobs. All 22 pass on S5a, five consecutive runs. Barriers are `threading.Event`s in the
+   real call path; there are no sleeps.
+8. **Remaining (S5b-S5d).** S5b: Amendment 11 item 3 (strict execution admission plus a reviewed
+   execution capability). S5c: typed evidence and price registries bound by one review ID, which
+   stay empty. S5d: a consent notice API, a revoke endpoint, a UI that shows the OpenAI notice,
+   and recipients in the consent audit. Plan approval does not yet know execution recipients when
+   the planning provider names none, so it can pass; execution then refuses before any request.
 
 ## Outcome
 

@@ -470,6 +470,11 @@ class InvestigationPlanningGateway:
             raise _Refused(RefusalCode.AUTHORITY_UNAVAILABLE) from None
         return authority, context, evidence, pricing
 
+    def _check_live(self) -> None:
+        code = check_planning_authority(self._authority, self._context.scope, live=self._live)
+        if code is not None:
+            raise _Refused(code)
+
     def _check_cancelled(self) -> None:
         try:
             requested = self._cancellation.cancel_requested
@@ -530,6 +535,7 @@ class InvestigationPlanningGateway:
                     raise _Refused(RefusalCode.METERING_VIOLATION)  # the counter was not quiet
                 invocation.counted = counted
                 self._check_cancelled()
+                self._check_live()  # PROD-1 S5a: consent may have changed since the stage began
                 deadline = PlanningDeadline(self._check_time())
                 invocation.calls += 1  # the invocation marker: set before the provider is entered
                 invocation.result = adapter.generate_once_with_deadline(

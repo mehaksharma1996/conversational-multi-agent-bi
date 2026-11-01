@@ -677,8 +677,12 @@ class _AdmittedLLMClient:
         max_output_tokens: int,
         remaining: Callable[[], float],
         cancellation: CancellationToken,
+        authorize: Callable[[], None],
     ) -> None:
         self._adapter = adapter
+        # PROD-1 S5a: the gateway's full authority check (consent re-read included), run again
+        # immediately before each request that would send the prompt (the count and the call).
+        self._authorize = authorize
         self._max_input_tokens = max_input_tokens
         self._remaining = remaining  # the execution ledger's remaining wall clock
         self._cancellation = cancellation
@@ -718,6 +722,7 @@ class _AdmittedLLMClient:
         try:
             with meter_provider_calls(self.meter) as health:
                 self.health = health
+                self._authorize()
                 try:
                     if isinstance(adapter, DeadlineBoundedModelAdapter):
                         count_deadline = self._deadline()
@@ -734,6 +739,7 @@ class _AdmittedLLMClient:
                     self.over_input = type(counted) is int and counted > self._max_input_tokens
                     raise _Refused(RefusalCode.METERING_UNBOUNDED)  # before the provider sees it
                 self.counted = counted
+                self._authorize()
                 if isinstance(adapter, DeadlineBoundedModelAdapter):
                     if self._cancel_requested():
                         raise _Refused(RefusalCode.CANCELLED)
@@ -1448,6 +1454,7 @@ class InvestigationToolGateway:
             remaining=self._ledger.remaining_wall_clock,
             cancellation=self._cancellation,
             max_output_tokens=model_request.output_tokens,
+            authorize=self._check_authority,
         )
         text: str | None = None
         failure: str | None = None
@@ -1765,6 +1772,7 @@ class InvestigationToolGateway:
             remaining=self._ledger.remaining_wall_clock,
             cancellation=self._cancellation,
             max_output_tokens=model_request.output_tokens,  # one member, one attempt: its cap
+            authorize=self._check_authority,
         )
         bounded = _BoundedRetriever(retriever, query=query, limit=limit)
         outcome: DocumentResearchOutcome | None = None
@@ -1879,6 +1887,7 @@ class InvestigationToolGateway:
             remaining=self._ledger.remaining_wall_clock,
             cancellation=self._cancellation,
             max_output_tokens=model_request.output_tokens,
+            authorize=self._check_authority,
         )
         service = GuardedSQLService(table, client, executor=_refusing_executor)
         prompt = ""

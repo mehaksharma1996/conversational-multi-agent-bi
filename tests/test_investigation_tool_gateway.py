@@ -1073,6 +1073,7 @@ def test_a_sealed_client_cannot_reach_the_provider_after_settlement() -> None:
         max_output_tokens=CAP,
         remaining=h.ledger.remaining_wall_clock,
         cancellation=h.cancellation,
+        authorize=lambda: None,
     )
     client.sealed = True
     with pytest.raises(tool_gateway._Refused):

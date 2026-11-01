@@ -260,7 +260,8 @@ def test_invalid_initial_then_valid_repair_is_proposed_within_one_ledger() -> No
     assert usage.verified_model_settlements == 2 and usage.reservation_bound == "held"
     assert usage.closed_reason == "completed" and usage.outstanding_reservations == 0
     assert h.model_calls == 2 and h.counts == 2
-    assert len(h.live.calls) == 2  # the live authority is re-checked before the repair
+    # re-checked before the repair, and (PROD-1 S5a) before each stage's create
+    assert len(h.live.calls) == 4
     for call in h.adapter.calls:
         assert call.max_output_tokens == PLANNING_STAGE_OUTPUT_TOKENS
 
@@ -484,7 +485,7 @@ def test_consent_or_authority_changed_between_calls_refuses_the_repair() -> None
     # A consent change re-issues authority: the bound authority no longer matches.
     _tamper(h.gateway, _authority=granted.model_copy(update={"consent": ConsentSnapshot()}))
     _refused(h.gateway.repair(), C.AUTHORITY_UNAVAILABLE)
-    assert h.model_calls == 1 and len(h.live.calls) == 1
+    assert h.model_calls == 1 and len(h.live.calls) == 2  # stage start, before the create
 
     # The trusted adapter reports the old epoch as revoked after a consent change.
     h = _repairable(adapter=_answers(INVALID_TEXT, valid_response_text()))

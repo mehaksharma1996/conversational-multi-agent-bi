@@ -213,7 +213,8 @@ def test_one_scripted_call_returns_a_validated_non_executable_proposal() -> None
     assert (usage.model_calls, usage.input_tokens, usage.output_tokens) == (1, 1_234, 321)
     assert usage.verified_model_settlements == 1 and usage.reservation_bound == "held"
     assert usage.closed_reason == "completed" and usage.outstanding_reservations == 0
-    assert h.live.calls == [(context().scope, 3)]
+    # PROD-1 S5a: once when the stage begins, and again immediately before the create
+    assert h.live.calls == [(context().scope, 3)] * 2
     assert h.gateway.closed is None
 
 

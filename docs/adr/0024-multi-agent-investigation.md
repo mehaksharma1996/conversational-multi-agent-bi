@@ -771,6 +771,11 @@ implemented, no reviewed execution capability, planning evidence, or price entry
 release gate `LIVE_ADMISSION_RELEASED` is `False`, so production remains `FailClosedAdapters` and
 the amendment stays Proposed.
 
+**S5a progress (2026-11-01, still Proposed).** The live authority check now re-reads current
+workspace consent, and both gateways re-check authority immediately before each provider request.
+An execution run allows one `run`/`resume` at a time. Neither change touches item 3, so the
+amendment stays Proposed.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

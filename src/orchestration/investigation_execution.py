@@ -591,6 +591,9 @@ class InvestigationExecutionRun:
         self._cancelled = False
         self._defect = False
         self._used = False
+        # PROD-1 S5a: at most one ``run``/``resume`` in flight. A second caller gets ``run_busy``
+        # and must leave the outcome to the holder; it never waits, so cancellation cannot deadlock.
+        self._serial = threading.Lock()
         # INV-8: the narrative call's untrusted draft and, without one, the reason; the candidate
         # and the accepted report stay in this process.
         self._narrative_enabled = narrative is True
@@ -688,16 +691,31 @@ class InvestigationExecutionRun:
         With SQL approval, the result may be ``awaiting_sql_approval`` with its ``sql_wave``;
         ``resume`` continues once the service holds the wave's outcome.
         """
-        if self._used:
-            raise ExecutionRunError("execution_run_used")
-        self._used = True
-        return self._invoke({})
+        if not self._serial.acquire(blocking=False):
+            raise ExecutionRunError("run_busy")
+        try:
+            if self._used:
+                raise ExecutionRunError("execution_run_used")
+            self._used = True
+            return self._invoke({})
+        finally:
+            self._serial.release()
 
     def resume(self) -> ExecutionResult:
         """Continue a run paused for SQL approval, once the service holds the wave's outcome.
 
         The resume value carries nothing the owner trusts: the decision is read from the service.
+        The pause check and the graph invocation are one step under the run's guard, so two
+        callers can never both pass the check and resume the same wave (``run_busy``).
         """
+        if not self._serial.acquire(blocking=False):
+            raise ExecutionRunError("run_busy")
+        try:
+            return self._resume_unlocked()
+        finally:
+            self._serial.release()
+
+    def _resume_unlocked(self) -> ExecutionResult:
         wave = self._wave
         if not self._used or wave is None or not self._paused():
             raise ExecutionRunError("sql_approval_not_pending")
