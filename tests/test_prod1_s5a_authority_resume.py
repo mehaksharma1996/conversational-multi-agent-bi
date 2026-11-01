@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -176,6 +177,28 @@ class Flow:
         assert _approve(self.client, self.to_plan_approval()).status_code == 200
         paused = self.until("awaiting_sql_approval", *TERMINAL)
         assert paused["status"] == "awaiting_sql_approval", paused
+
+    def wave_id(self) -> str | None:
+        answer = self.client.get(f"/api/v1/investigations/{self.id}/sql-wave")
+        return answer.json()["wave_id"] if answer.status_code == 200 else None
+
+    def after_resume(self, decided: str | None) -> Any:
+        """Wait until a resume settles: a terminal status, or a *new* pending wave.
+
+        The record keeps ``awaiting_sql_approval`` while a resume runs (it is published only when
+        the run settles), so the status alone cannot say the next wave exists.
+        """
+        deadline = time.monotonic() + 60
+        while True:
+            body = self.body()
+            if body["status"] in TERMINAL:
+                return body
+            current = self.wave_id()
+            if body["status"] == "awaiting_sql_approval" and current not in (None, decided):
+                return body
+            if time.monotonic() > deadline:
+                raise AssertionError(f"resume never settled: {body['status']}")
+            time.sleep(0.05)
 
     def withdraw(self) -> None:
         """The supported withdrawal path: accepting the older notice replaces the consent."""
@@ -412,11 +435,12 @@ def test_consent_withdrawn_after_a_create_was_sent_stops_what_follows() -> None:
     with TestClient(d.app()) as client:
         flow = Flow(client, d)
         flow.to_first_wave()
+        first = flow.wave_id()
         assert _approve_wave(client, flow.id).status_code == 202
         assert adapters.llm.call_gate.entered.wait(30)
         flow.withdraw()
         adapters.llm.call_gate.release.set()
-        body = flow.until("awaiting_sql_approval", *TERMINAL)
+        body = flow.after_resume(first)
         if body["status"] == "awaiting_sql_approval":
             assert _approve_wave(client, flow.id).status_code == 409
         flow.until(*TERMINAL)
@@ -497,6 +521,7 @@ def test_a_second_resume_of_a_held_run_is_busy_and_a_later_resume_still_works(
     with TestClient(d.app()) as client:
         flow = Flow(client, d)
         flow.to_first_wave()
+        first = flow.wave_id()
         assert _approve_wave(client, flow.id).status_code == 202
         assert adapters.llm.call_gate.entered.wait(30)
         run = flow.live().run
@@ -507,7 +532,7 @@ def test_a_second_resume_of_a_held_run_is_busy_and_a_later_resume_still_works(
             run.run()
         assert again.value.code == "run_busy"
         adapters.llm.call_gate.release.set()
-        paused = flow.until("awaiting_sql_approval", *TERMINAL)
+        paused = flow.after_resume(first)
         assert paused["status"] == "awaiting_sql_approval"
         assert _approve_wave(client, flow.id).status_code == 202  # the next legitimate resume
         flow.assert_one_consistent_end("completed")
@@ -563,8 +588,10 @@ def test_consent_valid_throughout_runs_both_waves_to_a_report(invocations: dict[
     with TestClient(d.app()) as client:
         flow = Flow(client, d)
         flow.to_first_wave()
+        first = flow.wave_id()
+        assert first is not None
         assert _approve_wave(client, flow.id).status_code == 202
-        assert flow.until("awaiting_sql_approval", *TERMINAL)["status"] == "awaiting_sql_approval"
+        assert flow.after_resume(first)["status"] == "awaiting_sql_approval"
         assert _approve_wave(client, flow.id).status_code == 202
         flow.assert_one_consistent_end("completed")
         assert len(adapters.llm.sql_prompts) == 2 and invocations["max"] == 1
