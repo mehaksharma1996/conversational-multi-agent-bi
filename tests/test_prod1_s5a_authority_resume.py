@@ -440,10 +440,13 @@ def test_consent_withdrawn_after_a_create_was_sent_stops_what_follows() -> None:
         assert adapters.llm.call_gate.entered.wait(30)
         flow.withdraw()
         adapters.llm.call_gate.release.set()
-        body = flow.after_resume(first)
-        if body["status"] == "awaiting_sql_approval":
-            assert _approve_wave(client, flow.id).status_code == 409
-        flow.until(*TERMINAL)
+        # The in-flight call completes and task 2 pauses at its wave, which sends nothing.
+        assert flow.after_resume(first)["status"] == "awaiting_sql_approval"
+        refused = _approve_wave(client, flow.id)
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "authority_revoked"
+        flow.assert_one_consistent_end("cancelled")
+        assert flow.body()["explanation_code"] == "authority_revoked"
         assert len(adapters.llm.sql_prompts) == 2  # the in-flight call, and nothing more
 
 
