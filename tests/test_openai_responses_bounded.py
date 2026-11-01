@@ -1051,16 +1051,16 @@ def test_admission_still_fails_closed_without_reviewed_evidence() -> None:
         admit_planning_adapter(adapter, envelope=envelope, capability=None)
 
 
-def test_nothing_outside_the_tests_imports_the_adapter() -> None:
+def test_only_the_gated_admission_module_imports_the_adapter() -> None:
     root = Path(__file__).resolve().parents[1]
     importers = [
-        path
+        path.relative_to(root).as_posix()
         for folder in ("src", "apps", "packages", "config")
         for path in (root / folder).rglob("*.py")
         if "openai_responses_bounded" in path.read_text(encoding="utf-8")
         and path.name != "openai_responses_bounded.py"
     ]
-    assert importers == []
+    assert importers == ["apps/api/investigation_providers.py"]
     from apps.api.investigations import FailClosedAdapters
 
     assert FailClosedAdapters().planning().adapter is None

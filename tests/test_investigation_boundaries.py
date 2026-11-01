@@ -643,17 +643,20 @@ def test_the_deadline_adapter_exemption_is_one_exact_module_and_class() -> None:
     assert production_planning_violations(adapter, "apps/api/investigations.py")
 
 
-def test_the_exempt_adapter_has_no_reviewed_capability_and_no_production_importer() -> None:
+def test_the_exempt_adapter_has_no_reviewed_capability_and_one_gated_importer() -> None:
+    """PROD-1 S4: only the admission module imports the adapter, and it admits nothing yet."""
+    from apps.api import investigation_providers
     from src.llm.openai_responses_bounded import REVIEWED_CAPABILITY_PROFILES
 
     assert dict(REVIEWED_CAPABILITY_PROFILES) == {}
+    assert investigation_providers.LIVE_ADMISSION_RELEASED is False
     importers = [
         str(path.relative_to(ROOT)).replace("\\", "/")
         for path in _production_modules()
         if "openai_responses_bounded" in path.read_text(encoding="utf-8")
         and path.name != "openai_responses_bounded.py"
     ]
-    assert importers == []
+    assert importers == ["apps/api/investigation_providers.py"]
 
 
 def test_the_production_checker_allows_only_derived_profiles_in_planning_cost() -> None:

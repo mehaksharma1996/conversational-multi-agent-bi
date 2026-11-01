@@ -764,6 +764,13 @@ ledger deadline. Item 3 is not implemented: admission still accepts a plain `Bou
 through an explicitly separate legacy branch, and no reviewed execution capability exists, so the
 amendment stays Proposed.
 
+**S4 progress (2026-10-31, still Proposed).** S4 adds trusted provider configuration, adapter
+ownership, and versioned OpenAI consent (`apps/api/investigation_providers.py`,
+`apps/api/consent_notices.py`) and changes no gateway admission rule. Item 3 is still not
+implemented, no reviewed execution capability, planning evidence, or price entry exists, and the
+release gate `LIVE_ADMISSION_RELEASED` is `False`, so production remains `FailClosedAdapters` and
+the amendment stays Proposed.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

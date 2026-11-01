@@ -5,10 +5,11 @@ Tier: strongest. Check mode: --full (S4 onward touches `apps/api`).
 
 **Status: S0 reviewed; S1 implemented offline and CI-verified (2026-10-31, run 41210001295, 10/10
 green including Python 3.12); S2 implemented offline and CI-verified (2026-10-31, run
-41214782753, 10/10 green); S3 implemented offline (2026-10-31), unpushed. The adapter runs through
-the real gateways in tests only: production still uses `FailClosedAdapters`, no snapshot is
-reviewed, no live model call was made, no API key was used, and external spend is $0.** S4–S6
-each need approval first.
+41214782753, 10/10 green); S3 implemented offline and CI-verified (2026-10-31, run 41256414712,
+10/10 green, 40/40 S3 tests on Python 3.12); S4 implemented offline (2026-10-31), unpushed.
+Production still uses `FailClosedAdapters` (S4 adds a selection path that admits nothing), no
+snapshot is reviewed, no live model call was made, no API key was used, and external spend is
+$0.** S5 and S6 each need approval first.
 
 **Approved decisions (2026-10-31):** D1 OpenAI Responses (direct) as a provisional implementation
 target, *not* a live-validated or admissible provider. D2 one pinned dated snapshot, left
@@ -210,6 +211,75 @@ importer.
    token estimate exists.
 6. **Live-unverified.** As in S2, every provider behaviour is proven against scripted transports
    only.
+
+## S4 record (configuration, ownership, and consent, offline)
+
+**Files.** `config/settings.py` (five settings and their validation), `apps/api/consent_notices.py`
+(new), `apps/api/investigation_providers.py` (new), `apps/api/investigations.py` (`_consent`),
+`apps/api/feature_routes.py` (consent route), `apps/api/main.py` (selection), the two importer
+guards, and `tests/test_prod1_configured_adapters.py` (49 offline tests). There are no OpenAPI,
+web, schema, evaluation, or telemetry changes.
+
+1. **Configuration contract (server environment only, all off by default).**
+
+   | Variable | Default | Meaning |
+   |---|---|---|
+   | `INVESTIGATION_MODEL_PROVIDER` | `none` | `none` or `openai_responses`; anything else fails startup |
+   | `INVESTIGATION_MODEL_ACTIVATION` | off | explicit activation; required in addition to the provider |
+   | `OPENAI_API_KEY` | unset | held with `repr=False`; never logged, serialized, or sent to the browser |
+   | `INVESTIGATION_MODEL_SNAPSHOT` | unset | a pinned dated snapshot ID; an alias fails startup |
+   | `INVESTIGATION_MODEL_REVIEW` | unset | the review record ID the profile and evidence must carry |
+
+   There is no base URL, proxy, or price setting: the endpoint is fixed in
+   `src/llm/responses_transport.py`, and the generic `LLM_*_COST_PER_MILLION_USD` settings are
+   never used for admission. Validation errors name the variable, never the value. None of these
+   variables is added to `.env.example` or Compose (the same convention as
+   `INVESTIGATION_ROUTING_ENABLED`, brief 142 I3).
+2. **Admission sequence** (`admit_investigation_provider`, no I/O, first failure wins, each a
+   content-free `AdmissionDecision`): provider selected → activation on → not local-only → key
+   present → snapshot present → an exactly matching reviewed `ResponsesCapabilityProfile` (no
+   alias or family lookup) → review ID matches the profile and the planning evidence → reviewed
+   planning evidence covers the exact planning bound → a reviewed price entry for the exact
+   provider and snapshot → the release gate `LIVE_ADMISSION_RELEASED`. The gate is a code
+   constant, `False`, which only a reviewed change after S6 and DEP-1 may flip. The three reviewed
+   registries are empty, so any of four independent blocks keeps production at
+   `FailClosedAdapters`. `create_app` uses this selection only when no adapters are injected and
+   records the decision on `app.state.investigation_provider_decision`. Budget, consent,
+   authorization and approvals, and the operation deadline stay per-call checks in the gateways,
+   unchanged.
+3. **Adapter ownership.** `ConfiguredInvestigationAdapters` builds a new adapter and transport on
+   each `planning()` and `execution()` call and retains neither. The runtime calls each once per
+   investigation, and resume continues the same run, so one instance serves a stage's every model
+   call. Proven offline: an uncertain create halts that instance, and neither a replacement
+   gateway nor a task retry sends again; two investigations get distinct instances; cancellation
+   reaches only `/responses/{owned id}/cancel` on the fixed host; and a restart leaves records
+   terminal and builds nothing. **Boundary:** this relies on the single-process runtime. Nothing
+   prevents duplicates across processes or hosts.
+4. **Consent notice `2026-10-openai-1`** (`OPENAI_NOTICE`). It names OpenAI as an external
+   processor and the data that may be sent (question, plan and prompts, schema details, query
+   results and aggregates, document excerpts). It also discloses `store=false`, background mode, and
+   the roughly ten-minute background retention as OpenAI's documented practice, not a guaranteed
+   deletion deadline. It states that acceptance turns nothing on. OpenAI is the only recipient
+   restricted to particular notice versions. The consent route records it only when the accepted
+   version discloses it and an OpenAI provider is configured. `_consent` drops it from any stored
+   record whose version does not disclose it. Existing `2026-09` consent (and the web client, which
+   still sends `2026-09`) never grants OpenAI. Gemini, Anthropic, and Ollama consent are unchanged,
+   and the ask route is unchanged.
+5. **Migration.** No schema change. An existing row reads as "OpenAI not granted" whatever its
+   recipients say. A later acceptance replaces the whole record, so re-accepting `2026-09`
+   withdraws OpenAI. There is no separate revoke endpoint; a cleared record (`accepted_at=None`)
+   satisfies nothing. Persisted consent survives restart under the same rule.
+6. **Privacy.** The consent audit event carries the notice version only (the existing
+   allowlist). Selection decisions are enum codes. The key is not in `repr` of the settings, the
+   reviewed config, or the adapters. Logs and state carry no key, prompt, or response ID (tested).
+   **Proxies:** S2 deliberately reads no ambient proxy settings. A deployment that needs an egress
+   proxy needs an explicit, reviewed infrastructure decision (DEP-1), not an environment variable.
+7. **Remaining production blockers.** Reviewed capability profile, planning evidence, and price
+   entry (S5); live validation of every provider claim (S6, separate spend approval); Amendment 11
+   item 3; a web flow that shows and accepts `2026-10-openai-1`; DEP-1 activation, secrets, and
+   egress; and opening the release gate.
+8. **Zero cost.** No key, account, network, or spend. A non-loopback connection fails every S4
+   test, and CI needs no credential.
 
 ## Outcome
 

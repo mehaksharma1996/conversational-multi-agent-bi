@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from apps.api.approvals import ApprovalCheckpoints
 from apps.api.authorization import Capability, requires
+from apps.api.consent_notices import disclosed_recipients
 from apps.api.dependencies import (
     get_api_settings,
     get_approval_checkpoints,
@@ -143,12 +144,13 @@ def accept_gemini_consent(
     observability: ObservabilityDependency,
     settings: SettingsDependency,
 ) -> ConsentResponse:
-    # The recipients are read from server configuration, never from the request.
+    # The recipients are read from server configuration, never from the request, and a recipient
+    # is recorded only when the accepted notice version discloses it (PROD-1 S4).
     workspace = repository.set_consent(
         workspace_id,
         identity.tenant_id,
         command.notice_version,
-        recipients=settings.hosted_recipients(),
+        recipients=disclosed_recipients(command.notice_version, settings.consent_recipients()),
     )
     observability.audit(
         "consent.accepted",

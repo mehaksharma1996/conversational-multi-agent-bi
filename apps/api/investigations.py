@@ -24,7 +24,8 @@ Lifecycle (decisions E1 to E9 in ``docs/agents/briefs/144-inv11-investigation-ap
 
 ``cancel`` cancels the job and the approval service's record; calls in flight finish and their
 results are discarded by the run (INV-5/INV-10). Production supplies no admissible model
-(``FailClosedAdapters``), so planning fails closed with ``metering_unbounded``.
+(``FailClosedAdapters``, chosen by ``apps.api.investigation_providers``), so planning fails closed
+with ``metering_unbounded``.
 
 In-process run objects are never persisted: after a restart, startup reconciliation has already
 made every live record ``interrupted`` (``apps/api/main.py``).
@@ -40,6 +41,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from apps.api.consent_notices import disclosed_recipients
 from apps.api.investigation_store import (
     InvestigationConflictError,
     InvestigationRecord,
@@ -233,10 +235,15 @@ class _DocumentResolver:
 
 
 def _consent(workspace: WorkspaceRecord) -> ConsentSnapshot:
+    """The stored consent, minus any recipient its notice version does not disclose (PROD-1 S4).
+
+    An older, stale, or hand-edited record therefore never authorises OpenAI.
+    """
+    version = workspace.consent_notice_version
     return ConsentSnapshot(
         accepted_at=workspace.consent_accepted_at,
-        notice_version=workspace.consent_notice_version,
-        recipients=tuple(workspace.consent_recipients),
+        notice_version=version,
+        recipients=disclosed_recipients(version, workspace.consent_recipients),
     )
 
 

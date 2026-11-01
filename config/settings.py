@@ -30,6 +30,10 @@ DEFAULT_PURPOSE_TIERS: tuple[tuple[str, str], ...] = (
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _HOSTNAME = re.compile(r"[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
 ALLOWED_OIDC_SIGNING_ALGORITHMS = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"})
+# PROD-1 S4 (#198): the investigation model provider is server configuration only, off by default.
+INVESTIGATION_MODEL_PROVIDERS = ("none", "openai_responses")
+_MODEL_SNAPSHOT = re.compile(r"[a-z0-9][a-z0-9.\-]{0,80}-\d{4}-\d{2}-\d{2}")
+_REVIEW_ID = re.compile(r"[a-z0-9][a-z0-9.\-]{0,63}")
 
 
 @dataclass(frozen=True)
@@ -108,6 +112,11 @@ class Settings:
     rate_limit_messages: int = 120
     embedding_cache_max_entries: int = 10_000
     investigation_routing_enabled: bool = False
+    investigation_model_provider: str = "none"
+    investigation_model_activation: bool = False
+    investigation_model_snapshot: str | None = None
+    investigation_model_review: str | None = None
+    openai_api_key: str | None = field(default=None, repr=False)
 
     @property
     def oidc_login_configured(self) -> bool:
@@ -225,6 +234,24 @@ class Settings:
                 recipients.append("Ollama (remote)")
         return tuple(recipients)
 
+    def investigation_recipients(self) -> tuple[str, ...]:
+        """The configured investigation model's consent recipient (PROD-1 S4), or none.
+
+        Naming a recipient here admits nothing: it only lets a workspace consent to it.
+        """
+        if (
+            self.investigation_model_provider == "openai_responses"
+            and self.investigation_model_activation
+            and self.openai_api_key
+            and not self.local_only_mode
+        ):
+            return ("OpenAI",)
+        return ()
+
+    def consent_recipients(self) -> tuple[str, ...]:
+        """Every recipient a workspace's consent can name: the bounded chain, then investigation."""
+        return (*self.hosted_recipients(), *self.investigation_recipients())
+
     @property
     def hosted_model_configured(self) -> bool:
         """True when a configured provider would send data off this machine (consent applies)."""
@@ -237,6 +264,25 @@ class Settings:
     @property
     def model_backed_available(self) -> bool:
         return self.hosted_model_configured or self.local_model_configured
+
+    def validate_investigation_model_configuration(self) -> None:
+        """Reject malformed investigation provider settings; never echo a configured value.
+
+        Valid settings admit nothing on their own: ``apps.api.investigation_providers`` still
+        requires reviewed capability, evidence, and price records and a released gate.
+        """
+        if self.investigation_model_provider not in INVESTIGATION_MODEL_PROVIDERS:
+            raise ValueError(
+                "INVESTIGATION_MODEL_PROVIDER must be one of: "
+                + ", ".join(INVESTIGATION_MODEL_PROVIDERS)
+                + "."
+            )
+        snapshot = self.investigation_model_snapshot
+        if snapshot is not None and _MODEL_SNAPSHOT.fullmatch(snapshot) is None:
+            raise ValueError("INVESTIGATION_MODEL_SNAPSHOT must be a pinned dated snapshot ID.")
+        review = self.investigation_model_review
+        if review is not None and _REVIEW_ID.fullmatch(review) is None:
+            raise ValueError("INVESTIGATION_MODEL_REVIEW must be a review record identifier.")
 
     def validate_document_index_configuration(self) -> None:
         """The pgvector backend is opt-in; it fails closed without a DSN from the environment."""
@@ -472,11 +518,20 @@ def get_settings() -> Settings:
         rate_limit_messages=_positive_int("RATE_LIMIT_MESSAGES", 120),
         embedding_cache_max_entries=_positive_int("EMBEDDING_CACHE_MAX_ENTRIES", 10_000),
         investigation_routing_enabled=_flag("INVESTIGATION_ROUTING_ENABLED"),
+        investigation_model_provider=os.getenv("INVESTIGATION_MODEL_PROVIDER", "none")
+        .strip()
+        .lower()
+        or "none",
+        investigation_model_activation=_flag("INVESTIGATION_MODEL_ACTIVATION"),
+        investigation_model_snapshot=_optional_text("INVESTIGATION_MODEL_SNAPSHOT"),
+        investigation_model_review=_optional_text("INVESTIGATION_MODEL_REVIEW"),
+        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
     )
     settings.validate_identity_configuration()
     settings.validate_llm_pricing()
     settings.validate_llm_configuration()
     settings.validate_document_index_configuration()
+    settings.validate_investigation_model_configuration()
     return settings
 
 
