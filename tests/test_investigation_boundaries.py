@@ -656,7 +656,10 @@ def test_the_exempt_adapter_has_no_reviewed_capability_and_one_gated_importer() 
         if "openai_responses_bounded" in path.read_text(encoding="utf-8")
         and path.name != "openai_responses_bounded.py"
     ]
-    assert importers == ["apps/api/investigation_providers.py"]
+    assert sorted(importers) == [
+        "apps/api/investigation_providers.py",
+        "apps/api/provider_evidence.py",
+    ]
 
 
 def test_the_production_checker_allows_only_derived_profiles_in_planning_cost() -> None:

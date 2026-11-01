@@ -252,7 +252,7 @@ def test_configured_production_execution_never_uses_the_scripted_path() -> None:
     ).execution()
     assert built.scripted_admission is None
     assert type(built.evidence) is ReviewedExecutionEvidence
-    assert providers.REVIEWED_EXECUTION_EVIDENCE is None  # production holds no review
+    assert dict(providers.REVIEWED_PROVIDER_EVIDENCE) == {}  # production holds no review
 
 
 def test_production_defaults_admit_nothing() -> None:

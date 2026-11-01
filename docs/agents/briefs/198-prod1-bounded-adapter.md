@@ -9,7 +9,9 @@ green including Python 3.12); S2 implemented offline and CI-verified (2026-10-31
 10/10 green, 40/40 S3 tests on Python 3.12); S4 implemented offline and CI-verified (2026-10-31,
 run 41260961042, 10/10 green, 49/49 S4 tests on Python 3.12); S5a implemented offline and
 CI-verified (2026-11-01, run 41268269115 at `c2cddff`, 10/10 green, 22/22 S5a tests on Ubuntu and
-Windows 3.12); S5b implemented offline (2026-11-01), unpushed.
+Windows 3.12); S5b implemented offline and CI-verified (2026-11-01, run 41273557427 at
+`bebcfcd`, 10/10 green, 33/33 S5b tests on Python 3.12); S5c implemented offline (2026-11-01),
+unpushed.
 Production still uses `FailClosedAdapters` (S4 adds a selection path that admits nothing), no
 snapshot is reviewed, no live model call was made, no API key was used, and external spend is
 $0.** S5 and S6 each need approval first.
@@ -408,6 +410,53 @@ telemetry change.
 9. **Remaining.** S5c: typed price and evidence registries bound by one review ID (still empty).
    S5d: consent notice API, revoke endpoint, UI, and recipients in the consent audit. S6 (separate
    spend approval): live evidence for every provider claim. Only a single process is supported.
+
+## S5c record (typed evidence registry and reviewed pricing, offline)
+
+**Files.** `apps/api/provider_evidence.py` (new), `apps/api/investigation_providers.py` (admission
+reads bundles), the S4 fixtures, the two importer guards, ADR 0024, and
+`tests/test_prod1_s5c_evidence_registry.py` (69 tests). No OpenAPI, web, schema, evaluation,
+telemetry, or ledger change.
+
+1. **One registry.** `REVIEWED_PROVIDER_EVIDENCE` maps an exact snapshot to one
+   `ReviewedProviderEvidence`. It replaces the three separate S4/S5b registries, so there is no
+   parallel price or evidence system. It is empty. The bundle holds `schema_version`, `review_id`,
+   `provider`, `model`, `data_recipient`, `source`, `reviewed_on`, `expires_on`, the
+   `ResponsesCapabilityProfile`, the planning and execution reviews, the `ProviderPricingTable`
+   the gateways estimate with, and a `ReviewedPriceEvidence`. Everything is frozen and strict
+   (a `"1"`, `True`, or `1.0` is refused where a flag, version, or price is expected).
+2. **Shape is not substance.** Admission re-validates the bundle (exact types throughout, a fresh
+   validation of a dump, so `model_construct` or a subclass fails `evidence_invalid`), then
+   `evidence_refusal` checks it: supported schema; one provider, snapshot, and recipient everywhere
+   (no alias; a bundle filed under another key is `evidence_identity_mismatch`); one review ID
+   across every part and the configured `INVESTIGATION_MODEL_REVIEW`; `reviewed_on <= today <
+   expires_on`; exactly one planning and one execution member equal to the fixed bounds; exactly
+   one pricing entry, with rates equal to the price review and all three enforcement flags; and
+   exactly the supported billable components.
+3. **Prices.** `ReviewedPriceEvidence` separates input and output rates and lists the billable
+   components (`input_tokens`, `output_tokens`, `input_token_count`); anything else, a duplicate,
+   or a missing token component is `pricing_unbounded`. **The count request is not assumed free:**
+   `count_charge` must be reviewed as `not_billed`. `billed` or `unknown` is refused, because
+   `estimate_planning_cost` prices input and output tokens only, so a billed count would leave
+   the bound short. Pricing a billed count is future work. No real or third-party price appears
+   anywhere; the tests' rates are synthetic.
+4. **Upper bound, reserved versus measured.** The estimate stays `enforced_upper_bound` only with a
+   priced entry, reviewed evidence for the exact member, and every enforcement flag. Without
+   review it is `indicative`, and without pricing `unavailable` with no amount (never zero). The
+   ledger is unchanged. A call whose usage is unknown is charged the full reservation and flagged
+   unverified (tested again here), separately from measured usage; it never authorizes another
+   create.
+5. **Mutation evidence.** Removing the count-charge check, the pricing review-ID check, or the
+   expiry check, or accepting a subclass, is each detected by the S5c suite (3, 1, 3, and 1
+   failures).
+6. **Unchanged.** `FailClosedAdapters` is the default, the gate is closed, no snapshot is admitted,
+   `SCRIPTED_EXECUTION_ADMISSION` stays test-only, consent is checked at approval and before every
+   request, there is one adapter per stage, resumes are serialized, and only a single process is
+   supported.
+7. **Remaining.** S5d: consent notice API, revoke endpoint, UI, and recipients in the consent audit.
+   S6 (separate spend approval): real reviewed evidence (count equals billed input, whether counting
+   is billed, background mode and cancel, usage on cancellation, latency, and official prices)
+   before any bundle may be added. $0 so far.
 
 ## Outcome
 

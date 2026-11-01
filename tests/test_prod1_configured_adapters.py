@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,7 @@ from apps.api.investigation_providers import (
 )
 from apps.api.investigations import FailClosedAdapters, _consent
 from apps.api.main import create_app
+from apps.api.provider_evidence import ReviewedPriceEvidence, ReviewedProviderEvidence
 from config.settings import Settings, get_settings
 from packages.governance import InMemoryAuditSink
 from packages.investigation.budget import ProviderCostProfile, ProviderPricingTable
@@ -96,9 +97,9 @@ def reviewed_evidence(version: str = REVIEW) -> ReviewedPlanningEvidence:
     )
 
 
-def reviewed_pricing(model: str = SNAPSHOT) -> ProviderPricingTable:
+def reviewed_pricing(model: str = SNAPSHOT, version: str = REVIEW) -> ProviderPricingTable:
     return ProviderPricingTable(
-        version="test-prices-v1",
+        version=version,
         currency="USD",
         profiles=(
             ProviderCostProfile(
@@ -143,23 +144,50 @@ def reviewed_execution(version: str = REVIEW, bound: Any = None) -> ReviewedExec
     )
 
 
-def reviewed() -> dict[str, Any]:
-    return {
-        "profiles": {SNAPSHOT: capabilities()},
+def reviewed_price(**changes: Any) -> ReviewedPriceEvidence:
+    """A SYNTHETIC price review (tests only): not a real or third-party OpenAI price."""
+    values: dict[str, Any] = {
+        "provider": "openai",
+        "model": SNAPSHOT,
+        "review_id": REVIEW,
+        "currency": "USD",
+        "input_per_million_usd": 0.4,
+        "output_per_million_usd": 1.6,
+        "billable_components": ("input_tokens", "output_tokens"),
+        "count_charge": "not_billed",
+    }
+    values.update(changes)
+    return ReviewedPriceEvidence(**values)
+
+
+def bundle(**changes: Any) -> ReviewedProviderEvidence:
+    """A SYNTHETIC, internally consistent evidence bundle (PROD-1 S5c), current today."""
+    today = datetime.now(UTC).date()
+    values: dict[str, Any] = {
+        "schema_version": 1,
+        "review_id": REVIEW,
+        "provider": "openai",
+        "model": SNAPSHOT,
+        "data_recipient": "OpenAI",
+        "source": "synthetic-test-fixture",
+        "reviewed_on": today - timedelta(days=1),
+        "expires_on": today + timedelta(days=30),
+        "capabilities": capabilities(),
         "planning_evidence": reviewed_evidence(),
         "execution_evidence": reviewed_execution(),
         "pricing": reviewed_pricing(),
+        "price": reviewed_price(),
     }
+    values.update(changes)
+    return ReviewedProviderEvidence(**values)
+
+
+def reviewed() -> dict[str, Any]:
+    return {"evidence": {SNAPSHOT: bundle()}}
 
 
 def config() -> ReviewedProviderConfig:
-    return ReviewedProviderConfig(
-        capabilities=capabilities(),
-        planning_evidence=reviewed_evidence(),
-        execution_evidence=reviewed_execution(),
-        pricing=reviewed_pricing(),
-        api_key=FAKE_KEY,
-    )
+    return ReviewedProviderConfig(evidence=bundle(), api_key=FAKE_KEY)
 
 
 def scripted(provider: Provider) -> ConfiguredInvestigationAdapters:
@@ -258,42 +286,22 @@ def test_each_configuration_step_is_required(
 
 
 @pytest.mark.parametrize(
-    ("records", "decision"),
+    ("registry", "decision"),
     [
-        ({"profiles": {}}, AdmissionDecision.CAPABILITY_UNREVIEWED),
-        # a reviewed profile filed under an alias never serves another snapshot
-        ({"profiles": {"test-model": capabilities()}}, AdmissionDecision.CAPABILITY_UNREVIEWED),
-        ({"planning_evidence": None}, AdmissionDecision.PLANNING_EVIDENCE_UNREVIEWED),
+        ({}, AdmissionDecision.CAPABILITY_UNREVIEWED),
+        # a bundle filed under an alias never serves another snapshot
+        ({"test-model": bundle()}, AdmissionDecision.CAPABILITY_UNREVIEWED),
         (
-            {"planning_evidence": reviewed_evidence("other-review-2")},
-            AdmissionDecision.PLANNING_EVIDENCE_UNREVIEWED,
-        ),
-        (
-            {"profiles": {SNAPSHOT: capabilities(review="other-review-2")}},
-            AdmissionDecision.REVIEW_MISMATCH,
-        ),
-        ({"execution_evidence": None}, AdmissionDecision.EXECUTION_EVIDENCE_UNREVIEWED),
-        (
-            {"execution_evidence": reviewed_execution("other-review-2")},
+            {SNAPSHOT: bundle(execution_evidence=reviewed_execution(bound=PLAN_BOUND))},
             AdmissionDecision.EXECUTION_EVIDENCE_UNREVIEWED,
-        ),
-        (
-            {"execution_evidence": reviewed_execution(bound=PLAN_BOUND)},  # the planning cap
-            AdmissionDecision.EXECUTION_EVIDENCE_UNREVIEWED,
-        ),
-        ({"pricing": None}, AdmissionDecision.PRICING_UNREVIEWED),
-        (
-            {"pricing": reviewed_pricing("test-model-2099-02-02")},
-            AdmissionDecision.PRICING_UNREVIEWED,
         ),
     ],
 )
 def test_each_review_record_is_required(
-    root: Path, records: dict[str, Any], decision: AdmissionDecision
+    root: Path, registry: dict[str, Any], decision: AdmissionDecision
 ) -> None:
-    values = reviewed()
-    values.update(records)
-    admission = admit_investigation_provider(configured(root), **values)
+    """The full evidence matrix is in ``tests/test_prod1_s5c_evidence_registry.py``."""
+    admission = admit_investigation_provider(configured(root), evidence=registry)
     assert admission.decision is decision and admission.config is None
 
 
@@ -301,8 +309,7 @@ def test_production_records_are_empty_so_valid_settings_admit_nothing(root: Path
     selection = select_investigation_adapters(configured(root))
     assert selection.decision is AdmissionDecision.CAPABILITY_UNREVIEWED
     assert type(selection.adapters) is FailClosedAdapters
-    assert providers.REVIEWED_PLANNING_EVIDENCE is None and providers.REVIEWED_PRICING is None
-    assert providers.REVIEWED_EXECUTION_EVIDENCE is None
+    assert dict(providers.REVIEWED_PROVIDER_EVIDENCE) == {}
 
 
 def test_the_release_gate_blocks_even_a_fully_reviewed_configuration(root: Path) -> None:
@@ -349,10 +356,10 @@ def test_the_default_app_fails_closed_even_with_valid_looking_configuration(root
 def test_the_reviewed_config_refuses_inconsistent_records_and_hides_the_key() -> None:
     with pytest.raises(ValueError, match="credential_missing"):
         replace(config(), api_key="")
-    with pytest.raises(ValueError, match="planning_evidence_unreviewed"):
-        replace(config(), planning_evidence=reviewed_evidence("other-review-2").model_copy())
+    with pytest.raises(ValueError, match="review_mismatch"):
+        replace(config(), evidence=bundle(planning_evidence=reviewed_evidence("other-review-2")))
     with pytest.raises(ValueError, match="pricing_unreviewed"):
-        replace(config(), pricing=reviewed_pricing("test-model-2099-02-02"))
+        replace(config(), evidence=bundle(pricing=reviewed_pricing("test-model-2099-02-02")))
     with pytest.raises(TypeError):
         ConfiguredInvestigationAdapters(object())  # type: ignore[arg-type]
     rendered = repr(config()) + repr(scripted(Provider(Clock())))

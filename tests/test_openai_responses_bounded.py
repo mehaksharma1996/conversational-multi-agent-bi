@@ -1060,7 +1060,10 @@ def test_only_the_gated_admission_module_imports_the_adapter() -> None:
         if "openai_responses_bounded" in path.read_text(encoding="utf-8")
         and path.name != "openai_responses_bounded.py"
     ]
-    assert importers == ["apps/api/investigation_providers.py"]
+    assert sorted(importers) == [
+        "apps/api/investigation_providers.py",
+        "apps/api/provider_evidence.py",
+    ]
     from apps.api.investigations import FailClosedAdapters
 
     assert FailClosedAdapters().planning().adapter is None

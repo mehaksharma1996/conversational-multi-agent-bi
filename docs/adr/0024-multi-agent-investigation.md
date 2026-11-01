@@ -784,11 +784,21 @@ deterministic tests only:
 | Item 2: execution receives the remaining ledger deadline, never extended, with the run's cancellation token and the planning classification | Implemented and tested (S3) | `tests/test_prod1_gateway_integration.py`, now on the strict path |
 | Item 3a: execution admission requires a `DeadlineBoundedModelAdapter` | Implemented and tested (S5b) | `admit_execution_adapter`; `tests/test_prod1_s5b_execution_admission.py` |
 | Item 3b: reviewed execution evidence for the exact member | Implemented and tested (S5b): `ReviewedExecutionCapability` / `ReviewedExecutionEvidence` | Same file; production registry `REVIEWED_EXECUTION_EVIDENCE` is empty |
-| Item 3c: "the scripted adapters ... gain the deadline method" | **Not done as written.** Scripted suites instead opt in through the single test-only `SCRIPTED_EXECUTION_ADMISSION`, which no production module may reference (boundary-tested) | Needs a decision: accept this deviation, or migrate every scripted adapter |
+| Item 3c (revised): scripted suites use an explicit test-only admission | **Accepted design revision (S5c, 2026-11-01).** Instead of giving every scripted adapter the deadline method, scripted suites opt in through the single `SCRIPTED_EXECUTION_ADMISSION`, which no production module may reference (boundary-tested) | `tests/test_prod1_s5b_execution_admission.py` |
 | Reviewed evidence for a real provider and snapshot | **Missing** (needs S6 live evidence under a separate spend approval) | None; synthetic test records only |
 
-The amendment stays Proposed because item 3c deviates from its text and no real reviewed
-execution evidence exists.
+The amendment stays Proposed because no real reviewed execution evidence exists.
+
+**S5c progress (2026-11-01, still Proposed).** Provider admission now reads one typed bundle per
+exact snapshot (`ReviewedProviderEvidence` in `apps/api/provider_evidence.py`). The bundle binds
+schema version, review ID, provider, snapshot, recipient, review dates, and source to the
+capability profile, the planning and execution reviews, the pricing table, and a
+`ReviewedPriceEvidence` record that names every billable component. Admission re-validates the
+bundle as the exact type and refuses any disagreement with a content-free code. The input-token
+count request must be reviewed as `not_billed`, because the planning estimate prices input and
+output tokens only. `REVIEWED_PROVIDER_EVIDENCE` is empty, the release gate is closed, and every
+record in the tests is synthetic. The amendment stays Proposed until real reviewed evidence exists
+(S6, under a separate spend approval).
 
 ## Alternatives rejected
 
