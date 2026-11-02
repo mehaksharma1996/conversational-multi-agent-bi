@@ -18,11 +18,12 @@ python -m scripts.run_evaluations
 python -m scripts.generate_openapi
 python -m scripts.run_benchmarks --quick
 python -m tests.e2e.workflow_baseline_runner
+python -m tests.e2e.investigation_trace_runner
 python -m scripts.check_all
 ```
 
 `scripts.check_all` runs its pytest and deterministic-evaluation children through the same
-boundary. OpenAPI generation, evaluations, benchmarks, and the workflow-baseline CLI re-exec
+boundary. OpenAPI generation, evaluations, benchmarks, investigation tracing, and the workflow-baseline CLI re-exec
 themselves before importing application or ChromaDB modules. Relative input and output paths on
 those CLIs are resolved against the directory from which the command was invoked.
 

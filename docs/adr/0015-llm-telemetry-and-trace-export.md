@@ -71,3 +71,16 @@ The SDK and OTLP/gRPC exporter were already present in `requirements.lock` and t
 ChromaDB, so making them direct application dependencies adds no package or image-size delta. They remain
 covered by the offline license policy and container Trivy/size gates. The optional collector/profile remains
 deferred under #15.
+
+## Addendum (2026-11-02): investigation spans and scopes
+
+OBS-1 (#146) needs a span per agent and task under one root, so `Telemetry.scope` holds a root open and
+events emitted inside become its children. It adds no second path: a scope's name is a validated event name,
+its span starts with no attributes, and it ends with the attributes of its own sanitized `TelemetryEvent`. Only
+a sink that implements `open_scope`/`close_scope` keeps a scope open; any other sink receives the one event.
+
+`InvestigationTrace` exports closed vocabularies, plan-order task indexes, and ledger counts. Plan-supplied task
+IDs have the allowlist's token shape, so the allowlist alone would not stop them; they stay in process.
+`bi.investigation_ref` is a truncated digest for joining a run's traces and is never a metric label. Ledger
+counts are charges and monetary figures are the ledger's own estimates, as in decision 4; no price is inferred.
+See [investigation-tracing.md](../operations/investigation-tracing.md).

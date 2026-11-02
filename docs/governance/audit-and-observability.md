@@ -71,6 +71,12 @@ rounded to three decimals, which would erase per-call costs.
 The wrapper never reads prompt or completion text. Evaluation reports fill `metadata.token_usage` from the same counters for opt-in live
 runs and keep it `null` for scripted runs. There is no trace exporter: see [ADR 0015](../adr/0015-llm-telemetry-and-trace-export.md).
 
+### Investigation telemetry (`investigation.*`)
+
+OBS-1 adds `investigation.run`, `investigation.agent`, `investigation.step`, and `investigation.task`, with ledger usage, estimated cost, and terminal status, through the same
+allowlist and sinks. String values come from closed vocabularies; tasks appear as plan-order indexes. Ledger counts and cost are estimates. See
+[Inspecting an investigation trace locally](../operations/investigation-tracing.md) for the fields, metrics, and an offline command that captures a trace.
+
 ### `DEBUG_LOG_RAW_CONTENT`
 
 This existing setting makes the orchestrator write the raw question and generated SQL to its logger at `DEBUG`. It does **not** feed telemetry or audit,

@@ -826,6 +826,16 @@ to `interrupted` (`interrupted_by_restart`), with one `agent.investigation_recon
 (`service.started` reports `investigations_interrupted`). Decisions on an interrupted record are
 refused; creation with the same key replays it.
 
+## Telemetry (OBS-1, #146)
+
+`InvestigationGraphBuilder` takes an optional `InvestigationTrace`
+(`src/orchestration/investigation_telemetry.py`), which wraps each step *inside* its guard. The
+wrapper returns what the step returned and re-raises what it raised, so `owned_update`, the ledger
+binding, and `require_guarded_graph` see the same thing with or without it. Both run owners open
+one `investigation.run` scope per graph invocation. With no telemetry, a step is not wrapped at all.
+Fields, metrics, and the offline capture command are in
+[investigation-tracing.md](../operations/investigation-tracing.md).
+
 ## UI-6b read contract (#155)
 
 The investigation response additively exposes only server-trusted, read-side metadata needed by
