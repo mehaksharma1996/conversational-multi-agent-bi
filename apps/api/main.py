@@ -187,6 +187,7 @@ def create_app(
         executor=application.state.job_executor,
         recorder=observability.recorder,
         adapters=investigation_adapters,
+        telemetry=observability.telemetry,
     )
     application.state.repository.lifecycle_listener = _workspace_lifecycle_listener(
         observability,

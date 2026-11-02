@@ -92,6 +92,7 @@ from packages.jobs import (
     JobQueueFullError,
     JobStatus,
 )
+from packages.observability import Telemetry
 from src.documents.retriever import Retriever
 from src.orchestration.investigation_approval import InvestigationApprovalService, SQLWaveReview
 from src.orchestration.investigation_execution import (
@@ -374,7 +375,9 @@ class InvestigationRuntime:
         recorder: AuditRecorder,
         adapters: InvestigationAdapters | None = None,
         new_id: Callable[[], str] = lambda: secrets.token_hex(16),
+        telemetry: Telemetry | None = None,
     ) -> None:
+        self._telemetry = telemetry
         self._enabled = enabled
         self._repository = repository
         self._records = records
@@ -574,6 +577,7 @@ class InvestigationRuntime:
                 pricing=provider.pricing,
                 live=self._live_check,
                 cancellation=ctx,
+                telemetry=self._telemetry,
             )
             result = run.run()
         except Exception:
@@ -654,6 +658,7 @@ class InvestigationRuntime:
                 table_resolver=_TableResolver(self._repository),
                 execution_evidence=provider.evidence,
                 scripted_admission=provider.scripted_admission,
+                telemetry=self._telemetry,
             )
             with self._lock:
                 live.run = run

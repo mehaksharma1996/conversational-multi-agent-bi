@@ -254,6 +254,7 @@ def execution(
     narrative: bool = True,
     approvals: Approvals | None = None,
     follow_up_rounds: int = 0,
+    telemetry: Any = None,
 ) -> Execution:
     plan = plan or churn_plan()
     proposal = proposal or proposed(plan)
@@ -289,6 +290,7 @@ def execution(
         ledger_clock=ledger_clock or (lambda: 0.0),
         follow_up_authorizer=authorizer,
         narrative=narrative,
+        telemetry=telemetry,
     )
     return Execution(
         run=run,

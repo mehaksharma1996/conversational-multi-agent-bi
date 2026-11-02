@@ -53,6 +53,7 @@ from packages.investigation.state import (
     ProposalRecord,
     plan_digest,
 )
+from packages.observability import Telemetry
 from src.investigation.supervisor import (
     SupervisorFailureCode,
     SupervisorOutcome,
@@ -67,6 +68,7 @@ from src.orchestration.investigation_planning import (
     PlanningCloseReason,
     planning_lifecycle_target,
 )
+from src.orchestration.investigation_telemetry import InvestigationTrace
 
 
 class ProposalRunError(RuntimeError):
@@ -104,6 +106,7 @@ class InvestigationProposalRun:
         live: AuthorityCheck,
         cancellation: CancellationToken,
         clock: Clock = time.monotonic,
+        telemetry: Telemetry | None = None,
     ) -> None:
         if type(context) is not PlanningContext:
             raise TypeError("A proposal run is bound to a trusted PlanningContext.")
@@ -127,7 +130,10 @@ class InvestigationProposalRun:
         }
         self._proposal: InvestigationProposal | None = None
         self._used = False
-        builder = InvestigationGraphBuilder(self._gateway)
+        self._trace = InvestigationTrace(
+            telemetry, phase="planning", scope=scope, ledger=self._gateway.ledger
+        )
+        builder = InvestigationGraphBuilder(self._gateway, trace=self._trace)
         builder.add_step("intake", "intake", self._intake)
         builder.add_step("open_planning", "lifecycle", _open_planning)
         builder.add_step("supervisor", "supervisor", self._supervise)
@@ -169,6 +175,13 @@ class InvestigationProposalRun:
         if self._used:
             raise ProposalRunError("proposal_run_used")
         self._used = True
+        with self._trace.run() as observed:
+            result = self._invoke()
+            observed.finish(result.status)
+            observed.cost(result.record.cost_estimate)
+            return result
+
+    def _invoke(self) -> ProposalResult:
         try:
             self._graph.invoke({}, self._config)
         except Exception:
