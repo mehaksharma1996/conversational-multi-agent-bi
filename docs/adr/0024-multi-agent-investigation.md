@@ -809,7 +809,8 @@ role-aware controls) also changes no execution or admission rule, and the amendm
 
 ## Amendment 12: the finished report's evidence read (UI-6c, #156, 2026-11-02)
 
-- Status: **Accepted.** Design E1 to E9: `docs/agents/briefs/156-ui6c-evidence-report.md`.
+- Status: **Accepted** by the project owner on 2026-11-02, including SQL retention and the
+  `workspace:read` preview-row access. Design E1 to E9: `docs/agents/briefs/156-ui6c-evidence-report.md`.
 
 UI-6c adds no authority and creates no evidence. Reading a finished investigation needed three
 changes to what INV-8 and INV-11 stored:
