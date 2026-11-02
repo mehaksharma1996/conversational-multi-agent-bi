@@ -103,6 +103,8 @@ def _parse_evidence(text: str) -> tuple[tuple[Payload, ...], dict[str, QueryDeta
         if payload.evidence_id != key:
             raise ValueError("evidence is filed under another identifier")
         payloads.append(payload)
+    if any(type(value["sql"]) is not str for value in raw["query_details"].values()):
+        raise ValueError("a recorded statement is text")
     details = {
         key: QueryDetails(
             sql=value["sql"],

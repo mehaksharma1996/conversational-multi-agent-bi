@@ -1,4 +1,7 @@
-import type { InvestigationEvidence } from "../api/client";
+// The generated schema, not the client: the Playwright project also compiles this file.
+import type { components } from "../api/schema";
+
+type InvestigationEvidence = components["schemas"]["InvestigationEvidenceResponse"];
 
 export const QUERY_ID = `ev_${"a".repeat(32)}`;
 export const DERIVED_ID = `ev_${"b".repeat(32)}`;
