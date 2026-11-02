@@ -264,11 +264,12 @@ def test_a_body_cannot_supply_authority_scope_or_content() -> None:
             assert refused.status_code == 422, extra
         created = _create(client, conversation_id, message_id).json()
         body = _until(client, created["id"], _status("awaiting_plan_approval", "failed"))
-        for extra in (
+        decision_extras: tuple[dict[str, Any], ...] = (
             {"subject_id": "someone_else"},
             {"sql_approval_required": False},
             {"approver": "system"},
-        ):
+        )
+        for decision_extra in decision_extras:
             refused = client.post(
                 f"/api/v1/investigations/{created['id']}/plan-decision",
                 json={
@@ -276,9 +277,9 @@ def test_a_body_cannot_supply_authority_scope_or_content() -> None:
                     "plan_digest": body["plan_digest"],
                     "authority_epoch": body["authority_epoch"],
                 }
-                | extra,
+                | decision_extra,
             )
-            assert refused.status_code == 422, extra
+            assert refused.status_code == 422, decision_extra
         assert client.get(f"/api/v1/investigations/{created['id']}").json()["status"] == (
             "awaiting_plan_approval"
         )
@@ -417,7 +418,7 @@ class SpyLimiter(InMemoryRateLimiter):
 class Limited:
     """A deployment with exact limits; ``telemetry`` is the real sink, ``limiter`` optional."""
 
-    def __init__(self, name: str, *, limiter: InMemoryRateLimiter | None = None, **limits: int):
+    def __init__(self, name: str, *, limiter: InMemoryRateLimiter | None = None, **limits: Any):
         self.adapters = ScriptedAdapters()
         self.audit = InMemoryAuditSink()
         self.telemetry = InMemoryTelemetrySink()

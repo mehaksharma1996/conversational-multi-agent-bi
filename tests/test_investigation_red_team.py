@@ -1172,7 +1172,8 @@ def _sql_leaves_the_table(_: Context) -> None:
         ("SELECT load_extension('x')", "unsafe_query"),
         ('SELECT * FROM "other_workspace_data"', "sql_generation"),
     ):
-        h = sql_harness(llm=ExactAdapterSequence(statement), executor=Executor())
+        real_executor: Any = Executor()
+        h = sql_harness(llm=ExactAdapterSequence(statement), executor=real_executor)
         token = h.begin()
         prepared = h.call("prepare_sql", PrepareSQL(task_id="trend", role=SQL, attempt=token))
         assert prepared.handle is not None, statement  # these pass the text guard, on purpose
@@ -1439,12 +1440,22 @@ def test_resource_status_runs_the_same_preflight(guard: str) -> None:
     assert h.tables.calls == []
 
 
+def _settled_after(decided: str) -> Callable[[dict[str, Any]], bool]:
+    """The run ended, or a wave other than the one just decided is pending."""
+
+    def settled(body: dict[str, Any]) -> bool:
+        pending = (body.get("sql_wave") or {}).get("wave_id")
+        return body["status"] in ENDS or pending not in (None, decided)
+
+    return settled
+
+
 @pytest.fixture
 def authority_checks(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[tuple[Any, int]]]:
     """For each tool call: its refusal, and how many times it re-checked live authority."""
     seen: dict[str, list[tuple[Any, int]]] = defaultdict(list)
     counter = {"checks": 0}
-    operate = InvestigationToolGateway._operate
+    operate: Any = InvestigationToolGateway._operate
     check = InvestigationToolGateway._check_authority
 
     def counting_check(self: Any) -> None:
@@ -1510,15 +1521,7 @@ def test_every_tool_that_runs_rechecks_live_authority_first(
                     "items": items,
                 },
             )
-            decided = wave["wave_id"]
-            _until(
-                client,
-                flow.id,
-                lambda body, seen=decided: (
-                    body["status"] in ENDS
-                    or (body.get("sql_wave") or {}).get("wave_id") not in (None, seen)
-                ),
-            )
+            _until(client, flow.id, _settled_after(wave["wave_id"]))
 
     assert set(authority_checks) == set(get_args(GatewayTool)), "a tool was not exercised"
     for tool, calls in authority_checks.items():
@@ -1540,7 +1543,8 @@ def test_honest_sql_runs_through_the_same_harness() -> None:
 def test_the_unmutated_plan_is_proposed() -> None:
     proposal = v2_proposal(_mutated(lambda _raw: None))
     view = proposal.state()
-    assert view.plan is not None and view.proposal_record.outcome == "proposed"
+    assert view.plan is not None and view.proposal_record is not None
+    assert view.proposal_record.outcome == "proposed"
     assert view.status is not InvestigationStatus.PLAN_INVALID
 
 
