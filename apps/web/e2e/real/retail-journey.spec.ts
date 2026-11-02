@@ -156,7 +156,7 @@ test("demo ingestion goes through schema review; data questions wait for confirm
   await expect(samples.getByRole("button", { name: REGION })).toBeDisabled();
   // Nothing model-backed is enabled until the data-sharing notice is accepted.
   await expect(samples.getByRole("button", { name: RETURN_RULE })).toBeDisabled();
-  await page.getByRole("button", { name: "I understand, enable Gemini" }).click();
+  await page.getByRole("button", { name: "Accept this notice for Gemini" }).click();
   await expect(samples.getByRole("button", { name: RETURN_RULE })).toBeEnabled();
   await expect(samples.getByRole("button", { name: REGION })).toBeDisabled();
 

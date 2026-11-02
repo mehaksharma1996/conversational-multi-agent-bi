@@ -29,6 +29,7 @@ from src.llm.base import LLMResponse
 from src.llm.gemini_client import GeminiClient
 from src.orchestration import tool_gateway
 from src.orchestration.tool_gateway import (
+    SCRIPTED_EXECUTION_ADMISSION,
     AttemptToken,
     BeginAttempt,
     ExecuteSQL,
@@ -225,6 +226,7 @@ def _harness(
         resolver=NoDocuments(),  # document research is not under test here
         llm_client=llm,
         max_input_tokens_per_call=MAX_INPUT,
+        scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         table_resolver=tables,
         policy_criteria=criteria,
         sql_executor=executor,

@@ -664,10 +664,72 @@
         "title": "ColumnProfileResponse",
         "type": "object"
       },
+      "ConsentNoticeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "description": "Identifies this exact notice and recipient list.",
+            "title": "Digest",
+            "type": "string"
+          },
+          "recipients": {
+            "description": "Every external recipient accepting this notice would authorize.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Recipients",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/ConsentNoticeSectionResponse"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "title",
+          "sections",
+          "recipients",
+          "digest"
+        ],
+        "title": "ConsentNoticeResponse",
+        "type": "object"
+      },
+      "ConsentNoticeSectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "heading": {
+            "title": "Heading",
+            "type": "string"
+          }
+        },
+        "required": [
+          "heading",
+          "body"
+        ],
+        "title": "ConsentNoticeSectionResponse",
+        "type": "object"
+      },
       "ConsentResponse": {
         "additionalProperties": false,
         "properties": {
           "accepted": {
+            "description": "Whether an acceptance of a recognized notice is in force.",
             "title": "Accepted",
             "type": "boolean"
           },
@@ -683,12 +745,29 @@
             ],
             "title": "Accepted At"
           },
+          "can_manage": {
+            "description": "Whether this caller holds `workspace:admin`, so may accept or withdraw.",
+            "title": "Can Manage",
+            "type": "boolean"
+          },
           "data_recipients": {
+            "description": "The recipients the consent in force really authorizes.",
             "items": {
               "type": "string"
             },
             "title": "Data Recipients",
             "type": "array"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConsentNoticeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The current notice, or null when this server shares data with no recipient."
           },
           "notice_version": {
             "anyOf": [
@@ -701,9 +780,38 @@
             ],
             "title": "Notice Version"
           },
+          "questions_enabled": {
+            "description": "Whether the consent in force covers every recipient of model-backed questions.",
+            "title": "Questions Enabled",
+            "type": "boolean"
+          },
           "required": {
+            "description": "Whether this server would send data to any recipient.",
             "title": "Required",
             "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "not_required",
+              "missing",
+              "current",
+              "stale",
+              "withdrawn"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
           },
           "workspace_id": {
             "title": "Workspace Id",
@@ -714,6 +822,9 @@
           "workspace_id",
           "required",
           "accepted",
+          "status",
+          "questions_enabled",
+          "can_manage",
           "notice_version",
           "accepted_at"
         ],
@@ -727,6 +838,20 @@
             "const": true,
             "title": "Accepted",
             "type": "boolean"
+          },
+          "notice_digest": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `digest` of the notice the client displayed. The request is refused unless it is the notice this server would serve now, recipients included. Required for every version except the legacy `2026-09`, which can never authorize OpenAI.",
+            "title": "Notice Digest"
           },
           "notice_version": {
             "default": "2026-09",
@@ -7702,6 +7827,264 @@
       }
     },
     "/api/v1/workspaces/{workspace_id}/consent": {
+      "delete": {
+        "description": "Withdraws the workspace's consent for every recipient. Idempotent. No new model request starts after a check that observes it; a request already sent is not recalled.",
+        "operationId": "withdraw_consent_api_v1_workspaces__workspace_id__consent_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Withdraw Consent",
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "get": {
+        "description": "The workspace's consent status and the current server-owned notice, including every external recipient accepting it would authorize. Accepting a notice activates nothing.",
+        "operationId": "read_consent_api_v1_workspaces__workspace_id__consent_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Read Consent",
+        "tags": [
+          "workspaces"
+        ]
+      },
       "put": {
         "operationId": "accept_gemini_consent_api_v1_workspaces__workspace_id__consent_put",
         "parameters": [

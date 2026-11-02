@@ -28,9 +28,15 @@ failure with a code-only refusal:
 Only then does the tool run. Its model calls go through ``_AdmittedLLMClient``: one logical call
 per reservation, a prompt whose exact token count (from the adapter, for the complete request) is
 within the input cap before anything is sent, the envelope's output cap sent with the request, and
-a provider-call meter. No existing provider client is an adapter (``src/llm/bounded.py`` says
-why), so with them every model-executing operation is refused with ``metering_unbounded`` before
-any resource is resolved or budget reserved.
+a provider-call meter. A ``DeadlineBoundedModelAdapter`` is counted and called with the execution
+ledger's remaining deadline and the run's cancellation token, never through ``generate_once``, and
+its result is classified like planning's (ADR 0024 Amendment 11, PROD-1 S3): an answer after the
+deadline, an unconfirmed termination, an unenforced bound, or an unrequested cancellation is
+``metering_violation``; a confirmed requested cancellation is ``cancelled``; a confirmed provider
+deadline is ``budget_exhausted``. A plain ``BoundedModelAdapter`` (no deadline support) keeps the
+legacy call, bounded only by its own transport. No existing provider client is an adapter
+(``src/llm/bounded.py`` says why), so with them every model-executing operation is refused with
+``metering_unbounded`` before any resource is resolved or budget reserved.
 
 The retrieval and the model call are reserved separately. Whatever happens next (success, no
 relevant passage, provider failure, a meter fault, cancellation) both are settled in ``finally``,
@@ -168,7 +174,7 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from numbers import Integral, Real
-from typing import Annotated, Any, Literal, Protocol, get_args
+from typing import Annotated, Any, Literal, NoReturn, Protocol, cast, final, get_args
 
 import numpy as np
 import pandas as pd
@@ -231,6 +237,7 @@ from packages.investigation.gateway import (
     InvestigationAuthority,
     MeteringUnbounded,
     ProviderEnvelope,
+    ReviewedExecutionEvidence,
     WallClock,
     check_authority,
     check_binding,
@@ -283,7 +290,14 @@ from src.agents.rag_agent import RAGAgentError
 from src.agents.sql_agent import execute_sql
 from src.documents.retriever import RetrievalResult, Retriever
 from src.llm.base import LLMConfigurationError, LLMGenerationError, LLMResponse
-from src.llm.bounded import BoundedModelAdapter
+from src.llm.bounded import (
+    BoundedModelAdapter,
+    DeadlineBoundedModelAdapter,
+    DeadlineModelResult,
+    DeadlineTermination,
+    PlanningDeadline,
+    admit_execution_adapter,
+)
 from src.llm.observability import MeterHealth, meter_provider_calls
 from src.orchestration.document_research import (
     DEFAULT_TOP_K,
@@ -618,16 +632,63 @@ class _CallMeter:
         self.served.append((provider, model))
 
 
+@final
+class ScriptedExecutionAdmission:
+    """Test and scripted-evaluation only: admit an unreviewed scripted ``BoundedModelAdapter``.
+
+    PROD-1 S5b (ADR 0024 Amendment 11, item 3) makes reviewed, deadline-bounded admission the
+    only production path. The deterministic suites drive the real gateway with scripted adapters
+    that have no reviewed capability, so they opt in with the single instance
+    ``SCRIPTED_EXECUTION_ADMISSION``. No production module may reference that instance
+    (``tests/test_investigation_boundaries.py`` enforces it), and the gateway accepts only it.
+    """
+
+    __slots__ = ()
+    _created = False
+
+    def __init__(self) -> None:
+        if ScriptedExecutionAdmission._created:
+            raise TypeError("SCRIPTED_EXECUTION_ADMISSION is the only instance.")
+        ScriptedExecutionAdmission._created = True
+
+    def __repr__(self) -> str:
+        return "SCRIPTED_EXECUTION_ADMISSION"
+
+
+SCRIPTED_EXECUTION_ADMISSION = ScriptedExecutionAdmission()
+
+
 def admitted_model_adapter(
-    client: object, envelope: ProviderEnvelope
+    client: object,
+    envelope: ProviderEnvelope,
+    *,
+    evidence: ReviewedExecutionEvidence | None = None,
+    scripted: ScriptedExecutionAdmission | None = None,
 ) -> BoundedModelAdapter | None:
     """``client`` if the gateway can enforce its limits for ``envelope``; otherwise ``None``.
 
-    The client must be a ``BoundedModelAdapter`` whose declared bound is the envelope's only
-    member, with one attempt, an output cap, and bounded input. Anything else (an existing provider
-    client, a wrapper, a fallback chain, or an envelope that under- or over-declares the adapter)
-    is unsupported: model-executing operations are refused with ``metering_unbounded``.
+    Production (PROD-1 S5b): the client must be a ``DeadlineBoundedModelAdapter`` admitted by
+    ``admit_execution_adapter`` against the reviewed capability in ``evidence`` that covers the
+    envelope's only member exactly. Without evidence nothing is admitted, so a plain
+    ``BoundedModelAdapter`` (no deadline, no review) is refused with ``metering_unbounded``.
+
+    ``scripted`` is the test-only opt-in (``ScriptedExecutionAdmission``). It keeps the earlier
+    structural rule for scripted adapters: a ``BoundedModelAdapter`` whose declared bound is the
+    envelope's only member, with one attempt, an output cap, and bounded input. Anything else (an
+    existing provider client, a wrapper, a fallback chain, or an envelope that under- or
+    over-declares the adapter) is refused either way.
     """
+    if evidence is not None:
+        if type(evidence) is not ReviewedExecutionEvidence or len(envelope.members) != 1:
+            return None
+        try:
+            return admit_execution_adapter(
+                client, envelope=envelope, capability=evidence.covering(envelope.members[0])
+            )
+        except MeteringUnbounded:
+            return None
+    if scripted is not SCRIPTED_EXECUTION_ADMISSION:
+        return None
     if not isinstance(client, BoundedModelAdapter):
         return None
     try:
@@ -658,11 +719,27 @@ class _AdmittedLLMClient:
     """
 
     def __init__(
-        self, adapter: BoundedModelAdapter, *, max_input_tokens: int, max_output_tokens: int
+        self,
+        adapter: BoundedModelAdapter,
+        *,
+        max_input_tokens: int,
+        max_output_tokens: int,
+        remaining: Callable[[], float],
+        cancellation: CancellationToken,
+        authorize: Callable[[], None],
     ) -> None:
         self._adapter = adapter
+        # PROD-1 S5a: the gateway's full authority check (consent re-read included), run again
+        # immediately before each request that would send the prompt (the count and the call).
+        self._authorize = authorize
         self._max_input_tokens = max_input_tokens
+        self._remaining = remaining  # the execution ledger's remaining wall clock
+        self._cancellation = cancellation
         self.max_output_tokens = max_output_tokens
+        # Amendment 11: a provider-confirmed stop without an answer (``cancelled`` or
+        # ``budget_exhausted``), and a deadline result that breaks the contract.
+        self.terminated = False
+        self.breach = False
         self.provider = adapter.bound.provider
         self.model = adapter.bound.model
         self.meter = _CallMeter()
@@ -689,30 +766,118 @@ class _AdmittedLLMClient:
         self.entered = True
         if type(prompt) is not str:
             raise _Refused(RefusalCode.METERING_UNBOUNDED)
+        adapter = self._adapter
+        result: DeadlineModelResult | None = None
         try:
             with meter_provider_calls(self.meter) as health:
                 self.health = health
+                self._authorize()
                 try:
-                    counted = self._adapter.count_input_tokens(prompt)
+                    if isinstance(adapter, DeadlineBoundedModelAdapter):
+                        count_deadline = self._deadline()
+                        counted = adapter.count_input_tokens_within(prompt, deadline=count_deadline)
+                    else:
+                        counted = adapter.count_input_tokens(prompt)
+                except _Refused:
+                    raise
                 except Exception:
+                    if isinstance(adapter, DeadlineBoundedModelAdapter):
+                        self._deadline()  # a count cut short by the deadline is the deadline's
                     raise _Refused(RefusalCode.METERING_UNBOUNDED) from None
                 if type(counted) is not int or not 1 <= counted <= self._max_input_tokens:
                     self.over_input = type(counted) is int and counted > self._max_input_tokens
                     raise _Refused(RefusalCode.METERING_UNBOUNDED)  # before the provider sees it
                 self.counted = counted
-                self.calls += 1  # the invocation marker: set before the provider is entered
-                response = self._adapter.generate_once(
-                    prompt, max_output_tokens=self.max_output_tokens
-                )
+                self._authorize()
+                if isinstance(adapter, DeadlineBoundedModelAdapter):
+                    if self._cancel_requested():
+                        raise _Refused(RefusalCode.CANCELLED)
+                    deadline = self._deadline()
+                    self.calls += 1  # the invocation marker: set before the provider is entered
+                    result = adapter.generate_once_with_deadline(
+                        prompt,
+                        max_output_tokens=self.max_output_tokens,
+                        deadline=deadline,
+                        cancellation=self._cancellation,
+                    )
+                    response: object = (
+                        result.response if type(result) is DeadlineModelResult else None
+                    )
+                else:
+                    self.calls += 1  # the invocation marker: set before the provider is entered
+                    response = adapter.generate_once(
+                        prompt, max_output_tokens=self.max_output_tokens
+                    )
         except _Refused:
             raise
         except BaseException:
             self.raised = True
             raise
-        self.answered_as = (getattr(response, "provider", None), getattr(response, "model", None))
+        if response is not None:
+            self.answered_as = (
+                getattr(response, "provider", None),
+                getattr(response, "model", None),
+            )
+        if isinstance(adapter, DeadlineBoundedModelAdapter):
+            self._classify(result)
         if self.answered_as != (self.provider, self.model):
+            self.breach = True
             raise _Refused(RefusalCode.METERING_VIOLATION)  # never use another model's answer
-        return response
+        return cast(LLMResponse, response)  # the legacy path's contract, as before
+
+    def _deadline(self) -> PlanningDeadline:
+        """The execution ledger's remaining time, never extended; refuses once it is spent."""
+        try:
+            return PlanningDeadline(self._remaining())
+        except BudgetExhaustedError:
+            raise _Refused(RefusalCode.BUDGET_EXHAUSTED) from None
+        except BudgetClosedError:
+            raise _Refused(RefusalCode.BUDGET_CLOSED) from None
+
+    def _cancel_requested(self) -> bool:
+        try:
+            return self._cancellation.cancel_requested is not False
+        except Exception:  # an unreadable token cannot prove the run may continue
+            return True
+
+    def _classify(self, result: object) -> None:
+        """Amendment 11: accept a completed in-contract answer, or refuse with a fixed code."""
+        if type(result) is not DeadlineModelResult:
+            self._breach()  # ``NoReturn``: ``result`` is a ``DeadlineModelResult`` below
+        requested = self._cancel_requested()
+        if result.termination is DeadlineTermination.COMPLETED:
+            try:
+                self._remaining()
+            except BudgetExhaustedError:
+                self._breach()  # answered after the original deadline
+            except BudgetClosedError:
+                raise _Refused(RefusalCode.BUDGET_CLOSED) from None
+            if (
+                not result.termination_confirmed
+                or not result.provider_execution_bound_enforced
+                or type(result.response) is not LLMResponse
+                or type(result.response.text) is not str
+            ):
+                self._breach()
+            if requested:
+                raise _Refused(RefusalCode.CANCELLED)  # a late answer to a cancelled call
+            return
+        if not result.termination_confirmed:
+            self._breach()  # a local stop is not a provider stop
+        if result.termination is DeadlineTermination.PROVIDER_CANCELLED and requested:
+            self.terminated = True
+            raise _Refused(RefusalCode.CANCELLED)
+        if (
+            result.termination is DeadlineTermination.PROVIDER_DEADLINE_ENFORCED
+            and result.provider_execution_bound_enforced
+        ):
+            self.terminated = True
+            raise _Refused(RefusalCode.BUDGET_EXHAUSTED)
+        self._breach()  # an unrequested cancellation, or an unenforced deadline
+
+    def _breach(self) -> NoReturn:
+        self.breach = True
+        raise _Refused(RefusalCode.METERING_VIOLATION)
 
 
 class _BoundedRetriever:
@@ -854,8 +1019,14 @@ class InvestigationToolGateway:
         fingerprint_key: bytes | None = None,
         retry_categories: frozenset[str] | None = None,
         numeric_fields: frozenset[str] = frozenset(),
+        execution_evidence: ReviewedExecutionEvidence | None = None,
+        scripted_admission: ScriptedExecutionAdmission | None = None,
     ) -> None:
         """``llm_client`` that is not an admitted adapter leaves model-executing tools disabled.
+
+        Admission (PROD-1 S5b, ``admitted_model_adapter``) needs ``execution_evidence`` covering
+        the envelope's member and a deadline-bounded adapter. ``scripted_admission`` is accepted
+        only as the test-only ``SCRIPTED_EXECUTION_ADMISSION``.
 
         Without a ``table_resolver`` no SQL task can resolve a table (``resource_absent``).
         ``fingerprint_key`` keys the SQL fingerprints recorded in state; by default it is random
@@ -878,6 +1049,16 @@ class InvestigationToolGateway:
             or not all(type(category) is str for category in retry_categories)
         ):
             raise TypeError("retry_categories must be a frozenset of category names.")
+        if execution_evidence is not None and type(execution_evidence) is not (
+            ReviewedExecutionEvidence
+        ):
+            raise TypeError("execution_evidence must be ReviewedExecutionEvidence.")
+        if scripted_admission is not None and scripted_admission is not (
+            SCRIPTED_EXECUTION_ADMISSION
+        ):
+            raise TypeError("scripted_admission must be SCRIPTED_EXECUTION_ADMISSION.")
+        self._execution_evidence = execution_evidence
+        self._scripted_admission = scripted_admission
         self._authority = authority
         self._live = live
         self._clock = clock
@@ -1335,7 +1516,10 @@ class InvestigationToolGateway:
         client = _AdmittedLLMClient(
             adapter,
             max_input_tokens=self._max_input_tokens,
+            remaining=self._ledger.remaining_wall_clock,
+            cancellation=self._cancellation,
             max_output_tokens=model_request.output_tokens,
+            authorize=self._check_authority,
         )
         text: str | None = None
         failure: str | None = None
@@ -1556,7 +1740,12 @@ class InvestigationToolGateway:
             )
         except MeteringUnbounded:
             raise _Refused(RefusalCode.METERING_UNBOUNDED) from None
-        adapter = admitted_model_adapter(self._llm_client, envelope)
+        adapter = admitted_model_adapter(
+            self._llm_client,
+            envelope,
+            evidence=self._execution_evidence,
+            scripted=self._scripted_admission,
+        )
         if adapter is None:
             raise _Refused(RefusalCode.METERING_UNBOUNDED)  # limits this gateway cannot enforce
         return adapter, model_request
@@ -1650,7 +1839,10 @@ class InvestigationToolGateway:
         client = _AdmittedLLMClient(
             adapter,
             max_input_tokens=self._max_input_tokens,
+            remaining=self._ledger.remaining_wall_clock,
+            cancellation=self._cancellation,
             max_output_tokens=model_request.output_tokens,  # one member, one attempt: its cap
+            authorize=self._check_authority,
         )
         bounded = _BoundedRetriever(retriever, query=query, limit=limit)
         outcome: DocumentResearchOutcome | None = None
@@ -1762,7 +1954,10 @@ class InvestigationToolGateway:
         client = _AdmittedLLMClient(
             adapter,
             max_input_tokens=self._max_input_tokens,
+            remaining=self._ledger.remaining_wall_clock,
+            cancellation=self._cancellation,
             max_output_tokens=model_request.output_tokens,
+            authorize=self._check_authority,
         )
         service = GuardedSQLService(table, client, executor=_refusing_executor)
         prompt = ""
@@ -2194,11 +2389,15 @@ class InvestigationToolGateway:
             and report.retries == 0
             and report.prompt_tokens is not None
             and report.output_tokens is not None
-            and meter.served == [identity]
-            and client.answered_as == identity
+            and (
+                meter.served in ([], [identity])  # a confirmed stop need not name the server
+                if client.terminated
+                else meter.served == [identity] and client.answered_as == identity
+            )
         )
         violation = (
-            client.health is None
+            client.breach  # a deadline result that breaks the contract (Amendment 11)
+            or client.health is None
             or client.health.faulted
             or len(reports) > 1
             or any(r.retries for r in reports)
@@ -2206,7 +2405,8 @@ class InvestigationToolGateway:
             or served_elsewhere
             or over_input
             or over_output
-            or (not client.raised and not complete)  # a success must be completely reported
+            # A success must be completely reported; a confirmed stop may lack usage (unknown).
+            or (not client.raised and not client.terminated and not complete)
         )
         if complete and report is not None and not violation:
             code = self._charge(

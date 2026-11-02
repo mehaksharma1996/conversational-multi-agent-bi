@@ -100,15 +100,55 @@ class WorkspaceOverviewResponse(StrictModel):
 class ConsentUpdateRequest(StrictModel):
     accepted: Literal[True]
     notice_version: str = Field(default="2026-09", min_length=1, max_length=32)
+    notice_digest: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "The `digest` of the notice the client displayed. The request is refused unless it is "
+            "the notice this server would serve now, recipients included. Required for every "
+            "version except the legacy `2026-09`, which can never authorize OpenAI."
+        ),
+    )
+
+
+class ConsentNoticeSectionResponse(StrictModel):
+    heading: str
+    body: str
+
+
+class ConsentNoticeResponse(StrictModel):
+    version: str
+    title: str
+    sections: list[ConsentNoticeSectionResponse]
+    recipients: list[str] = Field(
+        description="Every external recipient accepting this notice would authorize."
+    )
+    digest: str = Field(description="Identifies this exact notice and recipient list.")
 
 
 class ConsentResponse(StrictModel):
     workspace_id: str
-    required: bool
-    accepted: bool
+    required: bool = Field(description="Whether this server would send data to any recipient.")
+    accepted: bool = Field(description="Whether an acceptance of a recognized notice is in force.")
+    status: Literal["not_required", "missing", "current", "stale", "withdrawn"]
+    questions_enabled: bool = Field(
+        description="Whether the consent in force covers every recipient of model-backed questions."
+    )
+    can_manage: bool = Field(
+        description="Whether this caller holds `workspace:admin`, so may accept or withdraw."
+    )
     notice_version: str | None
     accepted_at: datetime | None
-    data_recipients: list[str] = Field(default_factory=list)
+    withdrawn_at: datetime | None = None
+    data_recipients: list[str] = Field(
+        default_factory=list,
+        description="The recipients the consent in force really authorizes.",
+    )
+    notice: ConsentNoticeResponse | None = Field(
+        default=None,
+        description="The current notice, or null when this server shares data with no recipient.",
+    )
 
 
 class TabularUploadResponse(StrictModel):

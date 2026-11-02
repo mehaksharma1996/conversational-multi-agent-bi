@@ -1,10 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import {
   acceptConsent,
+  ApiClientError,
+  getConsent,
   askQuestion,
   confirmSchema,
   createConversation,
@@ -19,6 +21,9 @@ import {
   uploadTabular,
 } from "./api/client";
 import {
+  consentCurrentFixture,
+  consentMissingFixture,
+  consentWithdrawnFixture,
   conversationFixture,
   documentCollectionFixture,
   messageFixture,
@@ -27,6 +32,7 @@ import {
   uploadFixture,
   workspaceFixture,
 } from "./test/fixtures";
+import { readyComposer } from "./test/composer";
 
 vi.mock("./components/PlotlyChart", () => ({ default: () => <div data-testid="plotly-chart" /> }));
 vi.mock("./api/client", async (importOriginal) => {
@@ -43,12 +49,15 @@ vi.mock("./api/client", async (importOriginal) => {
     confirmSchema: vi.fn(),
     uploadDocuments: vi.fn(),
     acceptConsent: vi.fn(),
+    getConsent: vi.fn(),
+    withdrawConsent: vi.fn(),
     createConversation: vi.fn(),
     askQuestion: vi.fn(),
     decideSqlApproval: vi.fn(),
   };
 });
 
+const REJECT = "Reject SQL";
 const csvFile = () => new File(["amount,merchant\n25,North"], "transactions.csv", { type: "text/csv" });
 const pdfFile = () => new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" });
 
@@ -62,7 +71,7 @@ async function startAsk(user: UserEvent) {
   await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
   await screen.findByText("Indexed 1 document(s)", { exact: false });
   await goTo(user, /Ask/);
-  await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+  await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
 }
 
 describe("unsaved workflow drafts across section navigation", () => {
@@ -79,7 +88,11 @@ describe("unsaved workflow drafts across section navigation", () => {
     vi.mocked(createDataset).mockResolvedValue(reviewDatasetFixture);
     vi.mocked(confirmSchema).mockResolvedValue(readyDatasetFixture);
     vi.mocked(uploadDocuments).mockResolvedValue(documentCollectionFixture);
-    vi.mocked(acceptConsent).mockResolvedValue();
+    vi.mocked(getConsent).mockResolvedValue(consentMissingFixture);
+    vi.mocked(acceptConsent).mockImplementation(() => {
+      vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
+      return Promise.resolve(consentCurrentFixture);
+    });
     vi.mocked(createConversation).mockResolvedValue(conversationFixture);
     vi.mocked(askQuestion).mockResolvedValue(messageFixture);
     vi.mocked(decideSqlApproval).mockResolvedValue(messageFixture);
@@ -231,6 +244,132 @@ describe("unsaved workflow drafts across section navigation", () => {
     expect(await screen.findByText("1 question")).toBeInTheDocument();
   });
 
+  describe("when a frame arrives late", () => {
+    const frames: FrameRequestCallback[] = [];
+    const flushFrames = () => act(() => frames.splice(0).forEach((frame) => frame(0)));
+
+    beforeEach(() => {
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => frames.push(frame));
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      frames.length = 0;
+    });
+
+    it("sends the whole question, once, when a focus move lands mid-typing", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText("Local workspace ready");
+      await startAsk(user);
+      const box = await readyComposer();
+
+      await user.click(box);
+      await user.keyboard("W");
+      flushFrames(); // the section and consent focus moves, both due since before the typing started
+      await user.keyboard("hich merchant?");
+
+      expect(box).toHaveFocus();
+      expect(box).toHaveValue("Which merchant?");
+      await user.click(screen.getByRole("button", { name: "Ask workbench" }));
+      await waitFor(() => expect(askQuestion).toHaveBeenCalledTimes(1));
+      expect(askQuestion).toHaveBeenCalledWith(conversationFixture.id, "Which merchant?", false);
+    });
+
+    it("keeps a pasted question when a focus move lands after the paste", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText("Local workspace ready");
+      await startAsk(user);
+      const box = await readyComposer();
+
+      await user.click(box);
+      await user.paste(messageFixture.question);
+      flushFrames();
+
+      expect(box).toHaveFocus();
+      expect(box).toHaveValue(messageFixture.question);
+    });
+
+    it("still moves focus to the consent heading when nothing else claimed it", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText("Local workspace ready");
+      await goTo(user, /Ask/);
+      flushFrames();
+      await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
+      await screen.findByText("Accepted");
+      flushFrames();
+
+      expect(screen.getByRole("heading", { name: "Workspace data-sharing consent" })).toHaveFocus();
+    });
+  });
+
+  describe("a pending SQL approval when consent changes", () => {
+    const pending = { ...messageFixture, status: "pending_approval" as const, answer: "", rows: null };
+
+    async function toPendingApproval(user: UserEvent) {
+      vi.mocked(askQuestion).mockResolvedValueOnce(pending);
+      render(<App />);
+      await screen.findByText("Local workspace ready");
+      await startAsk(user);
+      await user.type(await readyComposer(), messageFixture.question);
+      await user.click(screen.getByRole("button", { name: "Ask workbench" }));
+      await screen.findByRole("button", { name: "Approve SQL" });
+    }
+
+    it("can still be rejected when consent cannot be read", async () => {
+      const user = userEvent.setup();
+      await toPendingApproval(user);
+      vi.mocked(getConsent).mockRejectedValue(new ApiClientError("Server unavailable.", "network_error"));
+      await goTo(user, /Overview/);
+      await goTo(user, /Ask/);
+      await screen.findByText(/could not be read/);
+
+      const reject = screen.getByRole("button", { name: REJECT });
+      expect(reject).toBeEnabled();
+      await user.click(reject);
+      await waitFor(() => expect(decideSqlApproval).toHaveBeenCalledWith(pending.id, "reject", null));
+    });
+
+    it("can still be rejected after consent is withdrawn", async () => {
+      const user = userEvent.setup();
+      await toPendingApproval(user);
+      vi.mocked(getConsent).mockResolvedValue(consentWithdrawnFixture);
+      await goTo(user, /Overview/);
+      await goTo(user, /Ask/);
+      await screen.findByText("Withdrawn");
+
+      await user.click(screen.getByRole("button", { name: REJECT }));
+      await waitFor(() => expect(decideSqlApproval).toHaveBeenCalledWith(pending.id, "reject", null));
+    });
+
+    it("stays pending when the server refuses an approval for withdrawn consent", async () => {
+      const user = userEvent.setup();
+      await toPendingApproval(user);
+      vi.mocked(listMessages).mockResolvedValue([pending]); // what the server reports after refusing
+      vi.mocked(decideSqlApproval).mockRejectedValueOnce(
+        new ApiClientError("Accept the notice first.", "gemini_consent_required", null, 409),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Approve SQL" }));
+
+      await waitFor(() => expect(decideSqlApproval).toHaveBeenCalledTimes(1));
+      expect(await screen.findByRole("button", { name: "Approve SQL" })).toBeEnabled();
+      expect(screen.getByText("1 question · 1 awaiting approval")).toBeInTheDocument();
+    });
+
+    it("runs once when the server allows it", async () => {
+      const user = userEvent.setup();
+      await toPendingApproval(user);
+
+      await user.click(screen.getByRole("button", { name: "Approve SQL" }));
+
+      await waitFor(() => expect(decideSqlApproval).toHaveBeenCalledTimes(1));
+      expect(decideSqlApproval).toHaveBeenCalledWith(pending.id, "approve", null);
+    });
+  });
+
   it("clears every draft when the workspace is reset", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -241,7 +380,7 @@ describe("unsaved workflow drafts across section navigation", () => {
     await goTo(user, /Documents/);
     await user.upload(screen.getByLabelText("PDF documents"), pdfFile());
     await goTo(user, /Ask/);
-    await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+    await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
 
     await user.click(screen.getByRole("button", { name: "Reset workspace" }));
     await user.click(await screen.findByRole("button", { name: "Delete workspace" }));

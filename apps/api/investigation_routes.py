@@ -54,6 +54,10 @@ EXPLANATIONS: dict[str, str] = {
         "No model is configured that can run investigations within enforced limits."
     ),
     "job_queue_full": "The service was too busy to start this investigation.",
+    "authority_revoked": (
+        "This investigation stopped because the workspace's data-sharing consent or access "
+        "changed. Nothing further was sent to a model."
+    ),
 }
 _GENERIC = "This investigation ended without a result."
 

@@ -630,11 +630,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Read Consent
+         * @description The workspace's consent status and the current server-owned notice, including every external recipient accepting it would authorize. Accepting a notice activates nothing.
+         */
+        get: operations["read_consent_api_v1_workspaces__workspace_id__consent_get"];
         /** Accept Gemini Consent */
         put: operations["accept_gemini_consent_api_v1_workspaces__workspace_id__consent_put"];
         post?: never;
-        delete?: never;
+        /**
+         * Withdraw Consent
+         * @description Withdraws the workspace's consent for every recipient. Idempotent. No new model request starts after a check that observes it; a request already sent is not recalled.
+         */
+        delete: operations["withdraw_consent_api_v1_workspaces__workspace_id__consent_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1054,18 +1062,72 @@ export interface components {
             /** Unique Ratio */
             unique_ratio: number;
         };
+        /** ConsentNoticeResponse */
+        ConsentNoticeResponse: {
+            /**
+             * Digest
+             * @description Identifies this exact notice and recipient list.
+             */
+            digest: string;
+            /**
+             * Recipients
+             * @description Every external recipient accepting this notice would authorize.
+             */
+            recipients: string[];
+            /** Sections */
+            sections: components["schemas"]["ConsentNoticeSectionResponse"][];
+            /** Title */
+            title: string;
+            /** Version */
+            version: string;
+        };
+        /** ConsentNoticeSectionResponse */
+        ConsentNoticeSectionResponse: {
+            /** Body */
+            body: string;
+            /** Heading */
+            heading: string;
+        };
         /** ConsentResponse */
         ConsentResponse: {
-            /** Accepted */
+            /**
+             * Accepted
+             * @description Whether an acceptance of a recognized notice is in force.
+             */
             accepted: boolean;
             /** Accepted At */
             accepted_at: string | null;
-            /** Data Recipients */
+            /**
+             * Can Manage
+             * @description Whether this caller holds `workspace:admin`, so may accept or withdraw.
+             */
+            can_manage: boolean;
+            /**
+             * Data Recipients
+             * @description The recipients the consent in force really authorizes.
+             */
             data_recipients?: string[];
+            /** @description The current notice, or null when this server shares data with no recipient. */
+            notice?: components["schemas"]["ConsentNoticeResponse"] | null;
             /** Notice Version */
             notice_version: string | null;
-            /** Required */
+            /**
+             * Questions Enabled
+             * @description Whether the consent in force covers every recipient of model-backed questions.
+             */
+            questions_enabled: boolean;
+            /**
+             * Required
+             * @description Whether this server would send data to any recipient.
+             */
             required: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_required" | "missing" | "current" | "stale" | "withdrawn";
+            /** Withdrawn At */
+            withdrawn_at?: string | null;
             /** Workspace Id */
             workspace_id: string;
         };
@@ -1076,6 +1138,11 @@ export interface components {
              * @constant
              */
             accepted: true;
+            /**
+             * Notice Digest
+             * @description The `digest` of the notice the client displayed. The request is refused unless it is the notice this server would serve now, recipients included. Required for every version except the legacy `2026-09`, which can never authorize OpenAI.
+             */
+            notice_digest?: string | null;
             /**
              * Notice Version
              * @default 2026-09
@@ -5429,6 +5496,109 @@ export interface operations {
             };
         };
     };
+    read_consent_api_v1_workspaces__workspace_id__consent_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     accept_gemini_consent_api_v1_workspaces__workspace_id__consent_put: {
         parameters: {
             query?: never;
@@ -5443,6 +5613,109 @@ export interface operations {
                 "application/json": components["schemas"]["ConsentUpdateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    withdraw_consent_api_v1_workspaces__workspace_id__consent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

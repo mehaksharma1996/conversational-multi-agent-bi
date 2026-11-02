@@ -18,6 +18,7 @@ from apps.api.content_store import WorkspaceContentStore
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
+from apps.api.investigation_providers import select_investigation_adapters
 from apps.api.investigation_routes import router as investigation_router
 from apps.api.investigation_store import InvestigationRecordStore
 from apps.api.investigations import InvestigationAdapters, InvestigationRuntime
@@ -75,6 +76,7 @@ def create_app(
     active_settings = settings or get_settings()
     active_settings.validate_identity_configuration()
     active_settings.validate_document_index_configuration()
+    active_settings.validate_investigation_model_configuration()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -171,8 +173,13 @@ def create_app(
         metadata=application.state.repository.metadata_store,
         encryption_key=application.state.repository.encryption_key,
     )
-    # Trusted provider configuration comes only from this factory's caller (tests inject scripted
-    # adapters); production fails closed until a reviewed bounded adapter exists.
+    # Trusted provider configuration comes from this factory's caller (tests inject scripted
+    # adapters) or else from server settings through the PROD-1 admission sequence, which admits
+    # nothing until a reviewed, released provider exists: production stays ``FailClosedAdapters``.
+    if investigation_adapters is None:
+        selection = select_investigation_adapters(active_settings)
+        investigation_adapters = selection.adapters
+        application.state.investigation_provider_decision = selection.decision
     application.state.investigations = InvestigationRuntime(
         enabled=active_settings.investigation_routing_enabled,
         repository=application.state.repository,

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { focusAsApplication } from "../workspace/focus";
 import { SECTION_COPY, type WorkbenchSection } from "./workbenchNavigation";
 
 interface NavigationItem {
@@ -135,22 +136,22 @@ export function WorkbenchShell({
   // Entering the phone layout hides the sidebar; move focus out before the browser drops it.
   useLayoutEffect(() => {
     if (sidebarHidden && sidebarRef.current?.contains(document.activeElement)) {
-      toggleRef.current?.focus();
+      focusAsApplication(toggleRef.current);
     }
   }, [sidebarHidden]);
 
   useEffect(() => {
     if (drawerOpen) {
       const sidebar = sidebarRef.current;
-      (
+      focusAsApplication(
         sidebar?.querySelector<HTMLElement>('[aria-current="page"]') ??
-        sidebar?.querySelector<HTMLElement>(FOCUSABLE)
-      )?.focus();
+          sidebar?.querySelector<HTMLElement>(FOCUSABLE),
+      );
       return;
     }
     if (restoreToggleFocus.current) {
       restoreToggleFocus.current = false;
-      toggleRef.current?.focus();
+      focusAsApplication(toggleRef.current);
     }
   }, [drawerOpen]);
 

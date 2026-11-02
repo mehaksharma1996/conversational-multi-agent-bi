@@ -313,6 +313,10 @@ class InvestigationApprovalService:
         """Revoke a live investigation's authority (a consent or role change, for example)."""
         self._stop(scope, revoke=True)
 
+    def stop_requested(self, scope: InvestigationScope) -> bool:
+        """True once the investigation was cancelled or revoked (or is unknown to this service)."""
+        return self._stopped(_key(scope))
+
     def status(self, scope: InvestigationScope) -> InvestigationStatus | None:
         """The decision-stage lifecycle status this service records, or ``None``."""
         with self._lock:

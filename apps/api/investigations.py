@@ -24,7 +24,8 @@ Lifecycle (decisions E1 to E9 in ``docs/agents/briefs/144-inv11-investigation-ap
 
 ``cancel`` cancels the job and the approval service's record; calls in flight finish and their
 results are discarded by the run (INV-5/INV-10). Production supplies no admissible model
-(``FailClosedAdapters``), so planning fails closed with ``metering_unbounded``.
+(``FailClosedAdapters``, chosen by ``apps.api.investigation_providers``), so planning fails closed
+with ``metering_unbounded``.
 
 In-process run objects are never persisted: after a restart, startup reconciliation has already
 made every live record ``interrupted`` (``apps/api/main.py``).
@@ -32,14 +33,16 @@ made every live record ``interrupted`` (``apps/api/main.py``).
 
 from __future__ import annotations
 
+import itertools
 import json
 import secrets
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from apps.api.consent_notices import effective_recipients
 from apps.api.investigation_store import (
     InvestigationConflictError,
     InvestigationRecord,
@@ -65,6 +68,7 @@ from packages.investigation.gateway import (
     InvestigationAuthority,
     PlanningAuthority,
     ProviderEnvelope,
+    ReviewedExecutionEvidence,
     ReviewedPlanningEvidence,
 )
 from packages.investigation.lifecycle import TRANSITIONS, InvestigationStatus, is_terminal
@@ -96,6 +100,7 @@ from src.orchestration.investigation_execution import (
     InvestigationExecutionRun,
 )
 from src.orchestration.investigation_proposal import InvestigationProposalRun
+from src.orchestration.tool_gateway import ScriptedExecutionAdmission
 from src.storage.sqlite_store import StoredTable
 
 S = InvestigationStatus
@@ -110,6 +115,10 @@ _JOB_FAILURE_EXPLANATIONS = {
     "investigation.execute": "execution_failed",
     "investigation.resume": "execution_failed",
 }
+
+# A resume job that finds the run held by another job, or already advanced past its pause, has
+# nothing to do: the job that holds or advanced the run owns the outcome (PROD-1 S5a).
+_RUN_HANDED_OFF = frozenset({"run_busy", "sql_approval_pending", "sql_approval_not_pending"})
 
 ErrorCode = Literal[
     "investigations_disabled",
@@ -148,11 +157,18 @@ class PlanningProvider:
 
 @dataclass(frozen=True)
 class ExecutionProvider:
-    """What the trusted configuration supplies for execution (INV-5 inputs)."""
+    """What the trusted configuration supplies for execution (INV-5 inputs).
+
+    PROD-1 S5b: a model call is admitted only with ``evidence`` (reviewed execution capability
+    covering the envelope's member) and a deadline-bounded ``llm_client``. ``scripted_admission``
+    exists for test configurations only; no production configuration sets it.
+    """
 
     llm_client: object | None
     envelope: ProviderEnvelope
     max_input_tokens_per_call: int = MAX_EXECUTION_INPUT_TOKENS
+    evidence: ReviewedExecutionEvidence | None = None
+    scripted_admission: ScriptedExecutionAdmission | None = None
 
 
 class InvestigationAdapters(Protocol):
@@ -185,12 +201,25 @@ class _SystemClock:
 
 
 class _WorkspaceAuthority:
-    """The live check: valid while the scope's workspace exists, is unexpired, and the epoch is
-    current. Raising (an unreadable repository) is ``authority_unavailable`` to every caller."""
+    """The live check: valid while the scope's workspace exists, is unexpired, the epoch is
+    current, and (PROD-1 S5a) the workspace's *current* consent still covers every recipient the
+    investigation's providers name. Raising (an unreadable repository) is
+    ``authority_unavailable`` to every caller.
 
-    def __init__(self, repository: LocalResourceRepository, clock: _SystemClock) -> None:
+    Consent is re-read from the same workspace record on every check, so withdrawing it (or a
+    stale, cleared, or tampered record) revokes authority at the next check: before the next
+    count, create, or gateway action. It cannot recall a request already sent.
+    """
+
+    def __init__(
+        self,
+        repository: LocalResourceRepository,
+        clock: _SystemClock,
+        recipients: Callable[[InvestigationScope], frozenset[str] | None],
+    ) -> None:
         self._repository = repository
         self._clock = clock
+        self._recipients = recipients
 
     def current(self, scope: InvestigationScope, epoch: int) -> AuthorityStatus:
         if epoch != AUTHORITY_EPOCH:
@@ -201,6 +230,9 @@ class _WorkspaceAuthority:
             return AuthorityStatus.REVOKED
         if workspace.expires_at <= self._clock.now():
             return AuthorityStatus.REVOKED
+        required = self._recipients(scope)
+        if required is None or not _consent(workspace).satisfies(required):
+            return AuthorityStatus.REVOKED  # an unknown investigation, or consent withdrawn
         return AuthorityStatus.VALID
 
 
@@ -233,10 +265,21 @@ class _DocumentResolver:
 
 
 def _consent(workspace: WorkspaceRecord) -> ConsentSnapshot:
+    """The stored consent, reduced to the recipients it really authorises (PROD-1 S4, S5d).
+
+    An older, stale, or hand-edited record therefore never authorises OpenAI, and a withdrawn or
+    unrecognised one authorises nobody.
+    """
+    version = workspace.consent_notice_version
     return ConsentSnapshot(
         accepted_at=workspace.consent_accepted_at,
-        notice_version=workspace.consent_notice_version,
-        recipients=tuple(workspace.consent_recipients),
+        notice_version=version,
+        recipients=effective_recipients(
+            version,
+            workspace.consent_accepted_at,
+            workspace.consent_withdrawn_at,
+            workspace.consent_recipients,
+        ),
     )
 
 
@@ -270,6 +313,16 @@ class _Live:
     run: InvestigationExecutionRun | None = None
     job_id: str | None = None
     registered: bool = False
+    # PROD-1 S5a: consent recipients of every provider this investigation was given, and the
+    # claims of admitted execute/resume jobs that have not yet settled (``_claim_run_job``).
+    recipients: frozenset[str] = frozenset()
+    run_jobs: set[int] = field(default_factory=set)
+    job_claim: int | None = None
+    stop_explanation: str | None = None  # why a revoked pause was closed (S5a)
+    # PROD-1 S5b: the investigation's one execution provider, resolved at plan approval so its
+    # consent recipients are checked there; the execute job uses this instance, never a new one.
+    execution: ExecutionProvider | None = None
+    execution_resolved: bool = False
 
 
 @dataclass(frozen=True)
@@ -330,12 +383,29 @@ class InvestigationRuntime:
         self._adapters = adapters or FailClosedAdapters()
         self._new_id = new_id
         self._clock = _SystemClock()
-        self._live_check = _WorkspaceAuthority(repository, self._clock)
+        self._lock = threading.RLock()
+        self._live: dict[str, _Live] = {}
+        self._claims = itertools.count(1)
+        self._live_check = _WorkspaceAuthority(repository, self._clock, self._required_recipients)
         self.approvals = InvestigationApprovalService(
             clock=self._clock, live=self._live_check, audit=recorder
         )
-        self._lock = threading.RLock()
-        self._live: dict[str, _Live] = {}
+
+    def _required_recipients(self, scope: InvestigationScope) -> frozenset[str] | None:
+        """The consent recipients ``scope``'s investigation needs; ``None`` if it is not live.
+
+        Lock-free on purpose: the approval service calls the live check under its own lock, and
+        the runtime calls the service under ``self._lock``. A dict lookup and an immutable
+        ``frozenset`` read are atomic, and recipients only ever grow.
+        """
+        live = self._live.get(scope.investigation_id)
+        if (
+            live is None
+            or live.scope.tenant_id != scope.tenant_id
+            or live.scope.workspace_id != scope.workspace_id
+        ):
+            return None
+        return live.recipients
 
     @property
     def records(self) -> InvestigationRecordStore:
@@ -419,8 +489,28 @@ class InvestigationRuntime:
 
     # --- jobs ----------------------------------------------------------------------------------
 
+    def _claim_run_job(self, live: _Live) -> int:
+        """Claim an execute/resume job before submitting it (PROD-1 S5a).
+
+        A claim is held from admission until its job settles the run (``_finish_run_job``), so
+        ``cancel`` knows whether a job will still observe the cancellation and close the run.
+        """
+        with self._lock:
+            claim = next(self._claims)
+            live.run_jobs.add(claim)
+            return claim
+
+    def _release_run_job(self, live: _Live, claim: int) -> None:
+        with self._lock:
+            live.run_jobs.discard(claim)
+
     def _submit(
-        self, record: InvestigationRecord, operation: str, work: Callable[[JobContext], None]
+        self,
+        record: InvestigationRecord,
+        operation: str,
+        work: Callable[[JobContext], None],
+        *,
+        claim: int | None = None,
     ) -> None:
         def guarded_work(ctx: JobContext) -> None:
             try:
@@ -448,18 +538,25 @@ class InvestigationRuntime:
                 max_attempts=1,
             )
         except JobQueueFullError:
+            with self._lock:
+                live = self._live.get(record.id)
+                if live is not None and claim is not None:
+                    live.run_jobs.discard(claim)
             self._end(record.id, record.tenant_id, S.FAILED, explanation="job_queue_full")
             raise InvestigationRequestError("job_queue_full", 503) from None
         with self._lock:
             live = self._live.get(record.id)
             if live is not None:
                 live.job_id = job.id
+                live.job_claim = claim
 
     def _plan(self, ctx: JobContext, investigation_id: str, context: PlanningContext) -> None:
         live = self._live[investigation_id]
         tenant = live.scope.tenant_id
         try:
             provider = self._adapters.planning()
+            with self._lock:
+                live.recipients |= provider.envelope.data_recipients
             workspace = self._repository.get_workspace(live.scope.workspace_id, tenant)
             authority = PlanningAuthority(
                 scope=live.scope,
@@ -513,13 +610,23 @@ class InvestigationRuntime:
         except InvestigationConflictError:
             self.approvals.cancel(live.scope)  # cancelled meanwhile: the proposal goes too
 
-    def _execute(self, ctx: JobContext, investigation_id: str) -> None:
+    def _execute(self, ctx: JobContext, investigation_id: str, claim: int) -> None:
         live = self._live[investigation_id]
+        try:
+            self._execute_claimed(ctx, investigation_id, live, claim)
+        finally:
+            self._release_run_job(live, claim)
+
+    def _execute_claimed(
+        self, ctx: JobContext, investigation_id: str, live: _Live, claim: int
+    ) -> None:
         tenant = live.scope.tenant_id
         grant, proposal = live.grant, live.proposal
         assert grant is not None and proposal is not None
         try:
-            provider = self._adapters.execution()
+            provider = live.execution
+            if provider is None:  # resolution failed at approval: never resolve a second one
+                raise ExecutionRunError("execution_provider_unavailable")
             workspace = self._repository.get_workspace(live.scope.workspace_id, tenant)
             authority = InvestigationAuthority(
                 scope=grant.scope,
@@ -545,6 +652,8 @@ class InvestigationRuntime:
                 llm_client=provider.llm_client,
                 max_input_tokens_per_call=provider.max_input_tokens_per_call,
                 table_resolver=_TableResolver(self._repository),
+                execution_evidence=provider.evidence,
+                scripted_admission=provider.scripted_admission,
             )
             with self._lock:
                 live.run = run
@@ -555,19 +664,70 @@ class InvestigationRuntime:
         except Exception:
             self._end(investigation_id, tenant, S.FAILED, explanation="execution_failed")
             return
-        self._settle(investigation_id, tenant, result)
+        self._finish_run_job(investigation_id, live, claim, result)
 
-    def _resume(self, ctx: JobContext, investigation_id: str) -> None:
+    def _resume(self, ctx: JobContext, investigation_id: str, claim: int) -> None:
         live = self._live[investigation_id]
+        tenant = live.scope.tenant_id
+        try:
+            run = live.run
+            assert run is not None
+            try:
+                result = run.resume()
+            except ExecutionRunError as error:
+                if error.code not in _RUN_HANDED_OFF:
+                    self._end(investigation_id, tenant, S.FAILED, explanation="execution_failed")
+                return  # handed off: another job holds the run, or already advanced it
+            except Exception:
+                self._end(investigation_id, tenant, S.FAILED, explanation="execution_failed")
+                return
+            self._finish_run_job(investigation_id, live, claim, result)
+        finally:
+            self._release_run_job(live, claim)
+
+    def _finish_run_job(
+        self, investigation_id: str, live: _Live, claim: int, result: ExecutionResult
+    ) -> None:
+        """Settle this job's result; a pause it was overtaken at is resumed here (PROD-1 S5a).
+
+        A cancellation, revocation, or wave decision can arrive while this job still holds the
+        run, when a competing job could not resume it (``run_busy``). The check and the release
+        of this job's claim are one step under ``self._lock``, the lock ``_close_paused`` reads
+        claims under, so either this job sees the stop or the closer sees no claim and submits
+        the closing resume itself: a stopped pause is never left without an owner.
+        """
         tenant = live.scope.tenant_id
         run = live.run
         assert run is not None
-        try:
-            result = run.resume()
-        except Exception:
-            self._end(investigation_id, tenant, S.FAILED, explanation="execution_failed")
-            return
+        while True:
+            with self._lock:
+                if not self._overtaken(live, result):
+                    live.run_jobs.discard(claim)
+                    break
+            try:
+                result = run.resume()
+            except ExecutionRunError as error:
+                if error.code not in _RUN_HANDED_OFF:
+                    self._end(investigation_id, tenant, S.FAILED, explanation="execution_failed")
+                return
+            except Exception:
+                self._end(investigation_id, tenant, S.FAILED, explanation="execution_failed")
+                return
         self._settle(investigation_id, tenant, result)
+
+    def _overtaken(self, live: _Live, result: ExecutionResult) -> bool:
+        """A pause whose stop or decision already arrived: resume it rather than publish it."""
+        if result.status is not S.AWAITING_SQL_APPROVAL:
+            return False
+        if self.approvals.stop_requested(live.scope):
+            return True
+        wave = result.sql_wave
+        if wave is None or live.grant is None:
+            return False
+        try:
+            return self.approvals.sql_wave_state(live.grant, wave.wave_id) != "pending"
+        except ApprovalRefused:
+            return False
 
     def _settle(self, investigation_id: str, tenant: str, result: ExecutionResult) -> None:
         if result.status is S.AWAITING_SQL_APPROVAL:
@@ -587,8 +747,14 @@ class InvestigationRuntime:
                 self._records.save_report(
                     record, result.report.model_dump_json(), json.dumps(evidence, sort_keys=True)
                 )
+        live = self._live.get(investigation_id)
+        stopped_by = live.stop_explanation if live is not None else None
         self._end(
-            investigation_id, tenant, result.status, category=result.category, explanation=None
+            investigation_id,
+            tenant,
+            result.status,
+            category=result.category,
+            explanation=stopped_by if result.status is S.CANCELLED else None,
         )
 
     # --- decisions -----------------------------------------------------------------------------
@@ -622,10 +788,19 @@ class InvestigationRuntime:
         approver = ApproverIdentity(
             tenant_id=tenant_id, subject_id=subject_id, capabilities=capabilities
         )
+        if decision == "approve":
+            self._resolve_execution(live)  # its recipients join the live check before approval
         try:
             grant = self.approvals.decide_plan(request, approver, consent=_consent(workspace))
         except ApprovalRefused as refused:
-            self._sync(record)
+            if refused.code == "authority_revoked":
+                # PROD-1 S5b: consent no longer covers a recipient this investigation would use
+                # (or the workspace expired). The approval can never proceed, so the proposal is
+                # revoked and ends here; nothing executes.
+                self.approvals.revoke(live.scope)
+                self._end(record.id, tenant_id, S.FAILED, explanation="authority_revoked")
+            else:
+                self._sync(record)
             raise InvestigationRequestError(refused.code, 409) from None
         if grant is None:
             return self._end(record.id, tenant_id, S.PLAN_REJECTED, explanation=None) or record
@@ -633,8 +808,33 @@ class InvestigationRuntime:
             live.grant = grant
             live.capabilities = capabilities  # execution runs with the approver's capabilities
         record = self._records.update(record.id, tenant_id, status=S.QUEUED)
-        self._submit(record, "investigation.execute", lambda ctx: self._execute(ctx, record.id))
+        claim = self._claim_run_job(live)
+        self._submit(
+            record,
+            "investigation.execute",
+            lambda ctx: self._execute(ctx, record.id, claim),
+            claim=claim,
+        )
         return self._records.get(record.id, tenant_id)
+
+    def _resolve_execution(self, live: _Live) -> None:
+        """Call ``InvestigationAdapters.execution()`` at most once per investigation (S5b).
+
+        At plan approval, so the execution provider's consent recipients are part of the live
+        check that approval runs. The trusted configuration builds the provider without I/O. The
+        execute job and every resume use this one provider (and so one owned adapter); a failed
+        resolution is remembered and never retried, so no replacement can be built later.
+        """
+        with self._lock:
+            if live.execution_resolved:
+                return
+            live.execution_resolved = True
+            try:
+                provider = self._adapters.execution()
+            except Exception:
+                return  # the execute job fails closed (``execution_provider_unavailable``)
+            live.execution = provider
+            live.recipients |= provider.envelope.data_recipients
 
     def pending_wave(self, tenant_id: str, investigation_id: str) -> SQLWaveReview | None:
         record = self._records.get(investigation_id, tenant_id)
@@ -672,8 +872,20 @@ class InvestigationRuntime:
         try:
             self.approvals.decide_sql_wave(request, approver)
         except ApprovalRefused as refused:
+            if refused.code == "authority_revoked":
+                # PROD-1 S5a: consent was withdrawn (or the workspace expired) while paused. The
+                # wave can never run, so the paused run is revoked and closed, sending nothing.
+                live.stop_explanation = "authority_revoked"
+                self.approvals.revoke(live.scope)
+                self._close_paused(record, live)
             raise InvestigationRequestError(refused.code, 409) from None
-        self._submit(record, "investigation.resume", lambda ctx: self._resume(ctx, record.id))
+        claim = self._claim_run_job(live)
+        self._submit(
+            record,
+            "investigation.resume",
+            lambda ctx: self._resume(ctx, record.id, claim),
+            claim=claim,
+        )
         return record
 
     # --- cancellation --------------------------------------------------------------------------
@@ -691,17 +903,37 @@ class InvestigationRuntime:
                 job_cancelled = job.status is JobStatus.CANCELLED
             except LookupError:
                 job_cancelled = True
+            if job_cancelled and live.job_claim is not None:
+                self._release_run_job(live, live.job_claim)  # that job will never run
         scope = live.scope if live is not None else None
         if scope is not None and live is not None and live.registered:
             self.approvals.cancel(scope)
         if record.status is S.AWAITING_SQL_APPROVAL and live is not None and live.run is not None:
             # The paused run closes itself out as ``cancelled`` (nothing executes).
-            self._submit(record, "investigation.resume", lambda ctx: self._resume(ctx, record.id))
+            self._close_paused(record, live)
             return self._records.get(record.id, tenant_id)
         idle = record.status in {S.AWAITING_PLAN_APPROVAL, S.QUEUED} or job_cancelled
         if idle or live is None:
             self._end(record.id, tenant_id, S.CANCELLED, explanation="cancelled_by_user")
         return self._records.get(record.id, tenant_id)
+
+    def _close_paused(self, record: InvestigationRecord, live: _Live) -> None:
+        """Submit the resume that closes a stopped pause, unless a claimed job will (S5a).
+
+        Called after the stop is recorded in the approval service. A job that still holds a
+        claim re-checks the stop before it releases the claim (``_finish_run_job``), so no
+        competing resume is queued beside it.
+        """
+        with self._lock:
+            if live.run_jobs:
+                return
+            claim = self._claim_run_job(live)
+        self._submit(
+            record,
+            "investigation.resume",
+            lambda ctx: self._resume(ctx, record.id, claim),
+            claim=claim,
+        )
 
     def delete_workspace(self, tenant_id: str, workspace_id: str) -> None:
         """Stop the workspace's live investigations (its records are removed by the store)."""

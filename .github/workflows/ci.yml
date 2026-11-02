@@ -10,7 +10,7 @@ permissions:
 jobs:
   frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/web
@@ -41,6 +41,18 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Frontend browser test
         run: npm run test:e2e
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install the API for the scripted browser journeys
+        working-directory: .
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements.lock
+      # Real browser and production API code with scripted providers: no key, Docker, or model call.
+      - name: Consent journeys against the real API
+        run: npm run test:e2e:real -- e2e/real/consent-journey.spec.ts
 
   quality:
     strategy:

@@ -109,7 +109,18 @@ def test_a_schema_v1_database_upgrades_to_the_current_schema_keeping_its_data(
     path = tmp_path / "metadata.db"
     first = MetadataStore(path, migrations=MIGRATIONS[:1])
     first.open()
-    first.save_workspace(_workspace())
+    # Raw SQL: today's save_workspace names columns that later migrations add, as a v1 row cannot.
+    connection = first._connection
+    assert connection is not None
+    with connection:
+        connection.execute(
+            "INSERT INTO workspaces (id, tenant_id, authentication_mode, expires_at, "
+            "gemini_configured, local_only_mode, consent_notice_version, consent_accepted_at, "
+            "created_at, data_recipients, consent_recipients) "
+            "VALUES (?, ?, 'local', '2099-01-01T00:00:00+00:00', 1, 0, NULL, NULL, "
+            "'2026-10-01T00:00:00+00:00', 'Gemini', '')",
+            (WORKSPACE, TENANT),
+        )
     first.save_upload(_upload())
     first.close()
 
@@ -118,6 +129,7 @@ def test_a_schema_v1_database_upgrades_to_the_current_schema_keeping_its_data(
 
     assert result.migrations_applied == tuple(m.version for m in MIGRATIONS[1:])
     assert [w.id for w in current.load_workspaces()] == [WORKSPACE]
+    assert current.load_workspaces()[0].consent_withdrawn_at is None
     assert [u.id for u in current.load_uploads()] == [_upload().id]
     current.save_dataset(_dataset())
     assert [d.id for d in current.load_datasets()] == [_dataset().id]

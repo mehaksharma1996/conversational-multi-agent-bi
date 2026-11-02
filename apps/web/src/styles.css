@@ -350,7 +350,18 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .report-card h4 { margin: 0 0 .4rem; color: var(--text); }
 .report-card p, .report-card li { color: var(--text-secondary); line-height: 1.5; }
 
-.consent-button { width: fit-content; margin-top: .4rem; }
+.consent-panel h2:focus { outline: none; }
+.consent-notice { display: grid; gap: .45rem; margin-top: .6rem; padding: .75rem; border: 1px solid var(--border, #33424d); border-radius: 8px; }
+.consent-notice h3, .consent-notice h4, .consent-notice p, .consent-notice ul { margin: 0; }
+.consent-notice h4 { margin-top: .35rem; }
+.consent-notice section { display: grid; gap: .25rem; }
+.consent-notice ul { padding-left: 1.2rem; }
+.consent-details { margin-top: .5rem; }
+.consent-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+.consent-actions:empty { display: none; }
+.consent-status--current { color: #b6e3c6; border-color: #3f7a57; }
+.consent-status--missing, .consent-status--stale { color: #f1cf94; border-color: #8a6630; background: var(--warning-surface); }
+.consent-status--withdrawn { color: #f0b8be; border-color: #75404a; background: var(--danger-surface); }
 .message-list { padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); margin: var(--space-5) 0; }
 .message-pair, .local-entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
 .chat-message { min-width: 0; max-width: min(100%, 960px); padding: var(--space-4); overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: var(--radius-md); }

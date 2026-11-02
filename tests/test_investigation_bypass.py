@@ -40,6 +40,7 @@ from src.orchestration.investigation_checkpoint import (
 )
 from src.orchestration.investigation_graph import InvestigationGraphBuilder
 from src.orchestration.tool_gateway import (
+    SCRIPTED_EXECUTION_ADMISSION,
     AttemptToken,
     BeginAttempt,
     ExecuteSQL,
@@ -153,6 +154,7 @@ def test_the_gateway_accepts_only_a_trusted_authority_object(authority: Any) -> 
             resolver=h.gateway._resolver,
             llm_client=h.llm,
             max_input_tokens_per_call=1_000,
+            scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         )
 
 

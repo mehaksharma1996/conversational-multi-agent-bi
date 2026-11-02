@@ -93,6 +93,16 @@ describe("InvestigationPanel", () => {
     expect(callbacks.onStart).toHaveBeenCalledOnce();
   });
 
+  it("cannot start while consent does not allow it, and says why", () => {
+    render(<InvestigationPanel {...props(null, "available")} startBlockedReason="Consent is unknown." />);
+
+    expect(screen.getByText("Consent is unknown.")).toBeInTheDocument();
+    const start = screen.getByRole("button", { name: "Start investigation" });
+    expect(start).toBeDisabled();
+    fireEvent.click(start);
+    expect(callbacks.onStart).not.toHaveBeenCalled();
+  });
+
   it("renders the exact plan review, planning cost, deadline, and decision actions", () => {
     render(<InvestigationPanel {...props(pendingPlan())} />);
 

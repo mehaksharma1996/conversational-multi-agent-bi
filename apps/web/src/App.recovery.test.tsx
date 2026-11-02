@@ -7,6 +7,7 @@ import {
   ApiClientError,
   type Message,
   askQuestion,
+  getConsent,
   createDataset,
   createWorkspace,
   decideSqlApproval,
@@ -29,8 +30,10 @@ import {
   readyDatasetFixture,
   reviewDatasetFixture,
   uploadFixture,
+  consentCurrentFixture,
   workspaceFixture,
 } from "./test/fixtures";
+import { readyComposer } from "./test/composer";
 import { writeWorkspaceHint } from "./workspace/recovery";
 
 vi.mock("./components/PlotlyChart", () => ({ default: () => <div data-testid="plotly-chart" /> }));
@@ -39,6 +42,7 @@ vi.mock("./api/client", async (importOriginal) => {
   return {
     ...actual,
     createWorkspace: vi.fn(),
+    getConsent: vi.fn(),
     listWorkspaces: vi.fn(),
     getWorkspaceOverview: vi.fn(),
     getDataset: vi.fn(),
@@ -81,6 +85,10 @@ function mockOwnedWorkspace(messages: Message[] = [messageFixture]) {
   vi.mocked(getConversation).mockResolvedValue(conversationFixture);
   vi.mocked(listMessages).mockResolvedValue(messages);
 }
+
+beforeEach(() => {
+  vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
+});
 
 describe("workspace continuity", () => {
   beforeEach(() => {
@@ -307,7 +315,7 @@ describe("failed questions", () => {
     // Navigation focuses the section heading on the next frame; typing before it lands loses the
     // keystrokes when that frame moves focus away from the question box.
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).parentElement).toHaveFocus());
-    const box = await screen.findByLabelText("Business question");
+    const box = await readyComposer();
     await user.type(box, "Which region is largest?");
     await user.click(screen.getByRole("button", { name: "Ask workbench" }));
 

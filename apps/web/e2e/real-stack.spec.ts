@@ -141,15 +141,16 @@ test("real fake-provider stack: PDF citations, hybrid export, reports, and reset
   expect(((await blocked.json()) as ErrorPayload).error.code).toBe("gemini_consent_required");
 
   await page.getByRole("link", { name: /Ask/ }).click();
-  await expect(page.getByRole("button", { name: "I understand, enable Gemini" })).toBeVisible();
+  const acceptNotice = page.getByRole("button", { name: "Accept this notice for Gemini" });
+  await expect(acceptNotice).toBeVisible();
   const consentResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "PUT" &&
       new URL(response.url()).pathname === `/api/v1/workspaces/${workspace.id}/consent`,
   );
-  await page.getByRole("button", { name: "I understand, enable Gemini" }).click();
+  await acceptNotice.click();
   expect((await consentResponse).status()).toBe(200);
-  await expect(page.getByRole("button", { name: "I understand, enable Gemini" })).toHaveCount(0);
+  await expect(acceptNotice).toHaveCount(0);
 
   await page.getByLabel("Business question").fill("What does the policy require?");
   await page.getByRole("button", { name: "Ask workbench" }).click();

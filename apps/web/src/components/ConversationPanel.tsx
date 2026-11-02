@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import type { Message, Workspace } from "../api/client";
 import { QUESTION_MAX_LENGTH, threadEntries, type AskResult, type LocalEntry } from "../conversation/thread";
+import { consentGateReason, type ConsentGate } from "../workspace/useConsent";
 import type { ApprovalDraft } from "../workspace/drafts";
 import { DEMO_QUESTIONS, type DemoQuestion } from "../demo/retailDemo";
 import { LocalEntryCard } from "./LocalEntryCard";
@@ -41,7 +42,8 @@ interface ConversationPanelProps {
   onQuestionChange: (update: string | ((current: string) => string)) => void;
   onRequireSqlApprovalChange: (required: boolean) => void;
   onApprovalDraftChange: (messageId: string, draft: ApprovalDraft) => void;
-  onAcceptConsent: () => Promise<void>;
+  /** Whether consent allows model-backed questions; loading and unreadable never do. */
+  consentGate: ConsentGate;
   /** Resolves "restore" when the question failed, so it can be put back for editing. */
   onAsk: (question: string, requireSqlApproval: boolean) => Promise<AskResult>;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
@@ -80,7 +82,7 @@ export function ConversationPanel({
   onQuestionChange: setQuestion,
   onRequireSqlApprovalChange: setRequireSqlApproval,
   onApprovalDraftChange,
-  onAcceptConsent,
+  consentGate,
   onAsk,
   onApproval,
   onExport,
@@ -91,7 +93,8 @@ export function ConversationPanel({
   const reasonId = useId();
   const keysId = useId();
   const counterId = useId();
-  const consentBlocked = workspace.consent_required && !workspace.consent_accepted;
+  const consentReason = consentGateReason(consentGate);
+  const consentBlocked = consentReason !== null;
   const approvalPending = messages.some((message) => message.status === "pending_approval");
   const composerDisabled = busy || !hasContext || consentBlocked || approvalPending || questionUnconfirmed;
   // Outcomes are announced by the shell's single live region; this panel only says why it is locked.
@@ -102,7 +105,7 @@ export function ConversationPanel({
       : approvalPending
         ? "Resolve the pending SQL approval before asking another question."
         : consentBlocked
-          ? "Accept the data-sharing notice above to enable questions."
+          ? consentReason
           : !hasContext
             ? "Add a confirmed table or index documents before asking a question."
             : busy
@@ -135,10 +138,6 @@ export function ConversationPanel({
     });
   };
 
-  // Named from server configuration; older API responses without the field default to Gemini.
-  const recipients = workspace.data_recipients?.length ? workspace.data_recipients : ["Gemini"];
-  const recipientNames = recipients.join(" and ");
-
   return (
     <section className="panel conversation-panel" aria-labelledby="conversation-heading">
       <div className="section-heading">
@@ -148,20 +147,6 @@ export function ConversationPanel({
         </div>
       </div>
 
-      {consentBlocked ? (
-        <StatusBanner kind="info">
-          Questions may send question text, table schema and samples, or retrieved PDF excerpts
-          to {recipientNames}. Accept this notice before model-backed questions are enabled.
-          <button
-            className="button button--secondary consent-button"
-            type="button"
-            disabled={busy}
-            onClick={() => void onAcceptConsent()}
-          >
-            I understand, enable {recipientNames}
-          </button>
-        </StatusBanner>
-      ) : null}
       {workspace.local_only_mode ? (
         <StatusBanner kind="success">
           Local-only mode is active. Gemini-backed SQL and RAG routes are disabled.

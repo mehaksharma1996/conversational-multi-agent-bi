@@ -3,12 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Message, Workspace } from "../api/client";
 import { ConversationPanel } from "./ConversationPanel";
+import type { ConsentGate } from "../workspace/useConsent";
 import { investigationProposalMessageFixture, messageFixture, workspaceFixture } from "../test/fixtures";
 
-function panel(workspace: Workspace, messages: Message[] = []) {
+function panel(workspace: Workspace, messages: Message[] = [], consentGate: ConsentGate = "open") {
   return (
     <ConversationPanel
       workspace={workspace}
+      consentGate={consentGate}
       messages={messages}
       busy={false}
       hasContext
@@ -18,7 +20,6 @@ function panel(workspace: Workspace, messages: Message[] = []) {
       onQuestionChange={vi.fn()}
       onRequireSqlApprovalChange={vi.fn()}
       onApprovalDraftChange={vi.fn()}
-      onAcceptConsent={vi.fn()}
       onAsk={vi.fn()}
       onApproval={vi.fn()}
       onExport={vi.fn()}
@@ -30,26 +31,38 @@ function renderPanel(workspace: Workspace, messages: Message[] = []) {
   return render(panel(workspace, messages));
 }
 
-describe("consent notice", () => {
-  it("names every provider that will receive data", () => {
-    renderPanel({ ...workspaceFixture, data_recipients: ["Gemini", "Anthropic"] });
+describe("consent gate", () => {
+  const BLOCKED = "Accept the data-sharing notice above to enable questions and investigations.";
+  const composer = () => screen.getByLabelText("Business question");
 
-    expect(screen.getByText(/to Gemini and Anthropic/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "I understand, enable Gemini and Anthropic" }),
-    ).toBeInTheDocument();
+  it("locks the composer until the notice is accepted", () => {
+    render(panel(workspaceFixture, [], "needs_acceptance"));
+    expect(screen.getByText(BLOCKED)).toBeInTheDocument();
+    expect(composer()).toBeDisabled();
   });
 
-  it("defaults to Gemini when the API does not list recipients", () => {
-    renderPanel({ ...workspaceFixture });
-
-    expect(screen.getByRole("button", { name: "I understand, enable Gemini" })).toBeInTheDocument();
+  it("unlocks only when the gate is open", () => {
+    render(panel(workspaceFixture, [], "open"));
+    expect(screen.queryByText(BLOCKED)).not.toBeInTheDocument();
+    expect(composer()).toBeEnabled();
   });
 
-  it("shows no consent prompt once the notice is accepted", () => {
-    renderPanel({ ...workspaceFixture, consent_accepted: true, data_recipients: ["Anthropic"] });
+  it("stays locked while consent is loading, even when the workspace flag says accepted", () => {
+    render(panel({ ...workspaceFixture, consent_accepted: true }, [], "loading"));
+    expect(composer()).toBeDisabled();
+    expect(screen.getByText(/Checking this workspace's data-sharing consent/)).toBeInTheDocument();
+  });
 
-    expect(screen.queryByRole("button", { name: /I understand/ })).not.toBeInTheDocument();
+  it("stays locked and says so when consent cannot be verified", () => {
+    render(panel({ ...workspaceFixture, consent_accepted: true }, [], "error"));
+    expect(composer()).toBeDisabled();
+    expect(screen.getByText(/could not be verified/)).toBeInTheDocument();
+  });
+
+  it("sends a caller who cannot accept to an administrator", () => {
+    render(panel(workspaceFixture, [], "needs_administrator"));
+    expect(composer()).toBeDisabled();
+    expect(screen.getByText(/A workspace administrator must accept/)).toBeInTheDocument();
   });
 });
 

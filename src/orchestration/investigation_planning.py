@@ -38,10 +38,12 @@ Both stages run the same pre-flight, stopping at the first failure before any mo
    ``BudgetLedger(PLANNING_LIMITS)``, which is never reset and whose 30-second deadline is never
    extended; the two stages together cannot exceed 2 calls, 12,000 input, and 4,000 output.
 
-Then, with a provider-call meter installed, the adapter counts the complete request exactly
-(a non-integer or non-positive count, or a counter that raises, is ``metering_unbounded``; a count
+Then, with a provider-call meter installed, the adapter counts the complete request exactly with
+``count_input_tokens_within`` and the ledger's remaining duration, so the count cannot outlive the
+30-second deadline either (PROD-1 S3; a non-integer or non-positive count, or a counter that
+raises, is ``metering_unbounded``, or ``budget_exhausted`` once the deadline has passed; a count
 above 6,000 is ``budget_exhausted``), cancellation and the remaining deadline are sampled again,
-and exactly one ``generate_once_with_deadline`` is made with ``max_output_tokens=1000`` and the
+and exactly one ``generate_once_with_deadline`` is made with ``max_output_tokens=2000`` and the
 ledger's remaining duration.
 
 Settlement happens on every path. A reservation is released only when no invocation was entered
@@ -468,6 +470,11 @@ class InvestigationPlanningGateway:
             raise _Refused(RefusalCode.AUTHORITY_UNAVAILABLE) from None
         return authority, context, evidence, pricing
 
+    def _check_live(self) -> None:
+        code = check_planning_authority(self._authority, self._context.scope, live=self._live)
+        if code is not None:
+            raise _Refused(code)
+
     def _check_cancelled(self) -> None:
         try:
             requested = self._cancellation.cancel_requested
@@ -513,9 +520,11 @@ class InvestigationPlanningGateway:
         try:
             with meter_provider_calls(invocation.meter) as health:
                 invocation.health = health
+                count_deadline = PlanningDeadline(self._check_time())
                 try:
-                    counted = adapter.count_input_tokens(prompt)
+                    counted = adapter.count_input_tokens_within(prompt, deadline=count_deadline)
                 except Exception:
+                    self._check_time()  # a count cut short by the deadline is the deadline's
                     raise _Refused(RefusalCode.METERING_UNBOUNDED) from None
                 if type(counted) is not int or counted < 1:
                     raise _Refused(RefusalCode.METERING_UNBOUNDED)
@@ -526,6 +535,7 @@ class InvestigationPlanningGateway:
                     raise _Refused(RefusalCode.METERING_VIOLATION)  # the counter was not quiet
                 invocation.counted = counted
                 self._check_cancelled()
+                self._check_live()  # PROD-1 S5a: consent may have changed since the stage began
                 deadline = PlanningDeadline(self._check_time())
                 invocation.calls += 1  # the invocation marker: set before the provider is entered
                 invocation.result = adapter.generate_once_with_deadline(

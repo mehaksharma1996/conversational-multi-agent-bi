@@ -448,6 +448,44 @@ describe("investigation SQL waves", () => {
     expect(decideInvestigationSqlWave).not.toHaveBeenCalled();
   });
 
+  it("follows a run closed by withdrawn consent to its terminal state instead of locking", async () => {
+    const waiting = waitingForSql();
+    const review = {
+      ...waiting.sql_wave!,
+      items: waiting.sql_wave!.items.map((item) => ({ ...item, sql: "SELECT month FROM uploaded_data" })),
+    };
+    vi.mocked(getInvestigationByMessage).mockResolvedValue(waiting);
+    vi.mocked(getInvestigationSqlWave).mockResolvedValue(review);
+    vi.mocked(decideInvestigationSqlWave).mockRejectedValue(
+      new ApiClientError("Consent was withdrawn.", "authority_revoked", null, 409),
+    );
+    // The refusal arrives first; the record publishes the closed run on a later read.
+    vi.mocked(getInvestigation)
+      .mockResolvedValueOnce(waiting)
+      .mockResolvedValue(
+        investigation({ status: "cancelled", updated_at: "2026-10-30T11:00:00Z", sql_wave: null }),
+      );
+    const { result } = follow();
+    await waitFor(() => expect(result.current.sqlWave).not.toBeNull());
+
+    await act(() => result.current.submitSqlWave({
+      wave_id: review.wave_id,
+      wave_digest: review.wave_digest,
+      items: [{
+        task_id: review.items[0]!.task_id,
+        sql_fingerprint: review.items[0]!.sql_fingerprint,
+        decision: "approve",
+      }],
+    }));
+
+    expect(result.current.unconfirmed).toBeNull();
+    await waitFor(() => expect(result.current.investigation?.status).toBe("cancelled"), { timeout: 5_000 });
+    expect(result.current.availability).toBe("loaded");
+    expect(result.current.command).toBeNull();
+    expect(result.current.sqlWave).toBeNull();
+    expect(decideInvestigationSqlWave).toHaveBeenCalledTimes(1);
+  });
+
   it("adopts server-confirmed expiry after a stale wave conflict", async () => {
     const waiting = waitingForSql();
     const review = {

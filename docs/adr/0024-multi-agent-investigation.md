@@ -718,6 +718,95 @@ SQL remains available only from the authorized pending-wave endpoint. This amend
 report/evidence UI, a production model adapter, durable checkpoints, default feature activation, or
 new telemetry/audit content.
 
+## Amendment 11: execution calls receive the ledger deadline (PROD-1, #198, 2026-10-31)
+
+- Status: **Proposed** (approved as direction, decision D3; not in effect). Runtime behaviour is
+  unchanged until the S2 or later slice that implements it is reviewed.
+
+1. **Problem.** Planning passes the ledger's remaining deadline into
+   `generate_once_with_deadline` and classifies the provider's termination. Execution
+   (`_AdmittedLLMClient.generate` in `src/orchestration/tool_gateway.py`) calls `generate_once`
+   with no deadline. The 240-second execution wall clock is checked only between operations, so a
+   hung call is bounded only by the adapter's own transport timeout, which the gateway cannot see
+   or review.
+2. **Decision.** The reviewed execution contract will require the planning shape: one call that
+   receives `PlanningDeadline` (the remaining execution-ledger time, never extended) and the job's
+   cancellation token, and returns a `DeadlineModelResult`. The existing classification applies
+   unchanged: an answer after the deadline, an unconfirmed termination, or an unrequested
+   cancellation is `metering_violation`, charged at least the full reservation; a confirmed
+   provider deadline with an enforced bound is `budget_exhausted`; and a confirmed cancellation
+   after a request is `cancelled`.
+3. **Admission.** `admitted_model_adapter` will require a `DeadlineBoundedModelAdapter` plus
+   reviewed execution evidence equivalent to `ReviewedPlanningCapability` for the exact member.
+   This is strictly stronger than today. A `BoundedModelAdapter` without deadline support stays
+   unadmitted (`metering_unbounded`), and the scripted adapters used by the deterministic suites
+   gain the deadline method.
+4. **Unchanged.** Planning's 30-second ledger (D4), every budget limit, reservation, and
+   settlement rule, the feature flag (off by default), and `FailClosedAdapters` as the production
+   default.
+
+The S1 groundwork for the adapter (`src/llm/openai_responses.py`, `src/llm/responses_transport.py`)
+is not an adapter and changes no admission path.
+
+**S2 progress (2026-10-31, still Proposed).** `OpenAIResponsesBoundedAdapter`
+(`src/llm/openai_responses_bounded.py`) implements the adapter side offline: it takes the caller's
+remaining deadline, never extends it, and refuses `generate_once` (no deadline) before any I/O.
+Items 2 and 3 are not implemented, because the execution gateway is unchanged, so the amendment
+stays Proposed. It can be accepted once a slice changes `_AdmittedLLMClient` and
+`admitted_model_adapter` and proves the classification above with deterministic gateway tests.
+
+**S3 progress (2026-10-31, still Proposed).** Item 2 is implemented in the execution gateway:
+`_AdmittedLLMClient` counts a `DeadlineBoundedModelAdapter` with `count_input_tokens_within` and
+calls only `generate_once_with_deadline`, with the execution ledger's remaining time (never
+extended) and the run's cancellation token, and classifies the result as above
+(`tests/test_prod1_gateway_integration.py`). Both gateways now also bound the exact count by the
+ledger deadline. Item 3 is not implemented: admission still accepts a plain `BoundedModelAdapter`
+through an explicitly separate legacy branch, and no reviewed execution capability exists, so the
+amendment stays Proposed.
+
+**S4 progress (2026-10-31, still Proposed).** S4 adds trusted provider configuration, adapter
+ownership, and versioned OpenAI consent (`apps/api/investigation_providers.py`,
+`apps/api/consent_notices.py`) and changes no gateway admission rule. Item 3 is still not
+implemented, no reviewed execution capability, planning evidence, or price entry exists, and the
+release gate `LIVE_ADMISSION_RELEASED` is `False`, so production remains `FailClosedAdapters` and
+the amendment stays Proposed.
+
+**S5a progress (2026-11-01, still Proposed).** The live authority check now re-reads current
+workspace consent, and both gateways re-check authority immediately before each provider request.
+An execution run allows one `run`/`resume` at a time. Neither change touches item 3, so the
+amendment stays Proposed.
+
+**S5b progress (2026-11-01, still Proposed).** Requirement-by-requirement, against code and
+deterministic tests only:
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Item 2: execution receives the remaining ledger deadline, never extended, with the run's cancellation token and the planning classification | Implemented and tested (S3) | `tests/test_prod1_gateway_integration.py`, now on the strict path |
+| Item 3a: execution admission requires a `DeadlineBoundedModelAdapter` | Implemented and tested (S5b) | `admit_execution_adapter`; `tests/test_prod1_s5b_execution_admission.py` |
+| Item 3b: reviewed execution evidence for the exact member | Implemented and tested (S5b): `ReviewedExecutionCapability` / `ReviewedExecutionEvidence` | Same file; production registry `REVIEWED_EXECUTION_EVIDENCE` is empty |
+| Item 3c (revised): scripted suites use an explicit test-only admission | **Accepted design revision (S5c, 2026-11-01).** Instead of giving every scripted adapter the deadline method, scripted suites opt in through the single `SCRIPTED_EXECUTION_ADMISSION`, which no production module may reference (boundary-tested) | `tests/test_prod1_s5b_execution_admission.py` |
+| Reviewed evidence for a real provider and snapshot | **Missing** (needs S6 live evidence under a separate spend approval) | None; synthetic test records only |
+
+The amendment stays Proposed because no real reviewed execution evidence exists.
+
+**S5c progress (2026-11-01, still Proposed).** Provider admission now reads one typed bundle per
+exact snapshot (`ReviewedProviderEvidence` in `apps/api/provider_evidence.py`). The bundle binds
+schema version, review ID, provider, snapshot, recipient, review dates, and source to the
+capability profile, the planning and execution reviews, the pricing table, and a
+`ReviewedPriceEvidence` record that names every billable component. Admission re-validates the
+bundle as the exact type and refuses any disagreement with a content-free code. The input-token
+count request must be reviewed as `not_billed`, because the planning estimate prices input and
+output tokens only. `REVIEWED_PROVIDER_EVIDENCE` is empty, the release gate is closed, and every
+record in the tests is synthetic. The amendment stays Proposed until real reviewed evidence exists
+(S6, under a separate spend approval).
+
+**S5d progress (2026-11-01, still Proposed).** The consent lifecycle now exists end to end: a
+server-served notice, version- and digest-bound acceptance, and durable workspace-wide withdrawal that
+the existing live check observes. It changes no execution or admission rule of this amendment and
+admits no provider. The amendment's remaining blocker is unchanged: reviewed evidence for a real
+provider and snapshot (S6). The later consent hardening (mandatory digest, gated unknown consent, and
+role-aware controls) also changes no execution or admission rule, and the amendment stays Proposed.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import {
   askQuestion,
+  getConsent,
   createReport,
   downloadReport,
   getAnalysis,
@@ -18,12 +19,14 @@ import {
 } from "./api/client";
 import {
   analysisFixture,
+  consentCurrentFixture,
   conversationFixture,
   documentCollectionFixture,
   messageFixture,
   readyDatasetFixture,
   workspaceFixture,
 } from "./test/fixtures";
+import { readyComposer } from "./test/composer";
 
 vi.mock("./components/PlotlyChart", () => ({ default: () => <div data-testid="plotly-chart" /> }));
 vi.mock("./api/client", async (importOriginal) => {
@@ -31,6 +34,7 @@ vi.mock("./api/client", async (importOriginal) => {
   return {
     ...actual,
     createWorkspace: vi.fn(),
+    getConsent: vi.fn(),
     listWorkspaces: vi.fn(),
     getWorkspaceOverview: vi.fn(),
     getDataset: vi.fn(),
@@ -74,6 +78,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.sessionStorage.clear();
   mockOwnedWorkspace();
+  vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
 });
 
 afterEach(() => {
@@ -90,7 +95,7 @@ describe("operation state", () => {
     vi.mocked(askQuestion).mockReturnValue(answer.promise);
     render(<App />);
 
-    const question = await screen.findByLabelText("Business question");
+    const question = await readyComposer();
     await userEvent.type(question, "How many rows?");
     const ask = screen.getByRole("button", { name: "Ask workbench" });
     fireEvent.click(ask);
@@ -110,7 +115,7 @@ describe("operation state", () => {
 
     const announcer = screen.getByTestId("operation-announcer");
     expect(announcer).toHaveAttribute("aria-live", "polite");
-    await userEvent.type(await screen.findByLabelText("Business question"), "How many rows?");
+    await userEvent.type(await readyComposer(), "How many rows?");
     fireEvent.click(screen.getByRole("button", { name: "Ask workbench" }));
     await waitFor(() =>
       expect(announcer).toHaveTextContent("Question started. This can take up to two minutes."),
@@ -146,7 +151,7 @@ describe("operation state", () => {
     vi.mocked(askQuestion).mockReturnValue(answer.promise);
     render(<App />);
 
-    await userEvent.type(await screen.findByLabelText("Business question"), "Total revenue?");
+    await userEvent.type(await readyComposer(), "Total revenue?");
     fireEvent.click(screen.getByRole("button", { name: "Ask workbench" }));
     const running = await screen.findByRole("button", { name: "Analyzing question…" });
     fireEvent.click(running);

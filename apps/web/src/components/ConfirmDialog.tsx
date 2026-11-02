@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 
+import { focusOnNextFrame } from "../workspace/focus";
+
 export interface ConfirmationRequest {
   title: string;
   /** Each consequence the person is agreeing to, stated plainly. */
@@ -43,10 +45,11 @@ export function ConfirmDialog({ request, onResolve }: ConfirmDialogProps) {
     onResolve(confirmed);
     const target = opener.current;
     opener.current = null;
-    window.requestAnimationFrame(() => {
-      if (target?.isConnected && !target.matches(":disabled")) target.focus();
-      else document.querySelector<HTMLElement>("[data-section-heading]")?.focus();
-    });
+    focusOnNextFrame(() =>
+      target?.isConnected && !target.matches(":disabled")
+        ? target
+        : document.querySelector<HTMLElement>("[data-section-heading]"),
+    );
   };
 
   return (

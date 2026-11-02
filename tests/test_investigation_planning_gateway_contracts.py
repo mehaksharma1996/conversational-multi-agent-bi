@@ -120,6 +120,9 @@ class DeadlineAdapter(DeadlineBoundedModelAdapter):
     def count_input_tokens(self, prompt: str) -> int:
         return 1
 
+    def count_input_tokens_within(self, prompt: str, *, deadline: PlanningDeadline) -> int:
+        return 1
+
     def generate_once(self, prompt: str, *, max_output_tokens: int) -> LLMResponse:
         return LLMResponse(text="{}", model=self.model, provider=self.provider)
 

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import {
   askQuestion,
+  getConsent,
   getAnalysis,
   getConversation,
   getDataset,
@@ -21,8 +22,10 @@ import {
   documentCollectionFixture,
   messageFixture,
   readyDatasetFixture,
+  consentCurrentFixture,
   workspaceFixture,
 } from "./test/fixtures";
+import { readyComposer } from "./test/composer";
 
 vi.mock("./components/PlotlyChart", () => ({ default: () => <div data-testid="plotly-chart" /> }));
 vi.mock("./api/client", async (importOriginal) => {
@@ -30,6 +33,7 @@ vi.mock("./api/client", async (importOriginal) => {
   return {
     ...actual,
     createWorkspace: vi.fn(),
+    getConsent: vi.fn(),
     listWorkspaces: vi.fn(),
     getWorkspaceOverview: vi.fn(),
     getDataset: vi.fn(),
@@ -72,6 +76,10 @@ beforeEach(() => {
   window.sessionStorage.clear();
   window.history.replaceState(null, "", "#overview");
   mockOwnedWorkspace();
+});
+
+beforeEach(() => {
+  vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
 });
 
 describe("reload during an operation", () => {
@@ -129,7 +137,7 @@ describe("reload during an operation", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.type(await screen.findByLabelText("Business question"), "Secret question text");
+    await user.type(await readyComposer(), "Secret question text");
     fireEvent.click(screen.getByRole("button", { name: "Ask workbench" }));
     await waitFor(() => expect(window.sessionStorage.getItem(KEY)).not.toBeNull());
     const stored = JSON.parse(window.sessionStorage.getItem(KEY) ?? "{}") as Record<string, unknown>;

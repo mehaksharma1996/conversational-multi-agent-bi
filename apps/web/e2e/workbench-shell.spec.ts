@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import {
   conversationFixture,
   documentCollectionFixture,
+  fulfillConsent,
   messageFixture,
   workspaceFixture,
 } from "./fixtures";
@@ -19,6 +20,7 @@ const citedMessage = {
 
 async function routeApi(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
+    if (await fulfillConsent(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/config") {

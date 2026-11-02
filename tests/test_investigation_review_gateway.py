@@ -20,6 +20,7 @@ from src.orchestration.review_prompts import (
     FINDINGS_PROMPT_VERSION,
 )
 from src.orchestration.tool_gateway import (
+    SCRIPTED_EXECUTION_ADMISSION,
     BeginAttempt,
     DraftFindings,
     InvestigationToolGateway,
@@ -88,6 +89,7 @@ def _harness(
         resolver=resolver,
         llm_client=llm,
         max_input_tokens_per_call=max_input,
+        scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         numeric_fields=NUMERIC,
     )
     return Harness(

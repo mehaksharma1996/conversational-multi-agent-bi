@@ -34,6 +34,7 @@ from pydantic import (
     Field,
     Strict,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -205,7 +206,7 @@ class PlanningStageReservation:
 
 
 def reserve_planning_stage(ledger: BudgetLedger, stage: PlanningStage) -> PlanningStageReservation:
-    """Reserve one fixed 6k/1k stage against the caller's cumulative planning ledger.
+    """Reserve one fixed 6k/2k stage against the caller's cumulative planning ledger.
 
     The function accepts no caller-supplied amounts. It deliberately does not implement the
     initial/repair state machine; the S2 gateway will own that sequencing while retaining this
@@ -337,6 +338,71 @@ class ReviewedPlanningEvidence(_Authority):
         return self
 
     def covering(self, member: ProviderAttemptBound) -> ReviewedPlanningCapability | None:
+        """The review whose bound is exactly ``member``; aliases and near matches never count."""
+        return next((item for item in self.capabilities if item.bound == member), None)
+
+
+class ReviewedExecutionCapability(_Authority):
+    """Separately reviewed execution evidence for one exact member (ADR 0024 Amendment 11, item 3).
+
+    Like ``ReviewedPlanningCapability`` it is never an adapter self-declaration. ``bound`` pins the
+    exact provider, dated model snapshot, consent recipient, single attempt, bounded input, and the
+    per-call output cap. The literal ``True`` fields record that review established a deadline the
+    provider enforces, provider-confirmed termination, and usage reported on completion; a value
+    that is merely truthy (``1``) is refused. Review does not prove behaviour at runtime: the
+    gateway still checks every report and termination result.
+    """
+
+    bound: ProviderAttemptBound
+    evidence_version: Token
+    provider_deadline_enforced: Literal[True]
+    termination_confirmed: Literal[True]
+    usage_reported: Literal[True]
+
+    @field_validator(
+        "provider_deadline_enforced", "termination_confirmed", "usage_reported", mode="before"
+    )
+    @classmethod
+    def _exactly_true(cls, value: object) -> object:
+        if value is not True:  # ``Literal[True]`` alone accepts ``1``
+            raise ValueError("execution capability not reviewed")
+        return value
+
+    @model_validator(mode="after")
+    def _execution_bound(self) -> ReviewedExecutionCapability:
+        if (
+            self.bound.max_attempts != 1
+            or self.bound.input_bounded is not True
+            or self.bound.max_output_tokens is None
+        ):
+            raise ValueError("reviewed execution capability needs one attempt and enforced bounds")
+        return self
+
+
+class ReviewedExecutionEvidence(_Authority):
+    """The trusted, versioned set of reviewed execution capabilities (Amendment 11, item 3).
+
+    The configuration adapter holding the current review constructs it; production holds none.
+    Every capability carries the set's ``evidence_version`` (a stale or mixed review is refused),
+    each provider/model is reviewed once, and ``covering`` binds by exact equality with the
+    envelope member, so a review for another provider, snapshot, recipient, or cap never applies.
+    """
+
+    evidence_version: Token
+    capabilities: tuple[ReviewedExecutionCapability, ...] = Field(
+        min_length=1, max_length=MAX_PROVIDER_MEMBERS
+    )
+
+    @model_validator(mode="after")
+    def _current_unique_reviews(self) -> ReviewedExecutionEvidence:
+        if any(item.evidence_version != self.evidence_version for item in self.capabilities):
+            raise ValueError("every reviewed capability must carry the current evidence version")
+        identities = [(item.bound.provider, item.bound.model) for item in self.capabilities]
+        if len(identities) != len(set(identities)):
+            raise ValueError("provider/model capability identities must be unique")
+        return self
+
+    def covering(self, member: ProviderAttemptBound) -> ReviewedExecutionCapability | None:
         """The review whose bound is exactly ``member``; aliases and near matches never count."""
         return next((item for item in self.capabilities if item.bound == member), None)
 

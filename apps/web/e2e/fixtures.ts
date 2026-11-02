@@ -13,6 +13,36 @@ export const workspaceFixture = {
   created_at: createdAt,
 };
 
+export const consentMissingFixture = {
+  workspace_id: workspaceFixture.id,
+  required: true,
+  accepted: false,
+  status: "missing",
+  questions_enabled: false,
+  can_manage: true,
+  notice_version: null,
+  accepted_at: null,
+  withdrawn_at: null,
+  data_recipients: [],
+  notice: {
+    version: "2026-09",
+    title: "Hosted model data sharing",
+    sections: [{ heading: "What model-backed questions send", body: "Questions may send question text." }],
+    recipients: ["Gemini"],
+    digest: "a".repeat(64),
+  },
+};
+
+export const consentCurrentFixture = {
+  ...consentMissingFixture,
+  accepted: true,
+  status: "current",
+  questions_enabled: true,
+  notice_version: "2026-09",
+  accepted_at: "2026-09-29T12:01:00Z",
+  data_recipients: ["Gemini"],
+};
+
 export const documentCollectionFixture = {
   id: "documents-1",
   workspace_id: workspaceFixture.id,
@@ -196,4 +226,12 @@ export function fulfillWorkspaces(
   return route.request().method() === "GET"
     ? route.fulfill({ status: 200, json: { items: [] } })
     : route.fulfill({ status: 201, json: workspace });
+}
+
+/** Answers a consent read for journeys that are not about consent; false for any other request. */
+export async function fulfillConsent(route: import("@playwright/test").Route): Promise<boolean> {
+  const request = route.request();
+  if (request.method() !== "GET" || !new URL(request.url()).pathname.endsWith("/consent")) return false;
+  await route.fulfill({ status: 200, json: consentCurrentFixture });
+  return true;
 }

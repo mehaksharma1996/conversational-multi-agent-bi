@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import {
   ApiClientError,
   acceptConsent,
+  withdrawConsent,
   askQuestion,
   confirmSchema,
   createConversation,
@@ -30,9 +31,12 @@ import {
   type Message,
   type SchemaMappingUpdate,
   type Workspace,
+  type Consent,
+  type ConsentNotice,
 } from "./api/client";
 import { AnalysisDashboard } from "./components/AnalysisDashboard";
 import { ConfirmDialog, type ConfirmationRequest } from "./components/ConfirmDialog";
+import { ConsentPanel } from "./components/ConsentPanel";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { DemoGuide } from "./components/DemoGuide";
 import { DocumentUpload } from "./components/DocumentUpload";
@@ -61,9 +65,11 @@ import {
 } from "./demo/retailDemo";
 import { announcementFor } from "./operations/announcements";
 import { discardStale, useOperations, type OperationEvent } from "./operations/useOperations";
+import { consentGateReason, investigationGate, questionGate, useConsent } from "./workspace/useConsent";
 import { INVESTIGATION_STATUS_LABEL } from "./investigations/model";
 import { useInvestigation } from "./investigations/useInvestigation";
 import { useWorkflowDrafts } from "./workspace/drafts";
+import { captureFocusIntent, focusOnNextFrame } from "./workspace/focus";
 import {
   assessMarker,
   describeAssessment,
@@ -166,6 +172,17 @@ export default function App() {
     beginCommand: () => begin("investigation"),
   });
   const previousInvestigationStatus = useRef<{ id: string; status: string } | null>(null);
+  const consent = useConsent(workspace?.id ?? null);
+  const consentState = consent.view.consent;
+  const { refresh: refreshConsent } = consent;
+
+  // Another tab or person may have changed consent: read it again on opening Ask, and whenever an
+  // investigation moves or is refused, so a stale "accepted" is never what the person acts on.
+  const investigationStatusNow = investigation.investigation?.status ?? null;
+  const investigationErrorNow = investigation.error;
+  useEffect(() => {
+    if (activeSection === "ask") void refreshConsent();
+  }, [activeSection, investigationStatusNow, investigationErrorNow, refreshConsent]);
 
   useEffect(() => {
     const current = investigation.investigation;
@@ -191,9 +208,7 @@ export default function App() {
       window.history.pushState(null, "", `#${section}`);
     }
     setActiveSection(section);
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>("[data-section-heading]")?.focus();
-    });
+    focusOnNextFrame(() => document.querySelector<HTMLElement>("[data-section-heading]"));
   }, []);
 
   // Back, Forward, and typed fragments restore the section; a non-route fragment keeps the current one.
@@ -632,19 +647,65 @@ export default function App() {
     }
   };
 
-  const handleConsent = async () => {
+  // Success is announced only after the server answered. A failed request may still have reached
+  // the server (a timeout, for example), so the state shown afterwards is read back, never assumed.
+  const changeConsent = async (
+    kind: "consent" | "consent_withdrawal",
+    send: (ownerId: string) => Promise<Consent>,
+    success: (result: Consent) => string,
+  ) => {
     if (!workspace) return;
-    const operation = begin("consent");
+    const operation = begin(kind);
     if (!operation) return;
+    const from = epoch.current;
+    const focusIntent = captureFocusIntent();
     setError(null);
     try {
-      await acceptConsent(workspace.id);
-      setWorkspace({ ...workspace, consent_accepted: true });
+      const result = await send(workspace.id);
+      if (discardStale(operation, from, epoch.current)) return;
+      consent.adopt(result);
+      setWorkspace((current) =>
+        current?.id === result.workspace_id ? { ...current, consent_accepted: result.accepted } : current,
+      );
+      await consent.refresh(true);
+      if (discardStale(operation, from, epoch.current)) return;
       operation.finish("succeeded");
+      announce(success(result));
+      focusOnNextFrame(() => document.querySelector<HTMLElement>("[data-consent-heading]"), focusIntent);
     } catch (caught) {
+      if (discardStale(operation, from, epoch.current)) return;
       operation.finish("failed");
       setError(normalizeError(caught));
+      await consent.refresh();
+      if (from === epoch.current) announce("Consent was not confirmed as changed. The current status is shown on the page.");
     }
+  };
+
+  const handleAcceptConsent = (notice: ConsentNotice) =>
+    void changeConsent(
+      "consent",
+      (ownerId) => acceptConsent(ownerId, notice),
+      (result) => `Data-sharing consent accepted for ${(result.data_recipients ?? []).join(" and ")}.`,
+    );
+
+  const handleWithdrawConsent = async () => {
+    if (busy) return;
+    const accepted = await confirm({
+      title: "Withdraw data-sharing consent?",
+      consequences: [
+        "This applies to every external recipient of this workspace.",
+        "No new model request starts once a check sees the withdrawal. Questions and investigations that need these recipients are refused until a notice is accepted again.",
+        "Requests already sent are not recalled, and data a recipient already received is not deleted.",
+      ],
+      confirmLabel: "Withdraw consent",
+      tone: "danger",
+    });
+    if (!accepted) return;
+    await changeConsent(
+      "consent_withdrawal",
+      withdrawConsent,
+      () => "Data-sharing consent withdrawn. Requests already sent were not recalled.",
+    );
   };
 
   // Reads the conversation back after an uncertain submission. A stored answer is adopted, never
@@ -1118,7 +1179,9 @@ export default function App() {
             dataConfirmed={dataset?.filename === DEMO_DATA_FILENAME && dataset.status === "ready"}
             policyLoaded={documents?.filenames.includes(DEMO_POLICY_FILENAME) ?? false}
             analysisRun={analysis !== null}
-            consentNeeded={workspace !== null && workspace.consent_required && !workspace.consent_accepted}
+            consentNeeded={
+              consentState ? !consentState.questions_enabled : workspace !== null && workspace.consent_required
+            }
             onLoad={handleLoadDemo}
           />
         </div>
@@ -1257,8 +1320,19 @@ export default function App() {
       {activeSection === "ask" ? (
         <div className="section-stack" id="ask-workspace" aria-busy={mutationBusy || undefined}>
           {workspace ? (
+            <ConsentPanel
+              view={consent.view}
+              busy={busy}
+              pending={isActive("consent") ? "accept" : isActive("consent_withdrawal") ? "withdraw" : null}
+              onAccept={handleAcceptConsent}
+              onWithdraw={() => void handleWithdrawConsent()}
+              onRetry={() => void consent.refresh()}
+            />
+          ) : null}
+          {workspace ? (
             <ConversationPanel
               workspace={workspace}
+              consentGate={questionGate(consent.view, workspace)}
               messages={messages}
               localEntry={localEntry}
               busy={busy}
@@ -1281,7 +1355,6 @@ export default function App() {
               onApprovalDraftChange={(messageId, draft) =>
                 updateDraft("approvals", (current) => ({ ...current, [messageId]: draft }))
               }
-              onAcceptConsent={handleConsent}
               onAsk={handleQuestion}
               onApproval={handleApproval}
               onExport={handleResultExport}
@@ -1300,6 +1373,7 @@ export default function App() {
                     error={investigation.error}
                     job={investigation.job}
                     busy={busy}
+                    startBlockedReason={consentGateReason(investigationGate(consent.view, workspace))}
                     onStart={() => void investigation.start()}
                     onApprove={() => void handleInvestigationPlanDecision("approve")}
                     onReject={() => void handleInvestigationPlanDecision("reject")}

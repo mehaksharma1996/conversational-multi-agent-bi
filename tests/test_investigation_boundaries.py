@@ -489,6 +489,12 @@ TRUSTED_RECORDS = frozenset(
     {"ReviewedPlanningCapability", "ReviewedPlanningEvidence", "ProviderPricingTable"}
 )
 DERIVED_PROFILE_MODULES = frozenset({"packages/investigation/planning_cost.py"})
+# PROD-1 S2 (#198, approved 2026-10-31): the one deadline adapter allowed in production code, as an
+# exact (module, class) pair. It is wired to nothing, and admission still needs separately
+# reviewed evidence (``REVIEWED_CAPABILITY_PROFILES`` is empty; see the tests below).
+REVIEWED_DEADLINE_ADAPTERS = frozenset(
+    {("src/llm/openai_responses_bounded.py", "OpenAIResponsesBoundedAdapter")}
+)
 
 
 def _is_forbidden(module: str, forbidden: tuple[str, ...]) -> bool:
@@ -537,7 +543,10 @@ def production_planning_violations(source: str, relative: str = "<production>") 
             bases = {
                 getattr(base, "id", None) or getattr(base, "attr", None) for base in node.bases
             }
-            if "DeadlineBoundedModelAdapter" in bases:
+            if (
+                "DeadlineBoundedModelAdapter" in bases
+                and (relative, node.name) not in REVIEWED_DEADLINE_ADAPTERS
+            ):
                 found.append(f"deadline adapter {node.name}")  # needs reviewed evidence first
         elif isinstance(node, ast.Call):
             func = node.func
@@ -623,6 +632,34 @@ def test_the_planning_checker_detects_each_violation(source: str) -> None:
 )
 def test_the_production_checker_detects_each_violation(source: str) -> None:
     assert production_planning_violations(source, "src/llm/new_client.py"), source
+
+
+def test_the_deadline_adapter_exemption_is_one_exact_module_and_class() -> None:
+    adapter = "class OpenAIResponsesBoundedAdapter(DeadlineBoundedModelAdapter):\n    pass"
+    other = "class Gemini(DeadlineBoundedModelAdapter):\n    pass"
+    assert production_planning_violations(adapter, "src/llm/openai_responses_bounded.py") == []
+    assert production_planning_violations(other, "src/llm/openai_responses_bounded.py")
+    assert production_planning_violations(adapter, "src/llm/new_client.py")
+    assert production_planning_violations(adapter, "apps/api/investigations.py")
+
+
+def test_the_exempt_adapter_has_no_reviewed_capability_and_one_gated_importer() -> None:
+    """PROD-1 S4: only the admission module imports the adapter, and it admits nothing yet."""
+    from apps.api import investigation_providers
+    from src.llm.openai_responses_bounded import REVIEWED_CAPABILITY_PROFILES
+
+    assert dict(REVIEWED_CAPABILITY_PROFILES) == {}
+    assert investigation_providers.LIVE_ADMISSION_RELEASED is False
+    importers = [
+        str(path.relative_to(ROOT)).replace("\\", "/")
+        for path in _production_modules()
+        if "openai_responses_bounded" in path.read_text(encoding="utf-8")
+        and path.name != "openai_responses_bounded.py"
+    ]
+    assert sorted(importers) == [
+        "apps/api/investigation_providers.py",
+        "apps/api/provider_evidence.py",
+    ]
 
 
 def test_the_production_checker_allows_only_derived_profiles_in_planning_cost() -> None:

@@ -6,6 +6,7 @@ import App from "./App";
 import {
   ApiClientError,
   askQuestion,
+  getConsent,
   cancelInvestigation,
   createConversation,
   decideInvestigationPlan,
@@ -22,6 +23,7 @@ import {
 } from "./api/client";
 import {
   analysisFixture,
+  consentCurrentFixture,
   conversationFixture,
   documentCollectionFixture,
   investigationProposalMessageFixture,
@@ -29,6 +31,7 @@ import {
   readyDatasetFixture,
   workspaceFixture,
 } from "./test/fixtures";
+import { readyComposer } from "./test/composer";
 
 vi.mock("./components/PlotlyChart", () => ({ default: () => <div data-testid="plotly-chart" /> }));
 vi.mock("./api/client", async (importOriginal) => {
@@ -36,6 +39,7 @@ vi.mock("./api/client", async (importOriginal) => {
   return {
     ...actual,
     createWorkspace: vi.fn(),
+    getConsent: vi.fn(),
     listWorkspaces: vi.fn(),
     getWorkspaceOverview: vi.fn(),
     getDataset: vi.fn(),
@@ -121,7 +125,7 @@ function pendingInvestigation(overrides: Partial<Investigation> = {}): Investiga
 }
 
 async function ask(text = QUESTION) {
-  const box = await screen.findByLabelText("Business question");
+  const box = await readyComposer();
   await userEvent.type(box, text);
   fireEvent.click(screen.getByRole("button", { name: "Ask workbench" }));
 }
@@ -133,6 +137,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
   window.history.replaceState(null, "", "#ask");
   mockWorkspace();
+  vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
 });
 
 afterEach(() => {

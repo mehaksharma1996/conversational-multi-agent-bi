@@ -171,11 +171,27 @@ deterministically. Google's retention terms are Google's, not this project's; se
 
 Implemented: while Gemini is configured, the API returns `409 gemini_consent_required` for
 questions until the workspace records acceptance of a versioned notice; the acceptance
-(notice version, no content) is written to the audit stream. Consent is per workspace and lives
-in process memory with the workspace record.
+(notice version and recipient tokens, no content) is written to the audit stream. Consent is per
+workspace and is stored with the workspace record.
 
-Recommendation: consent is not re-requested when the notice text changes, and it is not tied to
-a verified user identity beyond the local-development tenant.
+The notice is served by the API (`GET /workspaces/{id}/consent`) with its version, full text, and
+recipients; the web client renders it before offering acceptance. An unrecognized version is refused,
+and a stored record that names one grants nothing. `DELETE /workspaces/{id}/consent` withdraws consent
+for every recipient of the workspace: questions, SQL approvals, and investigations that need those
+recipients are refused from the next check. It does not recall a request already sent or delete what a
+recipient already received.
+
+Accepting needs the exact digest of the notice the server currently serves, which is an integrity check
+rather than proof that anyone read it. The only exception is the legacy `2026-09` version, which can
+never authorize OpenAI. Only `workspace:admin` can accept or withdraw, and the web client offers those
+controls only when the server says the caller holds that capability. While consent is loading or
+unreadable, the web client does not offer questions or new investigations in a workspace that may share
+data. A run may continue after a new acceptance only if it has not already observed the withdrawal or
+ended, and its next approval still applies.
+
+Recommendation: consent is not re-requested when the notice text changes without a new version, and it
+is not tied to a verified user identity beyond the local-development tenant. The notice wording has
+not had legal review.
 
 ## Local-only mode
 
