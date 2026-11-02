@@ -448,10 +448,12 @@ class ConsentApp:
 
 
 def _accept(client: TestClient, workspace_id: str, version: str) -> Any:
-    return client.put(
-        f"/api/v1/workspaces/{workspace_id}/consent",
-        json={"accepted": True, "notice_version": version},
-    )
+    url = f"/api/v1/workspaces/{workspace_id}/consent"
+    command: dict[str, Any] = {"accepted": True, "notice_version": version}
+    notice = client.get(url).json().get("notice") or {}
+    if version != BASE_NOTICE_VERSION and notice.get("version") == version:
+        command["notice_digest"] = notice["digest"]  # S5d hardening: required for this version
+    return client.put(url, json=command)
 
 
 def _snapshot(client: TestClient, workspace_id: str) -> Any:
@@ -494,8 +496,9 @@ def test_explicit_acceptance_of_the_openai_notice_grants_it_with_content_free_au
 def test_openai_consent_needs_an_openai_provider_to_be_configured(root: Path) -> None:
     with TestClient(ConsentApp(root, investigation_model_activation=False).app()) as client:
         workspace_id = client.post("/api/v1/workspaces").json()["id"]
-        body = _accept(client, workspace_id, OPENAI_NOTICE_VERSION).json()
-        assert body["data_recipients"] == ["Gemini"]
+        refused = _accept(client, workspace_id, OPENAI_NOTICE_VERSION)
+        assert refused.status_code == 409  # a notice this server does not serve cannot be accepted
+        assert refused.json()["error"]["code"] == "consent_notice_changed"
         assert not _snapshot(client, workspace_id).satisfies({"OpenAI"})
 
 

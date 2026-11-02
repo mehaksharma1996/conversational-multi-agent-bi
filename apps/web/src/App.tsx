@@ -65,7 +65,7 @@ import {
 } from "./demo/retailDemo";
 import { announcementFor } from "./operations/announcements";
 import { discardStale, useOperations, type OperationEvent } from "./operations/useOperations";
-import { useConsent } from "./workspace/useConsent";
+import { consentGateReason, investigationGate, questionGate, useConsent } from "./workspace/useConsent";
 import { INVESTIGATION_STATUS_LABEL } from "./investigations/model";
 import { useInvestigation } from "./investigations/useInvestigation";
 import { useWorkflowDrafts } from "./workspace/drafts";
@@ -1186,9 +1186,7 @@ export default function App() {
             policyLoaded={documents?.filenames.includes(DEMO_POLICY_FILENAME) ?? false}
             analysisRun={analysis !== null}
             consentNeeded={
-              consentState
-                ? !consentState.questions_enabled
-                : workspace !== null && workspace.consent_required && !workspace.consent_accepted
+              consentState ? !consentState.questions_enabled : workspace !== null && workspace.consent_required
             }
             onLoad={handleLoadDemo}
           />
@@ -1340,7 +1338,7 @@ export default function App() {
           {workspace ? (
             <ConversationPanel
               workspace={workspace}
-              questionsEnabled={consentState?.questions_enabled}
+              consentGate={questionGate(consent.view, workspace)}
               messages={messages}
               localEntry={localEntry}
               busy={busy}
@@ -1381,6 +1379,7 @@ export default function App() {
                     error={investigation.error}
                     job={investigation.job}
                     busy={busy}
+                    startBlockedReason={consentGateReason(investigationGate(consent.view, workspace))}
                     onStart={() => void investigation.start()}
                     onApprove={() => void handleInvestigationPlanDecision("approve")}
                     onReject={() => void handleInvestigationPlanDecision("reject")}

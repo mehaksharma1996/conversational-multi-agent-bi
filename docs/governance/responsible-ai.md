@@ -181,6 +181,14 @@ for every recipient of the workspace: questions, SQL approvals, and investigatio
 recipients are refused from the next check. It does not recall a request already sent or delete what a
 recipient already received.
 
+Accepting needs the exact digest of the notice the server currently serves, which is an integrity check
+rather than proof that anyone read it. The only exception is the legacy `2026-09` version, which can
+never authorize OpenAI. Only `workspace:admin` can accept or withdraw, and the web client offers those
+controls only when the server says the caller holds that capability. While consent is loading or
+unreadable, the web client does not offer questions or new investigations in a workspace that may share
+data. A run may continue after a new acceptance only if it has not already observed the withdrawal or
+ended, and its next approval still applies.
+
 Recommendation: consent is not re-requested when the notice text changes without a new version, and it
 is not tied to a verified user identity beyond the local-development tenant. The notice wording has
 not had legal review.

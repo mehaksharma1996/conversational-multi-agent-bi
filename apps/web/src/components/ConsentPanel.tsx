@@ -123,7 +123,13 @@ export function ConsentPanel({ view, busy, pending, onAccept, onWithdraw, onRetr
         </details>
       ) : null}
 
-      {consent ? (
+      {consent && !consent.can_manage ? (
+        <p className="section-copy consent-read-only">
+          You can read this notice and its status. A workspace administrator accepts or withdraws consent.
+        </p>
+      ) : null}
+
+      {consent?.can_manage ? (
         <div className="consent-actions">
           {needsAcceptance && notice !== null ? (
             <button

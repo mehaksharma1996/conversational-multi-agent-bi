@@ -105,8 +105,9 @@ class ConsentUpdateRequest(StrictModel):
         min_length=64,
         max_length=64,
         description=(
-            "The `digest` of the notice the client displayed. When sent, the request is refused "
-            "unless it is the notice this server would serve now, recipients included."
+            "The `digest` of the notice the client displayed. The request is refused unless it is "
+            "the notice this server would serve now, recipients included. Required for every "
+            "version except the legacy `2026-09`, which can never authorize OpenAI."
         ),
     )
 
@@ -133,6 +134,9 @@ class ConsentResponse(StrictModel):
     status: Literal["not_required", "missing", "current", "stale", "withdrawn"]
     questions_enabled: bool = Field(
         description="Whether the consent in force covers every recipient of model-backed questions."
+    )
+    can_manage: bool = Field(
+        description="Whether this caller holds `workspace:admin`, so may accept or withdraw."
     )
     notice_version: str | None
     accepted_at: datetime | None

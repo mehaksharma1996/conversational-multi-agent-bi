@@ -241,6 +241,36 @@ test("a withdrawal made elsewhere shows on reopening Ask, not the remembered sta
   await expect(chip(page)).toHaveText("Withdrawn", SERVER_STEP);
 });
 
+test("consent the browser cannot read keeps the composer locked; a retry recovers it", async ({
+  page,
+  request,
+}) => {
+  const workspaceId = await emptyWorkspace(request);
+  await readyConversation(request, workspaceId);
+  await json(
+    await request.put(`${API}/api/v1/workspaces/${workspaceId}/consent`, {
+      data: { accepted: true, notice_version: "2026-09" },
+    }),
+  );
+  const consentPath = `**/api/v1/workspaces/${workspaceId}/consent`;
+  await page.route(consentPath, (route) => route.abort());
+  await openAsk(page, workspaceId);
+
+  await expect(page.getByText("consent could not be verified", { exact: false })).toBeVisible(SERVER_STEP);
+  await expect(page.getByLabel("Business question")).toBeDisabled();
+  await expect(chip(page)).toHaveCount(0);
+  await axe(page);
+
+  await page.unroute(consentPath);
+  await panel(page).getByRole("button", { name: "Read consent again" }).click();
+  await expect(chip(page)).toHaveText("Accepted", SERVER_STEP);
+  await expect(page.getByLabel("Business question")).toBeEnabled();
+
+  // Leaves nothing accepted for the next journey's workspace rediscovery to find.
+  await page.goto("about:blank");
+  expect((await request.delete(`${API}/api/v1/workspaces/${workspaceId}`)).ok()).toBe(true);
+});
+
 test("the next workspace never inherits the previous workspace's consent", async ({ page, request }) => {
   const workspaceId = await emptyWorkspace(request);
   await openAsk(page, workspaceId);
@@ -349,6 +379,7 @@ test("OpenAI configured: older consent is stale, the new notice discloses it, an
   // The server, not the browser, decides what can be accepted.
   for (const [body, code] of [
     [{ accepted: true, notice_version: "2026-10-openai-0" }, "consent_notice_unknown"],
+    [{ accepted: true, notice_version: "2026-10-openai-1" }, "consent_notice_changed"],
     [
       { accepted: true, notice_version: "2026-10-openai-1", notice_digest: "0".repeat(64) },
       "consent_notice_changed",

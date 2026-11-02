@@ -3,8 +3,10 @@ import type { Page } from "@playwright/test";
 
 import {
   analysisFixture,
+  consentMissingFixture,
   conversationFixture,
   documentCollectionFixture,
+  fulfillConsent,
   fulfillWorkspaces,
   messageFixture,
   readyDatasetFixture,
@@ -21,12 +23,29 @@ async function expectNoAxeViolations(page: Page, excludePlotly = false) {
   expect(result.violations).toEqual([]);
 }
 
+test("a viewer reads the consent notice with no controls and no violations", async ({ page }) => {
+  await routeWorkspace(page);
+  await page.route("**/api/v1/workspaces/*/consent", (route) =>
+    route.fulfill({ status: 200, json: { ...consentMissingFixture, can_manage: false } }),
+  );
+  await page.goto("/#ask");
+
+  const panel = page.getByRole("region", { name: "Workspace data-sharing consent" });
+  await expect(panel.getByText("A workspace administrator accepts or withdraws consent.")).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "External recipients" })).toBeVisible();
+  await expect(panel.getByRole("button")).toHaveCount(0);
+  await expect(page.getByLabel("Business question")).toBeDisabled();
+  await expect(page.getByText("A workspace administrator must accept the data-sharing notice")).toBeVisible();
+  await expectNoAxeViolations(page);
+});
+
 async function routeWorkspace(page: Page, workspace = workspaceFixture) {
   await page.route("**/api/v1/workspaces", (route) => fulfillWorkspaces(route, workspace));
 }
 
 async function routeTabularJourney(page: Page, includeChart = false) {
   await page.route("**/api/v1/**", async (route) => {
+    if (await fulfillConsent(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/config") {
@@ -150,6 +169,7 @@ test("axe baseline: chat answer and provenance warning", async ({ page }) => {
     },
   };
   await page.route("**/api/v1/**", async (route) => {
+    if (await fulfillConsent(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/config") {
@@ -196,6 +216,7 @@ test("axe baseline: pending SQL approval controls", async ({ page }) => {
     provenance: { ...messageFixture.provenance, criteria_provenance: "traced" },
   };
   await page.route("**/api/v1/**", async (route) => {
+    if (await fulfillConsent(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/config") {

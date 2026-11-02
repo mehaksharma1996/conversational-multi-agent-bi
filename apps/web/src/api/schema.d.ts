@@ -1098,6 +1098,11 @@ export interface components {
             /** Accepted At */
             accepted_at: string | null;
             /**
+             * Can Manage
+             * @description Whether this caller holds `workspace:admin`, so may accept or withdraw.
+             */
+            can_manage: boolean;
+            /**
              * Data Recipients
              * @description The recipients the consent in force really authorizes.
              */
@@ -1135,7 +1140,7 @@ export interface components {
             accepted: true;
             /**
              * Notice Digest
-             * @description The `digest` of the notice the client displayed. When sent, the request is refused unless it is the notice this server would serve now, recipients included.
+             * @description The `digest` of the notice the client displayed. The request is refused unless it is the notice this server would serve now, recipients included. Required for every version except the legacy `2026-09`, which can never authorize OpenAI.
              */
             notice_digest?: string | null;
             /**

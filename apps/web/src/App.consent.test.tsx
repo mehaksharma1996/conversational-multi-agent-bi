@@ -89,7 +89,7 @@ describe("workspace consent in the application", () => {
     expect(within(panel()).getByText("Not accepted")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Accepting…" }));
     expect(acceptConsent).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Accept the data-sharing notice above to enable questions.")).toBeVisible();
+    expect(screen.getByText("Accept the data-sharing notice above to enable questions and investigations.")).toBeVisible();
 
     vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
     answer.resolve(consentCurrentFixture);
@@ -97,7 +97,7 @@ describe("workspace consent in the application", () => {
     await waitFor(() => expect(announcer()).toHaveTextContent("Data-sharing consent accepted for Gemini."));
     expect(within(panel()).getByText("Accepted")).toBeVisible();
     expect(screen.queryByRole("button", { name: ACCEPT })).not.toBeInTheDocument();
-    expect(screen.queryByText("Accept the data-sharing notice above to enable questions.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Accept the data-sharing notice above to enable questions and investigations.")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("heading", { name: "Workspace data-sharing consent" })).toHaveFocus());
   });
 
@@ -162,7 +162,7 @@ describe("workspace consent in the application", () => {
     expect(within(panel()).getByText("Withdrawn")).toBeVisible();
     expect(screen.getByRole("button", { name: ACCEPT })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Withdraw consent" })).not.toBeInTheDocument();
-    expect(screen.getByText("Accept the data-sharing notice above to enable questions.")).toBeVisible();
+    expect(screen.getByText("Accept the data-sharing notice above to enable questions and investigations.")).toBeVisible();
   });
 
   it("restores the server's status on load, and never a remembered one", async () => {
@@ -228,6 +228,78 @@ describe("workspace consent in the application", () => {
     await user.click(screen.getByRole("button", { name: "Read consent again" }));
 
     expect(await screen.findByRole("button", { name: ACCEPT })).toBeEnabled();
+  });
+
+  it("keeps the composer locked while consent loads, even for a workspace flagged accepted", async () => {
+    const user = userEvent.setup();
+    const answer = deferred<Consent>();
+    vi.mocked(createWorkspace).mockResolvedValue({ ...workspaceFixture, consent_accepted: true });
+    vi.mocked(getConsent).mockReturnValue(answer.promise);
+    render(<App />);
+    await openAsk(user);
+
+    expect(await screen.findByText(/Checking this workspace's data-sharing consent/)).toBeVisible();
+    expect(screen.getByLabelText("Business question")).toBeDisabled();
+
+    answer.resolve(consentCurrentFixture);
+    await waitFor(() => expect(within(panel()).getByText("Accepted")).toBeVisible());
+    expect(screen.queryByText(/Checking this workspace's data-sharing consent/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the composer locked when consent cannot be read, and explains why", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createWorkspace).mockResolvedValue({ ...workspaceFixture, consent_accepted: true });
+    vi.mocked(getConsent).mockRejectedValue(new ApiClientError("Server unavailable.", "network_error"));
+    render(<App />);
+    await openAsk(user);
+
+    expect(await screen.findByText(/consent could not be verified/)).toBeVisible();
+    expect(screen.getByLabelText("Business question")).toBeDisabled();
+  });
+
+  it("does not block a local-only workspace while consent is unknown", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createWorkspace).mockResolvedValue({
+      ...workspaceFixture,
+      local_only_mode: true,
+      gemini_configured: false,
+      consent_required: false,
+      data_recipients: [],
+    });
+    vi.mocked(getConsent).mockReturnValue(deferred<Consent>().promise);
+    render(<App />);
+    await openAsk(user);
+
+    expect(screen.queryByText(/Checking this workspace's data-sharing consent/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not be verified/)).not.toBeInTheDocument();
+  });
+
+  it("gives a viewer the notice but no controls, and points to an administrator", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getConsent).mockResolvedValue({ ...consentMissingFixture, can_manage: false });
+    render(<App />);
+    await openAsk(user);
+
+    expect(await screen.findByText(/A workspace administrator accepts or withdraws consent/)).toBeVisible();
+    expect(within(panel()).getByRole("heading", { level: 4, name: "External recipients" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: ACCEPT })).not.toBeInTheDocument();
+    expect(screen.getByText(/A workspace administrator must accept/)).toBeVisible();
+  });
+
+  it("removes the controls when a role change makes the server answer 403", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await openAsk(user);
+    const accept = await screen.findByRole("button", { name: ACCEPT });
+
+    vi.mocked(acceptConsent).mockRejectedValue(new ApiClientError("Not allowed.", "forbidden", null, 403));
+    vi.mocked(getConsent).mockResolvedValue({ ...consentMissingFixture, can_manage: false });
+    await user.click(accept);
+
+    await screen.findByText(/A workspace administrator accepts or withdraws consent/);
+    expect(screen.queryByRole("button", { name: ACCEPT })).not.toBeInTheDocument();
+    expect(announcer()).toHaveTextContent("Consent was not confirmed as changed.");
+    expect(within(panel()).queryByText("Accepted")).not.toBeInTheDocument();
   });
 
   it("adds no live region of its own", async () => {

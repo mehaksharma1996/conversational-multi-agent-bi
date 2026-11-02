@@ -745,6 +745,11 @@
             ],
             "title": "Accepted At"
           },
+          "can_manage": {
+            "description": "Whether this caller holds `workspace:admin`, so may accept or withdraw.",
+            "title": "Can Manage",
+            "type": "boolean"
+          },
           "data_recipients": {
             "description": "The recipients the consent in force really authorizes.",
             "items": {
@@ -819,6 +824,7 @@
           "accepted",
           "status",
           "questions_enabled",
+          "can_manage",
           "notice_version",
           "accepted_at"
         ],
@@ -844,7 +850,7 @@
                 "type": "null"
               }
             ],
-            "description": "The `digest` of the notice the client displayed. When sent, the request is refused unless it is the notice this server would serve now, recipients included.",
+            "description": "The `digest` of the notice the client displayed. The request is refused unless it is the notice this server would serve now, recipients included. Required for every version except the legacy `2026-09`, which can never authorize OpenAI.",
             "title": "Notice Digest"
           },
           "notice_version": {

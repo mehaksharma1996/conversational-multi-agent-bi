@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from apps.api import consent_notices as notices_module
+from apps.api import feature_routes as routes_module
 from apps.api import investigation_providers as providers_module
 from apps.api.consent_notices import (
     BASE_NOTICE,
@@ -25,9 +27,12 @@ from apps.api.consent_notices import (
     NOTICES,
     OPENAI_NOTICE,
     OPENAI_NOTICE_VERSION,
+    NoticeSection,
     audit_recipients,
     consent_in_force,
     consent_status,
+    digest_required,
+    discloses,
     effective_recipients,
     served_notice,
 )
@@ -343,6 +348,158 @@ def test_accepting_activates_nothing() -> None:
         assert _accept_current(client, workspace_id).json()["status"] == "current"
         assert app.state.investigation_provider_decision is before
         assert type(app.state.investigations._adapters) is FailClosedAdapters
+
+
+# --- the mandatory digest --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("digest", "status", "code"),
+    [
+        (None, 409, "consent_notice_changed"),  # missing
+        ("0" * 64, 409, "consent_notice_changed"),  # incorrect
+        ("z" * 64, 409, "consent_notice_changed"),  # malformed, but the right length
+        ("", 422, "invalid_request"),  # empty
+        ("abc", 422, "invalid_request"),  # malformed
+    ],
+)
+def test_the_openai_notice_needs_its_exact_digest(
+    digest: str | None, status: int, code: str
+) -> None:
+    deployment = App("s5d_digest_required", openai=True)
+    with TestClient(deployment.app()) as client:
+        workspace_id = _workspace(client)
+        extra = {} if digest is None else {"notice_digest": digest}
+        refused = _accept(client, workspace_id, OPENAI_NOTICE_VERSION, **extra)
+        assert refused.status_code == status
+        assert refused.json()["error"]["code"] == code
+        assert _record(client, workspace_id).consent_accepted_at is None
+        assert not _consent(_record(client, workspace_id)).satisfies({"OpenAI"})
+        assert _accept_current(client, workspace_id).json()["data_recipients"] == [
+            "Gemini",
+            "OpenAI",
+        ]
+    assert len(deployment.events("consent.accepted")) == 1
+
+
+def test_a_digest_of_the_previous_notice_text_is_refused_after_the_text_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with TestClient(App("s5d_digest_text", openai=True).app()) as client:
+        workspace_id = _workspace(client)
+        before = client.get(_url(workspace_id)).json()["notice"]
+        changed = replace(
+            OPENAI_NOTICE,
+            sections=(*OPENAI_NOTICE.sections, NoticeSection("New", "A new disclosure.")),
+        )
+        monkeypatch.setattr(notices_module, "OPENAI_NOTICE", changed)
+        after = client.get(_url(workspace_id)).json()["notice"]
+        assert after["digest"] != before["digest"] and after["version"] == before["version"]
+        refused = _accept(
+            client, workspace_id, OPENAI_NOTICE_VERSION, notice_digest=before["digest"]
+        )
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "consent_notice_changed"
+        assert _record(client, workspace_id).consent_accepted_at is None
+        assert _accept_current(client, workspace_id).json()["status"] == "current"
+
+
+def test_only_the_legacy_version_may_omit_a_digest_and_it_never_reaches_openai() -> None:
+    assert not digest_required(BASE_NOTICE_VERSION)
+    for version in (OPENAI_NOTICE_VERSION, "2027-01-future", ""):
+        assert digest_required(version)
+    assert not discloses(BASE_NOTICE_VERSION, "OpenAI")
+    for version in set(NOTICES) - {BASE_NOTICE_VERSION}:
+        assert digest_required(version)  # a new notice cannot silently join the legacy allowance
+    with TestClient(App("s5d_legacy", openai=True).app()) as client:
+        workspace_id = _workspace(client)
+        body = _accept(client, workspace_id, BASE_NOTICE_VERSION).json()
+        assert (body["status"], body["data_recipients"]) == ("stale", ["Gemini"])
+        assert not _consent(_record(client, workspace_id)).satisfies({"OpenAI"})
+
+
+def test_a_future_recognised_notice_is_refused_without_its_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    future = replace(BASE_NOTICE, version="2027-01-future")
+    monkeypatch.setattr(routes_module, "NOTICES", {**NOTICES, future.version: future})
+    with TestClient(App("s5d_future").app()) as client:
+        workspace_id = _workspace(client)
+        refused = _accept(client, workspace_id, future.version)
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "consent_notice_changed"
+        assert _record(client, workspace_id).consent_accepted_at is None
+
+
+def test_stored_consent_stays_valid_without_any_digest_being_stored() -> None:
+    """Compatibility: only acceptance needs a digest, so existing OpenAI rows keep working."""
+    with TestClient(App("s5d_stored", openai=True).app()) as client:
+        workspace_id = _workspace(client)
+        _tamper(
+            client,
+            workspace_id,
+            consent_notice_version=OPENAI_NOTICE_VERSION,
+            consent_accepted_at=T0,
+            consent_recipients=("Gemini", "OpenAI"),
+        )
+        assert client.get(_url(workspace_id)).json()["status"] == "current"
+        assert _consent(_record(client, workspace_id)).satisfies({"OpenAI"})
+
+
+def test_consent_in_one_workspace_never_covers_another_in_the_same_tenant() -> None:
+    with TestClient(App("s5d_cross_workspace", openai=True).app()) as client:
+        first, second = _workspace(client), _workspace(client)
+        assert _accept_current(client, first).json()["status"] == "current"
+        body = client.get(_url(second)).json()
+        assert (body["status"], body["data_recipients"]) == ("missing", [])
+        assert client.delete(_url(second)).json()["status"] == "missing"
+        assert client.get(_url(first)).json()["status"] == "current"
+
+
+def test_the_digest_is_never_audited() -> None:
+    deployment = App("s5d_digest_audit", openai=True)
+    with TestClient(deployment.app()) as client:
+        workspace_id = _workspace(client)
+        digest = client.get(_url(workspace_id)).json()["notice"]["digest"]
+        _accept_current(client, workspace_id)
+    rendered = json.dumps([event.attributes for event in deployment.audit.events], default=str)
+    assert digest not in rendered
+
+
+# --- who may change consent ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("roles", "can_manage"),
+    [
+        (frozenset({"viewer"}), False),
+        (frozenset({"analyst"}), False),
+        (frozenset({"unknown-role"}), False),
+        (frozenset({"workspace_admin"}), True),
+    ],
+)
+def test_can_manage_reports_the_callers_capability_and_the_backend_still_enforces_it(
+    roles: frozenset[str], can_manage: bool
+) -> None:
+    app = App(f"s5d_can_manage_{sorted(roles)[0]}", openai=True).app()
+    with TestClient(app) as client:
+        workspace_id = _workspace(client)
+        notice = client.get(_url(workspace_id)).json()["notice"]
+        _as(app, _record(client, workspace_id).tenant_id, roles=roles)
+        answer = client.get(_url(workspace_id))
+        if "unknown-role" in roles:
+            assert answer.status_code == 403  # no capability at all: not even the notice
+        else:
+            assert answer.status_code == 200 and answer.json()["can_manage"] is can_manage
+        accepted = _accept(client, workspace_id, notice["version"], notice_digest=notice["digest"])
+        assert accepted.status_code == (200 if can_manage else 403)
+        assert client.delete(_url(workspace_id)).status_code == (200 if can_manage else 403)
+        app.dependency_overrides.clear()
+
+
+def test_a_local_caller_manages_consent() -> None:
+    with TestClient(App("s5d_can_manage_local").app()) as client:
+        assert client.get(_url(_workspace(client))).json()["can_manage"] is True
 
 
 # --- withdrawal ------------------------------------------------------------------------------
@@ -721,7 +878,12 @@ def test_reaccepting_before_any_check_continues_a_paused_run_under_the_new_conse
         flow.to_first_wave()
         first = flow.wave_id()
         flow.withdraw()
+        sent = (adapters.llm.counts, len(adapters.llm.sql_prompts))
         flow.accept_covering_the_run()
+        # Accepting starts nothing: the run stays paused on its own approval, with nothing sent.
+        assert flow.body()["status"] == "awaiting_sql_approval"
+        assert flow.wave_id() == first
+        assert (adapters.llm.counts, len(adapters.llm.sql_prompts)) == sent
         answer = _approve_wave(client, flow.id)
         assert answer.status_code == 202, answer.json()
         settled = flow.after_resume(first)
@@ -729,6 +891,77 @@ def test_reaccepting_before_any_check_continues_a_paused_run_under_the_new_conse
         assert len(adapters.llm.sql_prompts) == 2
         assert flow.cancel().status_code in {200, 202}
         flow.until(*TERMINAL)
+    consent_events = [e for e in d.audit.events if e.name.startswith("consent.")]
+    assert [e.name for e in consent_events][-2:] == ["consent.withdrawn", "consent.accepted"]
+
+
+def test_reaccepting_before_the_next_check_continues_an_active_run() -> None:
+    adapters = TwoWaves()
+    adapters.llm.count_gate = Gate(nth=2)
+    d = Deployment("s5d_reaccept_active", adapters=adapters)
+    with TestClient(d.app()) as client:
+        flow = WithdrawingFlow(client, d)
+        flow.to_first_wave()
+        first = flow.wave_id()
+        assert _approve_wave(client, flow.id).status_code == 202
+        assert adapters.llm.count_gate.entered.wait(30)
+        flow.withdraw()
+        flow.accept_covering_the_run()
+        adapters.llm.count_gate.release.set()
+        settled = flow.after_resume(first)
+        assert settled["status"] not in {"failed", "cancelled"}
+        assert len(adapters.llm.sql_prompts) == 2
+        assert flow.cancel().status_code in {200, 202}
+        flow.until(*TERMINAL)
+
+
+def test_reaccepting_after_an_active_run_observed_revocation_never_revives_it() -> None:
+    adapters = TwoWaves()
+    adapters.llm.count_gate = Gate(nth=2)
+    d = Deployment("s5d_observed_active", adapters=adapters)
+    with TestClient(d.app()) as client:
+        flow = WithdrawingFlow(client, d)
+        flow.to_first_wave()
+        assert _approve_wave(client, flow.id).status_code == 202
+        assert adapters.llm.count_gate.entered.wait(30)
+        flow.withdraw()
+        adapters.llm.count_gate.release.set()
+        ended = flow.until(*TERMINAL)
+        sent = (adapters.llm.counts, len(adapters.llm.sql_prompts))
+        flow.accept_covering_the_run()
+        assert flow.body()["status"] == ended["status"]
+        assert flow.wave_id() is None
+        assert (adapters.llm.counts, len(adapters.llm.sql_prompts)) == sent
+
+
+def test_reaccepting_after_a_refused_plan_approval_never_revives_the_failed_run() -> None:
+    adapters = TwoWaves()
+    d = Deployment("s5d_observed_plan", adapters=adapters)
+    with TestClient(d.app()) as client:
+        flow = WithdrawingFlow(client, d)
+        body = flow.to_plan_approval()
+        flow.withdraw()
+        assert _approve(client, body).status_code == 409
+        assert flow.until(*TERMINAL)["status"] == "failed"
+        flow.accept_covering_the_run()
+        assert flow.body()["status"] == "failed"
+        assert _approve(client, body).status_code == 409
+        assert adapters.llm.counts == 0 and adapters.llm.sql_prompts == []
+
+
+def test_reaccepting_never_restores_a_rejected_plan() -> None:
+    adapters = TwoWaves()
+    d = Deployment("s5d_rejected", adapters=adapters)
+    with TestClient(d.app()) as client:
+        flow = WithdrawingFlow(client, d)
+        body = flow.to_plan_approval()
+        assert _approve(client, body, decision="reject").status_code == 200
+        rejected = flow.until(*TERMINAL)["status"]
+        flow.withdraw()
+        flow.accept_covering_the_run()
+        assert flow.body()["status"] == rejected
+        assert _approve(client, body).status_code == 409
+        assert adapters.llm.counts == 0 and adapters.llm.sql_prompts == []
 
 
 def test_valid_consent_with_no_withdrawal_still_runs_to_the_next_wave() -> None:

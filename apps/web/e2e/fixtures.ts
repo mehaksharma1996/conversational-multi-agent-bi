@@ -19,6 +19,7 @@ export const consentMissingFixture = {
   accepted: false,
   status: "missing",
   questions_enabled: false,
+  can_manage: true,
   notice_version: null,
   accepted_at: null,
   withdrawn_at: null,
@@ -225,4 +226,12 @@ export function fulfillWorkspaces(
   return route.request().method() === "GET"
     ? route.fulfill({ status: 200, json: { items: [] } })
     : route.fulfill({ status: 201, json: workspace });
+}
+
+/** Answers a consent read for journeys that are not about consent; false for any other request. */
+export async function fulfillConsent(route: import("@playwright/test").Route): Promise<boolean> {
+  const request = route.request();
+  if (request.method() !== "GET" || !new URL(request.url()).pathname.endsWith("/consent")) return false;
+  await route.fulfill({ status: 200, json: consentCurrentFixture });
+  return true;
 }

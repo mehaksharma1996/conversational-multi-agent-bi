@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import type { Message, Workspace } from "../api/client";
 import { QUESTION_MAX_LENGTH, threadEntries, type AskResult, type LocalEntry } from "../conversation/thread";
+import { consentGateReason, type ConsentGate } from "../workspace/useConsent";
 import type { ApprovalDraft } from "../workspace/drafts";
 import { DEMO_QUESTIONS, type DemoQuestion } from "../demo/retailDemo";
 import { LocalEntryCard } from "./LocalEntryCard";
@@ -41,8 +42,8 @@ interface ConversationPanelProps {
   onQuestionChange: (update: string | ((current: string) => string)) => void;
   onRequireSqlApprovalChange: (required: boolean) => void;
   onApprovalDraftChange: (messageId: string, draft: ApprovalDraft) => void;
-  /** The server's answer when it is known; until then the workspace's own flags decide. */
-  questionsEnabled?: boolean | undefined;
+  /** Whether consent allows model-backed questions; loading and unreadable never do. */
+  consentGate: ConsentGate;
   /** Resolves "restore" when the question failed, so it can be put back for editing. */
   onAsk: (question: string, requireSqlApproval: boolean) => Promise<AskResult>;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
@@ -81,7 +82,7 @@ export function ConversationPanel({
   onQuestionChange: setQuestion,
   onRequireSqlApprovalChange: setRequireSqlApproval,
   onApprovalDraftChange,
-  questionsEnabled,
+  consentGate,
   onAsk,
   onApproval,
   onExport,
@@ -92,10 +93,8 @@ export function ConversationPanel({
   const reasonId = useId();
   const keysId = useId();
   const counterId = useId();
-  const consentBlocked =
-    questionsEnabled === undefined
-      ? workspace.consent_required && !workspace.consent_accepted
-      : !questionsEnabled;
+  const consentReason = consentGateReason(consentGate);
+  const consentBlocked = consentReason !== null;
   const approvalPending = messages.some((message) => message.status === "pending_approval");
   const composerDisabled = busy || !hasContext || consentBlocked || approvalPending || questionUnconfirmed;
   // Outcomes are announced by the shell's single live region; this panel only says why it is locked.
@@ -106,7 +105,7 @@ export function ConversationPanel({
       : approvalPending
         ? "Resolve the pending SQL approval before asking another question."
         : consentBlocked
-          ? "Accept the data-sharing notice above to enable questions."
+          ? consentReason
           : !hasContext
             ? "Add a confirmed table or index documents before asking a question."
             : busy

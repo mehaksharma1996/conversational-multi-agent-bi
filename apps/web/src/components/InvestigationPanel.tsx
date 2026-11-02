@@ -35,6 +35,8 @@ interface InvestigationPanelProps {
   error: Error | null;
   job: JobView;
   busy: boolean;
+  /** Why consent does not allow starting; null when it does. Decisions stay the server's to refuse. */
+  startBlockedReason?: string | null;
   onStart: () => void;
   onApprove: () => void;
   onReject: () => void;
@@ -143,6 +145,7 @@ export function InvestigationPanel({
   error,
   job,
   busy,
+  startBlockedReason,
   onStart,
   onApprove,
   onReject,
@@ -184,10 +187,11 @@ export function InvestigationPanel({
           does not approve or execute the resulting plan.
         </p>
         {error ? <Notice kind="error">{error.message}</Notice> : null}
+        {startBlockedReason ? <p>{startBlockedReason}</p> : null}
         <button
           className="button button--primary"
           type="button"
-          disabled={busy || command !== null}
+          disabled={busy || command !== null || Boolean(startBlockedReason)}
           onClick={onStart}
         >
           {command === "start" ? "Starting investigation..." : "Start investigation"}

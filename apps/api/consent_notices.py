@@ -124,6 +124,11 @@ _DISCLOSING_VERSIONS: Mapping[str, frozenset[str]] = MappingProxyType(
     {OPENAI_DATA_RECIPIENT: frozenset({OPENAI_NOTICE_VERSION})}
 )
 
+# The only versions a client may accept without a digest: what the web client sent before digests
+# existed. An allowlist, so every other version needs one, and it must never name a version that
+# discloses a recipient in ``_DISCLOSING_VERSIONS``.
+_DIGEST_OPTIONAL_VERSIONS: frozenset[str] = frozenset({BASE_NOTICE_VERSION})
+
 # Audit tokens for recipient names, so a display name never reaches the audit log as free text.
 _AUDIT_TOKENS: Mapping[str, str] = MappingProxyType(
     {
@@ -134,6 +139,11 @@ _AUDIT_TOKENS: Mapping[str, str] = MappingProxyType(
     }
 )
 _UNLISTED_AUDIT_TOKEN = "unlisted"
+
+
+def digest_required(notice_version: str) -> bool:
+    """True unless ``notice_version`` is a legacy version that may be accepted without a digest."""
+    return notice_version not in _DIGEST_OPTIONAL_VERSIONS
 
 
 def discloses(notice_version: str | None, recipient: str) -> bool:
@@ -220,6 +230,7 @@ __all__ = [
     "audit_recipients",
     "consent_in_force",
     "consent_status",
+    "digest_required",
     "disclosed_recipients",
     "discloses",
     "effective_recipients",

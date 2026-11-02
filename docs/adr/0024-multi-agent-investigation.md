@@ -804,7 +804,8 @@ record in the tests is synthetic. The amendment stays Proposed until real review
 server-served notice, version- and digest-bound acceptance, and durable workspace-wide withdrawal that
 the existing live check observes. It changes no execution or admission rule of this amendment and
 admits no provider. The amendment's remaining blocker is unchanged: reviewed evidence for a real
-provider and snapshot (S6).
+provider and snapshot (S6). The later consent hardening (mandatory digest, gated unknown consent, and
+role-aware controls) also changes no execution or admission rule, and the amendment stays Proposed.
 
 ## Alternatives rejected
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiClientError, getConsent, type Consent } from "../api/client";
+import { ApiClientError, getConsent, type Consent, type Workspace } from "../api/client";
 
 export type ConsentView =
   | { phase: "loading"; consent: null; error: null }
@@ -8,6 +8,47 @@ export type ConsentView =
   | { phase: "error"; consent: null; error: ApiClientError };
 
 const LOADING: ConsentView = { phase: "loading", consent: null, error: null };
+
+/** Whether an action that may send data can be offered: only the server's answer opens it. */
+export type ConsentGate = "open" | "loading" | "error" | "needs_acceptance" | "needs_administrator";
+
+/**
+ * Local-only and recipient-free workspaces have nothing to consent to, so an unknown consent must
+ * not block them. These flags can only ever keep such a workspace usable, never authorize sharing.
+ */
+function mayShareData(workspace: Workspace): boolean {
+  return !workspace.local_only_mode && (workspace.consent_required || (workspace.data_recipients?.length ?? 0) > 0);
+}
+
+function gate(view: ConsentView, workspace: Workspace, authorized: (consent: Consent) => boolean): ConsentGate {
+  if (view.phase !== "ready") return mayShareData(workspace) ? view.phase : "open";
+  if (authorized(view.consent)) return "open";
+  return view.consent.can_manage ? "needs_acceptance" : "needs_administrator";
+}
+
+/** The gate on model-backed questions. */
+export function questionGate(view: ConsentView, workspace: Workspace): ConsentGate {
+  return gate(view, workspace, (consent) => consent.questions_enabled);
+}
+
+/** The gate on starting an investigation, which may also need the investigation model's recipient. */
+export function investigationGate(view: ConsentView, workspace: Workspace): ConsentGate {
+  return gate(view, workspace, (consent) => consent.status === "current" || consent.status === "not_required");
+}
+
+const GATE_REASON: Record<Exclude<ConsentGate, "open">, string> = {
+  loading: "Checking this workspace's data-sharing consent. This is available once the server confirms it.",
+  error:
+    "This workspace's data-sharing consent could not be verified, so anything that may send data to an external recipient is unavailable. Read consent again above.",
+  needs_acceptance: "Accept the data-sharing notice above to enable questions and investigations.",
+  needs_administrator:
+    "A workspace administrator must accept the data-sharing notice above to enable questions and investigations.",
+};
+
+/** Why a gated action is unavailable, or null when it is not gated. */
+export function consentGateReason(consentGate: ConsentGate): string | null {
+  return consentGate === "open" ? null : GATE_REASON[consentGate];
+}
 
 function asClientError(caught: unknown): ApiClientError {
   return caught instanceof ApiClientError

@@ -12,7 +12,8 @@ CI-verified (2026-11-01, run 41268269115 at `c2cddff`, 10/10 green, 22/22 S5a te
 Windows 3.12); S5b implemented offline and CI-verified (2026-11-01, run 41273557427 at
 `bebcfcd`, 10/10 green, 33/33 S5b tests on Python 3.12); S5c implemented offline and CI-verified
 (2026-11-01, run 41323475156 at `cd5739f`, 10/10 green, 69/69 S5c tests on Ubuntu and Windows 3.12);
-S5d implemented and verified locally (2026-11-01), unpushed.
+S5d implemented offline and CI-verified (2026-11-02 UTC, run 41386563069 at `2790554`, 10/10 green,
+51/51 S5d tests on Ubuntu and Windows 3.12); S5d hardening implemented locally, unpushed.
 Production still uses `FailClosedAdapters` (S4 adds a selection path that admits nothing), no
 snapshot is reviewed, no live model call was made, no API key was used, and external spend is
 $0.** S5 and S6 each need approval first.
@@ -559,6 +560,57 @@ telemetry, or ledger change.
     provider claim, and a real reviewed bundle. Legal review of the notice text. DEP-1: activation,
     secrets, egress, and a reviewed spend ceiling. Then, and only then, a reviewed change that opens
     the release gate. EVAL-2 depends on S6.
+
+## S5d hardening record (consent, offline)
+
+External spend stays $0. Every investigation test uses scripted providers, and nothing here admits a
+provider or says anything about how a real one behaves.
+
+1. **Mandatory digest.** Every notice version needs its exact `notice_digest`, except versions in
+   `_DIGEST_OPTIONAL_VERSIONS`, an allowlist holding only the legacy `2026-09`. A future notice therefore
+   needs a digest by default. A missing or wrong digest is `409 consent_notice_changed`; an empty or
+   wrong-length one is `422 invalid_request`. The server computes the digest from the version, title,
+   sections, and recipients it would serve now, so an older digest fails once the text or recipients
+   change. Accepting a notice this server does not currently serve is refused the same way. A digest is
+   an integrity check, not proof that a person read or understood anything.
+2. **Compatibility.** Only acceptance changed. Stored consent stays valid and no digest is stored. A
+   client may still accept `2026-09` without a digest, which never authorizes OpenAI. The digest is not
+   audited.
+3. **Unknown consent.** `questionGate` and `investigationGate` derive one gate from the existing consent
+   view: `open`, `loading`, `error`, `needs_acceptance`, or `needs_administrator`. Loading and error never
+   open it, and the workspace's `consent_accepted` flag no longer stands in for a consent read. The
+   composer and **Start investigation** stay disabled with a stated reason. A workspace with no external
+   recipient (local-only, or none configured) is not blocked while consent is unknown. Everything else in
+   the workspace stays usable. Plan and SQL-wave decisions are not gated: rejecting must stay possible, and
+   the server refuses an approval that consent no longer allows.
+4. **Roles.** `ConsentResponse.can_manage` is computed by the server from `workspace:admin`, so the UI
+   never infers permission from a successful read. Viewers and analysts see the status and full notice,
+   with a line saying an administrator manages consent, and no accept or withdraw control. The backend
+   still answers 403 regardless. If a role changes, the 403 is shown and the re-read removes the controls.
+   Limitation: the real-browser journeys run as the local administrator. The read-only state is covered by
+   the real API (per role), Vitest, and a mocked-API browser test with axe, not by a real-browser viewer.
+5. **Withdrawal and re-acceptance (agreed design).** An investigation may continue after re-acceptance
+   only if it has not already observed revocation or reached a terminal state. Current consent must cover
+   every required recipient, and its next approval still applies. Accepting sends nothing by itself and
+   restores no decision. A failed, cancelled, or rejected run stays that way. Both events are audited. A
+   request already in flight cannot be recalled. The tests cover re-acceptance before and after the
+   runtime detects a withdrawal, paused and active; no runtime change was needed.
+6. **Browser coverage, as actually executed.**
+
+   | Suite | Where it ran at `2790554` | Against |
+   |---|---|---|
+   | Mocked specs (`npm run test:e2e`) | `frontend` job: 46 passed, 36 skipped | mocked API |
+   | Same specs plus `real-stack.spec.ts` local mode | `containers` job: 47 passed, 35 skipped | nginx image, real API |
+   | `real-stack.spec.ts` fake mode, which holds the changed consent lines | `containers` job: 1 passed, 1 skipped | Compose with test-only providers |
+   | `e2e/real/` scripted journeys, including `consent-journey.spec.ts` | **local only; always skipped in CI** | real browser, production API code, scripted providers |
+
+   Docker is not available on the development machine, so the Compose specs have CI evidence only.
+   The hardening adds a `frontend` job step running `consent-journey.spec.ts` with no key, Docker, or
+   model call, and raises that job's timeout from 20 to 30 minutes. That step has not run in CI until
+   this commit is pushed. The other `e2e/real/` journeys stay local-only.
+7. **Remaining.** Legal review of the notice text. S6 under a separate spend approval: real evidence for
+   every provider claim and a real reviewed bundle. DEP-1. The UI still learns of a change made elsewhere
+   only at its next read.
 
 ## Outcome
 

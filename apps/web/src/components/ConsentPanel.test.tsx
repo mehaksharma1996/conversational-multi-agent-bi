@@ -124,6 +124,43 @@ describe("ConsentPanel", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["missing", consentMissingFixture],
+    ["accepted", consentCurrentFixture],
+    ["withdrawn", consentWithdrawnFixture],
+  ])("is read-only for a caller who cannot manage consent: %s", (_name, fixture) => {
+    renderPanel(ready({ ...fixture, can_manage: false }));
+
+    expect(screen.queryByRole("button", { name: /Accept/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Withdraw consent" })).not.toBeInTheDocument();
+    expect(screen.getByText(/A workspace administrator accepts or withdraws consent/)).toBeVisible();
+  });
+
+  it("still shows a read-only caller the complete notice", () => {
+    renderPanel(ready({ ...consentMissingFixture, can_manage: false }));
+
+    expect(screen.getByRole("heading", { level: 4, name: "External recipients" })).toBeVisible();
+    expect(screen.getByText("Gemini")).toBeVisible();
+  });
+
+  it("offers an administrator acceptance and withdrawal", async () => {
+    const accept = renderPanel(ready(consentMissingFixture));
+    await userEvent.setup().click(screen.getByRole("button", { name: /Accept this notice/ }));
+    expect(accept.onAccept).toHaveBeenCalledOnce();
+    accept.unmount();
+
+    const withdraw = renderPanel(ready(consentCurrentFixture));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Withdraw consent" }));
+    expect(withdraw.onWithdraw).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/A workspace administrator accepts/)).not.toBeInTheDocument();
+  });
+
+  it("does not take a successful read as permission to manage", () => {
+    renderPanel(ready({ ...consentCurrentFixture, can_manage: false }));
+    expect(screen.getByText("Accepted")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Withdraw consent" })).not.toBeInTheDocument();
+  });
+
   it("renders nothing when this server shares data with no recipient", () => {
     const { container } = renderPanel(
       ready({ ...consentMissingFixture, required: false, status: "not_required", questions_enabled: true, notice: null }),

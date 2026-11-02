@@ -13,12 +13,13 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from apps.api.approvals import ApprovalCheckpoints
-from apps.api.authorization import Capability, requires
+from apps.api.authorization import Capability, capabilities_for, requires
 from apps.api.consent_notices import (
     NOTICES,
     audit_recipients,
     consent_in_force,
     consent_status,
+    digest_required,
     disclosed_recipients,
     effective_recipients,
     served_notice,
@@ -160,7 +161,7 @@ def accept_gemini_consent(
             "consent_notice_unknown",
             "This notice version is not recognized. Read the current notice and accept that.",
         )
-    if command.notice_digest is not None:
+    if command.notice_digest is not None or digest_required(command.notice_version):
         current = served_notice(settings.consent_recipients())
         if (
             current is None
@@ -188,7 +189,7 @@ def accept_gemini_consent(
         consent_recipients=audit_recipients(workspace.consent_recipients),
         consent_required=workspace.gemini_configured,
     )
-    return _consent_response(workspace, settings)
+    return _consent_response(workspace, settings, identity)
 
 
 @router.get(
@@ -210,7 +211,9 @@ def read_consent(
     settings: SettingsDependency,
 ) -> ConsentResponse:
     response.headers["Cache-Control"] = "no-store"
-    return _consent_response(repository.get_workspace(workspace_id, identity.tenant_id), settings)
+    return _consent_response(
+        repository.get_workspace(workspace_id, identity.tenant_id), settings, identity
+    )
 
 
 @router.delete(
@@ -244,7 +247,7 @@ def withdraw_consent(
             ),
             consent_recipients=audit_recipients(_effective_consent(replaced)),
         )
-    return _consent_response(workspace, settings)
+    return _consent_response(workspace, settings, identity)
 
 
 def _effective_consent(workspace: WorkspaceRecord) -> tuple[str, ...]:
@@ -256,7 +259,9 @@ def _effective_consent(workspace: WorkspaceRecord) -> tuple[str, ...]:
     )
 
 
-def _consent_response(workspace: WorkspaceRecord, settings: Settings) -> ConsentResponse:
+def _consent_response(
+    workspace: WorkspaceRecord, settings: Settings, identity: IdentityContext
+) -> ConsentResponse:
     required = settings.consent_recipients()
     effective = _effective_consent(workspace)
     served = served_notice(required)
@@ -272,6 +277,7 @@ def _consent_response(workspace: WorkspaceRecord, settings: Settings) -> Consent
             required, effective, workspace.consent_accepted_at, workspace.consent_withdrawn_at
         ),
         questions_enabled=set(settings.hosted_recipients()) <= set(effective),
+        can_manage=Capability.WORKSPACE_ADMIN in capabilities_for(identity),
         notice_version=(
             workspace.consent_notice_version
             if workspace.consent_notice_version in NOTICES

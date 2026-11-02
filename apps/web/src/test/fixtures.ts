@@ -39,6 +39,7 @@ export const consentMissingFixture = {
   accepted: false,
   status: "missing",
   questions_enabled: false,
+  can_manage: true,
   notice_version: null,
   accepted_at: null,
   withdrawn_at: null,

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page, Route } from "@playwright/test";
 
-import { conversationFixture, documentCollectionFixture, messageFixture, workspaceFixture } from "./fixtures";
+import { conversationFixture, fulfillConsent, documentCollectionFixture, messageFixture, workspaceFixture } from "./fixtures";
 import { expect, test } from "./test";
 
 // UI-6a (#154) journeys against the production bundle with an intercepted API. These are mocked:
@@ -34,6 +34,7 @@ async function routeApi(page: Page): Promise<Api> {
     posts: 0,
   };
   await page.route("**/api/v1/**", async (route) => {
+    if (await fulfillConsent(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const method = request.method();
