@@ -57,7 +57,7 @@ reconciliation, and asynchronous job recovery remain future work.
 
 ## API surface
 
-- `PUT /api/v1/workspaces/{workspace_id}/consent`
+- `GET`, `PUT`, and `DELETE /api/v1/workspaces/{workspace_id}/consent`
 - `DELETE /api/v1/workspaces/{workspace_id}`
 - `POST /api/v1/workspaces/{workspace_id}/document-collections`
 - `GET /api/v1/document-collections/{collection_id}`

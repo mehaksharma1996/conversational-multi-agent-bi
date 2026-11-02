@@ -9,6 +9,7 @@ const LABELS: Record<OperationKind, string> = {
   analysis: "Analysis",
   documents: "Document indexing",
   consent: "Consent update",
+  consent_withdrawal: "Consent withdrawal",
   conversation: "Question",
   approval: "SQL decision",
   investigation: "Investigation command",
@@ -21,7 +22,12 @@ const LABELS: Record<OperationKind, string> = {
 const SLOW = new Set<OperationKind>(["upload", "dataset", "analysis", "documents", "conversation"]);
 
 /** Operations whose outcome the Ask workspace announces itself, with the answer's own wording. */
-const OUTCOME_ANNOUNCED_ELSEWHERE = new Set<OperationKind>(["conversation", "approval"]);
+const OUTCOME_ANNOUNCED_ELSEWHERE = new Set<OperationKind>([
+  "conversation",
+  "approval",
+  "consent",
+  "consent_withdrawal",
+]);
 
 /**
  * The polite status text for an operation event, or null when nothing should be announced.

@@ -19,6 +19,7 @@ const MARKED = new Set<OperationKind>([
   "analysis",
   "documents",
   "consent",
+  "consent_withdrawal",
   "conversation",
   "approval",
   "reset",
@@ -138,6 +139,9 @@ export function assessMarker(
       // Consent is a flag, not a timestamped resource.
       done = restored.workspace.consent_accepted;
       break;
+    case "consent_withdrawal":
+      done = !restored.workspace.consent_accepted;
+      break;
     default:
       // Schema confirmation and approval decisions leave no timestamp to compare, and a reset
       // whose workspace still exists did not complete.
@@ -153,6 +157,7 @@ const LABELS: Partial<Record<OperationKind, string>> = {
   analysis: "analysis",
   documents: "document upload",
   consent: "consent update",
+  consent_withdrawal: "consent withdrawal",
   conversation: "question",
   approval: "SQL approval decision",
   reset: "workspace reset",
@@ -164,6 +169,10 @@ export function describeAssessment(assessment: MarkerAssessment): string {
   const lead = `A ${label} was in progress when the page reloaded (started ${started}).`;
   switch (assessment.outcome) {
     case "evidence":
+      // Older, stale consent also reads as accepted, so the flag cannot prove this acceptance applied.
+      if (assessment.kind === "consent") {
+        return `${lead} This workspace has consent on record, which may be from before that update. The consent panel shows the notice and recipients it covers.`;
+      }
       return assessment.at
         ? `${lead} The server has a result created at ${new Date(assessment.at).toLocaleTimeString()}, after it started, so it appears to have completed. Check that the workbench shows what you expected.`
         : `${lead} The server shows it completed.`;

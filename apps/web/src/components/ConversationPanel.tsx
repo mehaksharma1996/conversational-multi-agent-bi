@@ -41,7 +41,8 @@ interface ConversationPanelProps {
   onQuestionChange: (update: string | ((current: string) => string)) => void;
   onRequireSqlApprovalChange: (required: boolean) => void;
   onApprovalDraftChange: (messageId: string, draft: ApprovalDraft) => void;
-  onAcceptConsent: () => Promise<void>;
+  /** The server's answer when it is known; until then the workspace's own flags decide. */
+  questionsEnabled?: boolean | undefined;
   /** Resolves "restore" when the question failed, so it can be put back for editing. */
   onAsk: (question: string, requireSqlApproval: boolean) => Promise<AskResult>;
   onApproval: (message: Message, decision: "approve" | "reject", sql?: string) => Promise<void>;
@@ -80,7 +81,7 @@ export function ConversationPanel({
   onQuestionChange: setQuestion,
   onRequireSqlApprovalChange: setRequireSqlApproval,
   onApprovalDraftChange,
-  onAcceptConsent,
+  questionsEnabled,
   onAsk,
   onApproval,
   onExport,
@@ -91,7 +92,10 @@ export function ConversationPanel({
   const reasonId = useId();
   const keysId = useId();
   const counterId = useId();
-  const consentBlocked = workspace.consent_required && !workspace.consent_accepted;
+  const consentBlocked =
+    questionsEnabled === undefined
+      ? workspace.consent_required && !workspace.consent_accepted
+      : !questionsEnabled;
   const approvalPending = messages.some((message) => message.status === "pending_approval");
   const composerDisabled = busy || !hasContext || consentBlocked || approvalPending || questionUnconfirmed;
   // Outcomes are announced by the shell's single live region; this panel only says why it is locked.
@@ -135,10 +139,6 @@ export function ConversationPanel({
     });
   };
 
-  // Named from server configuration; older API responses without the field default to Gemini.
-  const recipients = workspace.data_recipients?.length ? workspace.data_recipients : ["Gemini"];
-  const recipientNames = recipients.join(" and ");
-
   return (
     <section className="panel conversation-panel" aria-labelledby="conversation-heading">
       <div className="section-heading">
@@ -148,20 +148,6 @@ export function ConversationPanel({
         </div>
       </div>
 
-      {consentBlocked ? (
-        <StatusBanner kind="info">
-          Questions may send question text, table schema and samples, or retrieved PDF excerpts
-          to {recipientNames}. Accept this notice before model-backed questions are enabled.
-          <button
-            className="button button--secondary consent-button"
-            type="button"
-            disabled={busy}
-            onClick={() => void onAcceptConsent()}
-          >
-            I understand, enable {recipientNames}
-          </button>
-        </StatusBanner>
-      ) : null}
       {workspace.local_only_mode ? (
         <StatusBanner kind="success">
           Local-only mode is active. Gemini-backed SQL and RAG routes are disabled.

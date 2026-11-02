@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
-from apps.api.consent_notices import disclosed_recipients
+from apps.api.consent_notices import effective_recipients
 from apps.api.investigation_store import (
     InvestigationConflictError,
     InvestigationRecord,
@@ -265,15 +265,21 @@ class _DocumentResolver:
 
 
 def _consent(workspace: WorkspaceRecord) -> ConsentSnapshot:
-    """The stored consent, minus any recipient its notice version does not disclose (PROD-1 S4).
+    """The stored consent, reduced to the recipients it really authorises (PROD-1 S4, S5d).
 
-    An older, stale, or hand-edited record therefore never authorises OpenAI.
+    An older, stale, or hand-edited record therefore never authorises OpenAI, and a withdrawn or
+    unrecognised one authorises nobody.
     """
     version = workspace.consent_notice_version
     return ConsentSnapshot(
         accepted_at=workspace.consent_accepted_at,
         notice_version=version,
-        recipients=disclosed_recipients(version, workspace.consent_recipients),
+        recipients=effective_recipients(
+            version,
+            workspace.consent_accepted_at,
+            workspace.consent_withdrawn_at,
+            workspace.consent_recipients,
+        ),
     )
 
 

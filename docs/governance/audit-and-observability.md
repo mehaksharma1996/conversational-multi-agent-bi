@@ -96,7 +96,8 @@ Each event has: `name`, `occurred_at` (UTC), `tenant_id`, `request_id`, optional
 | `config.changed` | A later start whose governed configuration differs (system tenant) | as above plus `previous_config_hash` |
 | `workspace.deleted` | The owner deletes a workspace | reason `user_requested` |
 | `workspace.exported` | The owner downloads the workspace export (`GET /workspaces/{id}/export`) | `size_bytes`, `file_count`; never file names or content |
-| `consent.accepted` | Gemini data-sharing notice accepted | notice version |
+| `consent.accepted` | A data-sharing notice accepted | notice version, `consent_recipients` (fixed tokens such as `gemini+openai`) |
+| `consent.withdrawn` | Workspace consent withdrawn (not repeated when already withdrawn) | the withdrawn notice version, `consent_recipients` that were in force |
 | `tabular.uploaded` | A CSV/Excel upload is accepted | size, format |
 | `dataset.created` | A dataset is profiled | row and column counts |
 | `dataset.schema_confirmed` | The user confirms a schema mapping | mapping version |

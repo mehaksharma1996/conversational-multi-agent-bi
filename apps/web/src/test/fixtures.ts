@@ -1,5 +1,6 @@
 import type {
   Analysis,
+  Consent,
   Conversation,
   Dataset,
   DocumentCollection,
@@ -20,6 +21,46 @@ export const workspaceFixture = {
   consent_accepted: false,
   created_at: "2026-09-29T12:00:00Z",
 } satisfies Workspace;
+
+const consentNoticeFixture = {
+  version: "2026-09",
+  title: "Hosted model data sharing",
+  sections: [
+    { heading: "What model-backed questions send", body: "Questions may send question text and table samples." },
+    { heading: "Withdrawing consent", body: "Withdrawal does not recall a request already sent." },
+  ],
+  recipients: ["Gemini"],
+  digest: "a".repeat(64),
+};
+
+export const consentMissingFixture = {
+  workspace_id: workspaceFixture.id,
+  required: true,
+  accepted: false,
+  status: "missing",
+  questions_enabled: false,
+  notice_version: null,
+  accepted_at: null,
+  withdrawn_at: null,
+  data_recipients: [],
+  notice: consentNoticeFixture,
+} satisfies Consent;
+
+export const consentCurrentFixture = {
+  ...consentMissingFixture,
+  accepted: true,
+  status: "current",
+  questions_enabled: true,
+  notice_version: "2026-09",
+  accepted_at: "2026-09-29T12:01:00Z",
+  data_recipients: ["Gemini"],
+} satisfies Consent;
+
+export const consentWithdrawnFixture = {
+  ...consentMissingFixture,
+  status: "withdrawn",
+  withdrawn_at: "2026-09-29T12:02:00Z",
+} satisfies Consent;
 
 export const documentCollectionFixture = {
   id: "documents-1",

@@ -42,6 +42,7 @@ AUDIT_ACTIONS: frozenset[str] = frozenset(
         "workspace.deleted",
         "workspace.exported",
         "consent.accepted",
+        "consent.withdrawn",
         "tabular.uploaded",
         "dataset.created",
         "dataset.schema_confirmed",
@@ -86,6 +87,7 @@ SYSTEM_TENANT_ID = "system"
 AUDIT_ATTRIBUTES: dict[str, str] = {
     "authentication_mode": "token",
     "notice_version": "token",
+    "consent_recipients": "token",
     "mapping_version": "int",
     "reason": "token",
     "route": "token",

@@ -310,6 +310,7 @@ def _workspace(**consent: Any) -> Any:
         "consent_accepted_at": datetime.now(UTC),
         "consent_notice_version": OPENAI_NOTICE_VERSION,
         "consent_recipients": ("Gemini", "OpenAI"),
+        "consent_withdrawn_at": None,
     }
     values.update(consent)
     return SimpleNamespace(**values)

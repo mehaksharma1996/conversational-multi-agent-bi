@@ -16,6 +16,7 @@ export type OperationKind =
   | "analysis"
   | "documents"
   | "consent"
+  | "consent_withdrawal"
   | "conversation"
   | "approval"
   | "investigation"
@@ -56,6 +57,7 @@ const LANES: Record<OperationKind, OperationLane> = {
   analysis: "mutation",
   documents: "mutation",
   consent: "mutation",
+  consent_withdrawal: "mutation",
   conversation: "mutation",
   approval: "mutation",
   investigation: "mutation",

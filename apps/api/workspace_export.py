@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 
+from apps.api.consent_notices import consent_in_force
 from apps.api.repository import WorkspaceSnapshot
 from src.agents.report_agent import report_to_markdown
 from src.utils.spreadsheet_safety import sanitize_dataframe_for_export
@@ -123,10 +124,19 @@ def build_workspace_export(
             "local_only_mode": workspace.local_only_mode,
         },
         "consent": {
-            "accepted": workspace.consent_accepted_at is not None,
+            "accepted": consent_in_force(
+                workspace.consent_notice_version,
+                workspace.consent_accepted_at,
+                workspace.consent_withdrawn_at,
+            ),
             "notice_version": workspace.consent_notice_version,
             "accepted_at": (
                 workspace.consent_accepted_at.isoformat() if workspace.consent_accepted_at else None
+            ),
+            "withdrawn_at": (
+                workspace.consent_withdrawn_at.isoformat()
+                if workspace.consent_withdrawn_at
+                else None
             ),
             "data_recipients": list(workspace.consent_recipients),
         },

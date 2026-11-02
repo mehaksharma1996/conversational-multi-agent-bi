@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -121,6 +121,27 @@ def build_scripted_app() -> FastAPI:
         embedder_factory=lambda _model: ScriptedRetailEmbedder(),
         llm_client_factory=lambda _settings: RecordingLLM(root),
         investigation_adapters=ScriptedInvestigationAdapters(),
+    )
+
+
+def build_openai_consent_app() -> FastAPI:
+    """OpenAI selected and "activated" with placeholder values, so its notice is the current one.
+
+    The placeholder key is never sent: nothing is reviewed, so admission still leaves production's
+    ``FailClosedAdapters`` in place, which is exactly what the browser journey must show.
+    """
+    root = _data_root()
+    return create_app(
+        settings=replace(
+            _settings(root, Settings),
+            investigation_model_provider="openai_responses",
+            investigation_model_activation=True,
+            openai_api_key="offline-test-placeholder-not-a-credential",
+            investigation_model_snapshot="test-model-2099-01-01",
+            investigation_model_review="browser-journey-placeholder",
+        ),
+        embedder_factory=lambda _model: ScriptedRetailEmbedder(),
+        llm_client_factory=lambda _settings: RecordingLLM(root),
     )
 
 

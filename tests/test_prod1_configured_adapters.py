@@ -500,7 +500,7 @@ def test_openai_consent_needs_an_openai_provider_to_be_configured(root: Path) ->
 
 
 def test_accepting_an_older_notice_again_withdraws_openai(root: Path) -> None:
-    """There is no revoke endpoint; a later acceptance replaces the whole consent record."""
+    """A later acceptance replaces the whole consent record (S5d adds an explicit withdrawal)."""
     with TestClient(ConsentApp(root).app()) as client:
         workspace_id = client.post("/api/v1/workspaces").json()["id"]
         _accept(client, workspace_id, OPENAI_NOTICE_VERSION)
@@ -520,7 +520,12 @@ def test_a_stale_or_edited_record_naming_openai_is_not_trusted(root: Path) -> No
         workspace_id = client.post("/api/v1/workspaces").json()["id"]
         repository = client.app.state.repository
         record = repository._workspaces[workspace_id]
-        for version in (BASE_NOTICE_VERSION, None, "2026-10-openai-0"):
+        # S5d: a version the server does not recognise now grants nobody, not even Gemini.
+        for version, granted in (
+            (BASE_NOTICE_VERSION, ("Gemini",)),
+            (None, ()),
+            ("2026-10-openai-0", ()),
+        ):
             stale = replace(
                 record,
                 consent_accepted_at=datetime.now(UTC),
@@ -528,7 +533,7 @@ def test_a_stale_or_edited_record_naming_openai_is_not_trusted(root: Path) -> No
                 consent_recipients=("Gemini", "OpenAI"),
             )
             snapshot = _consent(stale)
-            assert snapshot.recipients == ("Gemini",)
+            assert snapshot.recipients == granted
             assert not snapshot.satisfies({"OpenAI"})
 
 

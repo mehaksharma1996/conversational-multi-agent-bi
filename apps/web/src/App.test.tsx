@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import {
   acceptConsent,
+  getConsent,
   askQuestion,
   confirmSchema,
   createConversation,
@@ -21,6 +22,8 @@ import {
 } from "./api/client";
 import {
   analysisFixture,
+  consentCurrentFixture,
+  consentMissingFixture,
   conversationFixture,
   documentCollectionFixture,
   messageFixture,
@@ -45,6 +48,8 @@ vi.mock("./api/client", async (importOriginal) => {
     runAnalysis: vi.fn(),
     uploadDocuments: vi.fn(),
     acceptConsent: vi.fn(),
+    getConsent: vi.fn(),
+    withdrawConsent: vi.fn(),
     createConversation: vi.fn(),
     askQuestion: vi.fn(),
     decideSqlApproval: vi.fn(),
@@ -65,7 +70,11 @@ describe("tabular analysis journey", () => {
     vi.mocked(confirmSchema).mockResolvedValue(readyDatasetFixture);
     vi.mocked(runAnalysis).mockResolvedValue(analysisFixture);
     vi.mocked(uploadDocuments).mockResolvedValue(documentCollectionFixture);
-    vi.mocked(acceptConsent).mockResolvedValue();
+    vi.mocked(getConsent).mockResolvedValue(consentMissingFixture);
+    vi.mocked(acceptConsent).mockImplementation(() => {
+      vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
+      return Promise.resolve(consentCurrentFixture);
+    });
     vi.mocked(createConversation).mockResolvedValue(conversationFixture);
     vi.mocked(askQuestion).mockResolvedValue(messageFixture);
     vi.mocked(decideSqlApproval).mockResolvedValue(messageFixture);
@@ -163,7 +172,7 @@ describe("tabular analysis journey", () => {
 
     expect(await screen.findByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
     await user.click(screen.getByRole("link", { name: /Ask/ }));
-    await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+    await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
 
     await user.type(
       screen.getByLabelText("Business question"),
@@ -201,7 +210,7 @@ describe("tabular analysis journey", () => {
     );
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
     await user.click(screen.getByRole("link", { name: /Ask/ }));
-    await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+    await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
     await user.click(
       screen.getByRole("checkbox", { name: "Require approval before hybrid SQL runs" }),
     );

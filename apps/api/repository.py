@@ -238,6 +238,7 @@ def _stored_workspace(workspace: WorkspaceRecord) -> StoredWorkspace:
         created_at=workspace.created_at,
         data_recipients=workspace.data_recipients,
         consent_recipients=workspace.consent_recipients,
+        consent_withdrawn_at=workspace.consent_withdrawn_at,
     )
 
 
@@ -254,6 +255,7 @@ class WorkspaceRecord:
     created_at: datetime
     data_recipients: tuple[str, ...] = ()
     consent_recipients: tuple[str, ...] = ()
+    consent_withdrawn_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -519,6 +521,7 @@ class LocalResourceRepository:
                     created_at=stored.created_at,
                     data_recipients=stored.data_recipients,
                     consent_recipients=stored.consent_recipients,
+                    consent_withdrawn_at=stored.consent_withdrawn_at,
                 )
                 if record.expires_at <= now:
                     expired.append(record)
@@ -1032,11 +1035,40 @@ class LocalResourceRepository:
                 consent_notice_version=notice_version,
                 consent_accepted_at=_now(),
                 consent_recipients=recipients,
+                consent_withdrawn_at=None,
             )
             if self._store is not None:
                 self._store.save_workspace(_stored_workspace(updated))
             self._workspaces[workspace_id] = updated
             return self._touch_workspace_unlocked(updated)
+
+    def withdraw_consent(
+        self, workspace_id: str, tenant_id: str
+    ) -> tuple[WorkspaceRecord, WorkspaceRecord | None]:
+        """Clear the workspace's consent, returning the new record and what it replaced.
+
+        Idempotent: a repeated withdrawal, or one with nothing on record, changes nothing, keeps
+        any earlier ``consent_withdrawn_at``, and returns ``None`` as the replaced record.
+        """
+        with self._lock:
+            workspace = self._owned(self._workspaces, workspace_id, tenant_id, "Workspace")
+            if (
+                workspace.consent_accepted_at is None
+                and workspace.consent_notice_version is None
+                and not workspace.consent_recipients
+            ):
+                return workspace, None
+            updated = replace(
+                workspace,
+                consent_notice_version=None,
+                consent_accepted_at=None,
+                consent_recipients=(),
+                consent_withdrawn_at=workspace.consent_withdrawn_at or _now(),
+            )
+            if self._store is not None:
+                self._store.save_workspace(_stored_workspace(updated))
+            self._workspaces[workspace_id] = updated
+            return self._touch_workspace_unlocked(updated), workspace
 
     def workspace_dir(self, workspace_id: str, tenant_id: str) -> Path:
         workspace = self.get_workspace(workspace_id, tenant_id)

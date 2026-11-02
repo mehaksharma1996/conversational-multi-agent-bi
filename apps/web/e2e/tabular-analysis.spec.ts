@@ -1,5 +1,7 @@
 import {
   analysisFixture,
+  consentCurrentFixture,
+  consentMissingFixture,
   conversationFixture,
   documentCollectionFixture,
   messageFixture,
@@ -73,6 +75,7 @@ test("analyst reviews the schema before running deterministic analysis", async (
 });
 
 test("analyst indexes a PDF and receives a consented cited answer", async ({ page }) => {
+  let consented = false;
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -93,17 +96,13 @@ test("analyst indexes a PDF and receives a consented cited answer", async ({ pag
       await route.fulfill({ status: 201, json: documentCollectionFixture });
       return;
     }
+    if (request.method() === "GET" && path.endsWith("/consent")) {
+      await route.fulfill({ status: 200, json: consented ? consentCurrentFixture : consentMissingFixture });
+      return;
+    }
     if (request.method() === "PUT" && path.endsWith("/consent")) {
-      await route.fulfill({
-        status: 200,
-        json: {
-          workspace_id: workspaceFixture.id,
-          required: true,
-          accepted: true,
-          notice_version: "2026-09",
-          accepted_at: "2026-09-29T12:01:00Z",
-        },
-      });
+      consented = true;
+      await route.fulfill({ status: 200, json: consentCurrentFixture });
       return;
     }
     if (request.method() === "POST" && path.endsWith("/conversations")) {
@@ -129,7 +128,7 @@ test("analyst indexes a PDF and receives a consented cited answer", async ({ pag
 
   await expect(page.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
   await page.getByRole("link", { name: /Ask/ }).click();
-  await page.getByRole("button", { name: "I understand, enable Gemini" }).click();
+  await page.getByRole("button", { name: "Accept this notice for Gemini" }).click();
   await page.getByLabel("Business question").fill(messageFixture.question);
   await page.getByRole("button", { name: "Ask workbench" }).click();
 

@@ -186,6 +186,11 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX investigations_workspace ON investigations (workspace_id)",
         ),
     ),
+    Migration(
+        5,
+        "when a workspace's consent was withdrawn (PROD-1 S5d); existing rows stay not withdrawn",
+        ("ALTER TABLE workspaces ADD COLUMN consent_withdrawn_at TEXT",),
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
@@ -203,6 +208,7 @@ class StoredWorkspace:
     created_at: datetime
     data_recipients: tuple[str, ...]
     consent_recipients: tuple[str, ...]
+    consent_withdrawn_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -485,13 +491,15 @@ class MetadataStore:
             connection.execute(
                 "INSERT INTO workspaces (id, tenant_id, authentication_mode, expires_at, "
                 "gemini_configured, local_only_mode, consent_notice_version, "
-                "consent_accepted_at, created_at, data_recipients, consent_recipients) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "consent_accepted_at, created_at, data_recipients, consent_recipients, "
+                "consent_withdrawn_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET expires_at=excluded.expires_at, "
                 "consent_notice_version=excluded.consent_notice_version, "
                 "consent_accepted_at=excluded.consent_accepted_at, "
                 "data_recipients=excluded.data_recipients, "
-                "consent_recipients=excluded.consent_recipients",
+                "consent_recipients=excluded.consent_recipients, "
+                "consent_withdrawn_at=excluded.consent_withdrawn_at",
                 (
                     workspace.id,
                     workspace.tenant_id,
@@ -504,6 +512,9 @@ class MetadataStore:
                     _iso(workspace.created_at),
                     _join(workspace.data_recipients),
                     _join(workspace.consent_recipients),
+                    _iso(workspace.consent_withdrawn_at)
+                    if workspace.consent_withdrawn_at
+                    else None,
                 ),
             )
 
@@ -524,7 +535,8 @@ class MetadataStore:
             rows = connection.execute(
                 "SELECT id, tenant_id, authentication_mode, expires_at, gemini_configured, "
                 "local_only_mode, consent_notice_version, consent_accepted_at, created_at, "
-                "data_recipients, consent_recipients FROM workspaces ORDER BY created_at, id"
+                "data_recipients, consent_recipients, consent_withdrawn_at "
+                "FROM workspaces ORDER BY created_at, id"
             ).fetchall()
         return [
             StoredWorkspace(
@@ -539,6 +551,7 @@ class MetadataStore:
                 created_at=_parse(row[8]),
                 data_recipients=_split(row[9]),
                 consent_recipients=_split(row[10]),
+                consent_withdrawn_at=_parse(row[11]) if row[11] else None,
             )
             for row in rows
         ]

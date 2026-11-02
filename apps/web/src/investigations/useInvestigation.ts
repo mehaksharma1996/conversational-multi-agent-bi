@@ -440,6 +440,17 @@ export function useInvestigation({
           markUnconfirmed(kind, error);
           return;
         }
+        if (
+          kind === "sql_wave" &&
+          value.status === "awaiting_sql_approval" &&
+          error instanceof ApiClientError &&
+          error.code === "authority_revoked"
+        ) {
+          // A definite refusal: consent or access is gone and the server is closing this paused run.
+          // That finishes just after the response, so keep polling until the record says so.
+          adopt(value, "sql_submitted");
+          return;
+        }
         if (value.status !== before.status || value.updated_at !== before.updated_at) {
           if (kind === "cancel") {
             const cancellation = cancellationAfterCancel(value);

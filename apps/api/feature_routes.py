@@ -14,7 +14,15 @@ from fastapi.responses import StreamingResponse
 
 from apps.api.approvals import ApprovalCheckpoints
 from apps.api.authorization import Capability, requires
-from apps.api.consent_notices import disclosed_recipients
+from apps.api.consent_notices import (
+    NOTICES,
+    audit_recipients,
+    consent_in_force,
+    consent_status,
+    disclosed_recipients,
+    effective_recipients,
+    served_notice,
+)
 from apps.api.dependencies import (
     get_api_settings,
     get_approval_checkpoints,
@@ -28,6 +36,8 @@ from apps.api.dependencies import (
 from apps.api.errors import STANDARD_ERROR_RESPONSES, ApiError, ResourceConflictError
 from apps.api.http_semantics import DOWNLOAD_SEMANTICS, NON_IDEMPOTENT_CREATE_SEMANTICS
 from apps.api.models import (
+    ConsentNoticeResponse,
+    ConsentNoticeSectionResponse,
     ConsentResponse,
     ConsentUpdateRequest,
     ConversationCreateRequest,
@@ -45,7 +55,7 @@ from apps.api.models import (
 from apps.api.observability import ApiObservability
 from apps.api.pagination import decode_cursor, encode_cursor
 from apps.api.rate_limit import InMemoryRateLimiter, enforce_rate_limit
-from apps.api.repository import LocalResourceRepository
+from apps.api.repository import LocalResourceRepository, WorkspaceRecord
 from apps.api.serializers import (
     conversation_response,
     document_collection_response,
@@ -144,6 +154,24 @@ def accept_gemini_consent(
     observability: ObservabilityDependency,
     settings: SettingsDependency,
 ) -> ConsentResponse:
+    repository.get_workspace(workspace_id, identity.tenant_id)  # a foreign workspace is 404 first
+    if command.notice_version not in NOTICES:
+        raise ResourceConflictError(
+            "consent_notice_unknown",
+            "This notice version is not recognized. Read the current notice and accept that.",
+        )
+    if command.notice_digest is not None:
+        current = served_notice(settings.consent_recipients())
+        if (
+            current is None
+            or current.notice.version != command.notice_version
+            or current.digest != command.notice_digest
+        ):
+            raise ResourceConflictError(
+                "consent_notice_changed",
+                "The notice changed after it was displayed. Read the current notice and accept "
+                "that.",
+            )
     # The recipients are read from server configuration, never from the request, and a recipient
     # is recorded only when the accepted notice version discloses it (PROD-1 S4).
     workspace = repository.set_consent(
@@ -157,16 +185,126 @@ def accept_gemini_consent(
         identity,
         resource_id=workspace.id,
         notice_version=workspace.consent_notice_version,
+        consent_recipients=audit_recipients(workspace.consent_recipients),
         consent_required=workspace.gemini_configured,
     )
+    return _consent_response(workspace, settings)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/consent",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
+    response_model=ConsentResponse,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["workspaces"],
+    description=(
+        "The workspace's consent status and the current server-owned notice, including every "
+        "external recipient accepting it would authorize. Accepting a notice activates nothing."
+    ),
+)
+def read_consent(
+    workspace_id: str,
+    response: Response,
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+    settings: SettingsDependency,
+) -> ConsentResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return _consent_response(repository.get_workspace(workspace_id, identity.tenant_id), settings)
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/consent",
+    dependencies=[requires(Capability.WORKSPACE_ADMIN)],
+    response_model=ConsentResponse,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["workspaces"],
+    description=(
+        "Withdraws the workspace's consent for every recipient. Idempotent. No new model request "
+        "starts after a check that observes it; a request already sent is not recalled."
+    ),
+)
+def withdraw_consent(
+    workspace_id: str,
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+    observability: ObservabilityDependency,
+    settings: SettingsDependency,
+) -> ConsentResponse:
+    workspace, replaced = repository.withdraw_consent(workspace_id, identity.tenant_id)
+    if replaced is not None:
+        observability.audit(
+            "consent.withdrawn",
+            identity,
+            resource_id=workspace.id,
+            notice_version=(
+                replaced.consent_notice_version
+                if replaced.consent_notice_version in NOTICES
+                else None
+            ),
+            consent_recipients=audit_recipients(_effective_consent(replaced)),
+        )
+    return _consent_response(workspace, settings)
+
+
+def _effective_consent(workspace: WorkspaceRecord) -> tuple[str, ...]:
+    return effective_recipients(
+        workspace.consent_notice_version,
+        workspace.consent_accepted_at,
+        workspace.consent_withdrawn_at,
+        workspace.consent_recipients,
+    )
+
+
+def _consent_response(workspace: WorkspaceRecord, settings: Settings) -> ConsentResponse:
+    required = settings.consent_recipients()
+    effective = _effective_consent(workspace)
+    served = served_notice(required)
     return ConsentResponse(
         workspace_id=workspace.id,
-        required=workspace.gemini_configured,
-        accepted=True,
-        notice_version=workspace.consent_notice_version,
+        required=bool(required),
+        accepted=consent_in_force(
+            workspace.consent_notice_version,
+            workspace.consent_accepted_at,
+            workspace.consent_withdrawn_at,
+        ),
+        status=consent_status(
+            required, effective, workspace.consent_accepted_at, workspace.consent_withdrawn_at
+        ),
+        questions_enabled=set(settings.hosted_recipients()) <= set(effective),
+        notice_version=(
+            workspace.consent_notice_version
+            if workspace.consent_notice_version in NOTICES
+            else None
+        ),
         accepted_at=workspace.consent_accepted_at,
-        data_recipients=list(workspace.consent_recipients),
+        withdrawn_at=workspace.consent_withdrawn_at,
+        data_recipients=list(effective),
+        notice=(
+            ConsentNoticeResponse(
+                version=served.notice.version,
+                title=served.notice.title,
+                sections=[
+                    ConsentNoticeSectionResponse(heading=section.heading, body=section.body)
+                    for section in served.notice.sections
+                ],
+                recipients=list(served.recipients),
+                digest=served.digest,
+            )
+            if served is not None
+            else None
+        ),
     )
+
+
+def _require_question_consent(workspace: WorkspaceRecord, settings: Settings) -> None:
+    """Refuse a model-backed step unless consent in force covers the question model's recipients."""
+    recipients = settings.hosted_recipients()
+    if recipients and not set(recipients) <= set(_effective_consent(workspace)):
+        raise ResourceConflictError(
+            "gemini_consent_required",
+            "Accept the Gemini data-sharing notice before asking model-backed questions.",
+        )
 
 
 WORKSPACE_EXPORT_RESPONSES = {
@@ -450,16 +588,9 @@ def create_message(
             "sql_approval_already_pending",
             "Resolve the pending SQL approval before asking another question.",
         )
-    workspace = repository.get_workspace(conversation.workspace_id, identity.tenant_id)
-    recipients = settings.hosted_recipients()
-    consented = workspace.consent_accepted_at is not None and set(recipients) <= set(
-        workspace.consent_recipients
+    _require_question_consent(
+        repository.get_workspace(conversation.workspace_id, identity.tenant_id), settings
     )
-    if recipients and not consented:
-        raise ResourceConflictError(
-            "gemini_consent_required",
-            "Accept the Gemini data-sharing notice before asking model-backed questions.",
-        )
 
     dataset = (
         repository.get_dataset(conversation.dataset_id, identity.tenant_id)
@@ -614,6 +745,12 @@ def decide_sql_approval(
         message.conversation_id,
         identity.tenant_id,
     )
+    if command.decision == "approve":
+        # Approving resumes a model-backed step, so consent withdrawn while it waited stops it. The
+        # message stays pending: it can still be rejected, or approved after a new acceptance.
+        _require_question_consent(
+            repository.get_workspace(conversation.workspace_id, identity.tenant_id), settings
+        )
     dataset = (
         repository.get_dataset(conversation.dataset_id, identity.tenant_id)
         if conversation.dataset_id is not None

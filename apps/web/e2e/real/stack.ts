@@ -25,7 +25,11 @@ const apiPidFile = resolve(stateDir, "api.pid");
  * adapters or, for `investigation-production`, with none, as production is configured. Each keeps
  * its own data directory so the journeys never share workspaces.
  */
-export type ApiFactory = "retail" | "investigation-scripted" | "investigation-production";
+export type ApiFactory =
+  | "retail"
+  | "investigation-scripted"
+  | "investigation-production"
+  | "consent-openai";
 
 const FACTORIES: Record<ApiFactory, { target: string; data: string }> = {
   retail: { target: "tests.e2e.retail_app:build_app", data: "data" },
@@ -36,6 +40,10 @@ const FACTORIES: Record<ApiFactory, { target: string; data: string }> = {
   "investigation-production": {
     target: "tests.e2e.investigation_app:build_production_app",
     data: "investigation-production",
+  },
+  "consent-openai": {
+    target: "tests.e2e.investigation_app:build_openai_consent_app",
+    data: "consent-openai",
   },
 };
 

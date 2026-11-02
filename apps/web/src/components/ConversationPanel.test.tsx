@@ -18,7 +18,6 @@ function panel(workspace: Workspace, messages: Message[] = []) {
       onQuestionChange={vi.fn()}
       onRequireSqlApprovalChange={vi.fn()}
       onApprovalDraftChange={vi.fn()}
-      onAcceptConsent={vi.fn()}
       onAsk={vi.fn()}
       onApproval={vi.fn()}
       onExport={vi.fn()}
@@ -30,26 +29,17 @@ function renderPanel(workspace: Workspace, messages: Message[] = []) {
   return render(panel(workspace, messages));
 }
 
-describe("consent notice", () => {
-  it("names every provider that will receive data", () => {
-    renderPanel({ ...workspaceFixture, data_recipients: ["Gemini", "Anthropic"] });
+describe("consent gate", () => {
+  const BLOCKED = "Accept the data-sharing notice above to enable questions.";
 
-    expect(screen.getByText(/to Gemini and Anthropic/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "I understand, enable Gemini and Anthropic" }),
-    ).toBeInTheDocument();
-  });
-
-  it("defaults to Gemini when the API does not list recipients", () => {
+  it("locks the composer until the workspace has accepted, before the server's answer is known", () => {
     renderPanel({ ...workspaceFixture });
-
-    expect(screen.getByRole("button", { name: "I understand, enable Gemini" })).toBeInTheDocument();
+    expect(screen.getByText(BLOCKED)).toBeInTheDocument();
   });
 
-  it("shows no consent prompt once the notice is accepted", () => {
+  it("unlocks once the notice is accepted", () => {
     renderPanel({ ...workspaceFixture, consent_accepted: true, data_recipients: ["Anthropic"] });
-
-    expect(screen.queryByRole("button", { name: /I understand/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(BLOCKED)).not.toBeInTheDocument();
   });
 });
 

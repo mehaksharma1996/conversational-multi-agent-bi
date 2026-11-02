@@ -800,6 +800,12 @@ output tokens only. `REVIEWED_PROVIDER_EVIDENCE` is empty, the release gate is c
 record in the tests is synthetic. The amendment stays Proposed until real reviewed evidence exists
 (S6, under a separate spend approval).
 
+**S5d progress (2026-11-01, still Proposed).** The consent lifecycle now exists end to end: a
+server-served notice, version- and digest-bound acceptance, and durable workspace-wide withdrawal that
+the existing live check observes. It changes no execution or admission rule of this amendment and
+admits no provider. The amendment's remaining blocker is unchanged: reviewed evidence for a real
+provider and snapshot (S6).
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

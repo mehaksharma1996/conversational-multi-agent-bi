@@ -10,8 +10,9 @@ green including Python 3.12); S2 implemented offline and CI-verified (2026-10-31
 run 41260961042, 10/10 green, 49/49 S4 tests on Python 3.12); S5a implemented offline and
 CI-verified (2026-11-01, run 41268269115 at `c2cddff`, 10/10 green, 22/22 S5a tests on Ubuntu and
 Windows 3.12); S5b implemented offline and CI-verified (2026-11-01, run 41273557427 at
-`bebcfcd`, 10/10 green, 33/33 S5b tests on Python 3.12); S5c implemented offline (2026-11-01),
-unpushed.
+`bebcfcd`, 10/10 green, 33/33 S5b tests on Python 3.12); S5c implemented offline and CI-verified
+(2026-11-01, run 41323475156 at `cd5739f`, 10/10 green, 69/69 S5c tests on Ubuntu and Windows 3.12);
+S5d implemented and verified locally (2026-11-01), unpushed.
 Production still uses `FailClosedAdapters` (S4 adds a selection path that admits nothing), no
 snapshot is reviewed, no live model call was made, no API key was used, and external spend is
 $0.** S5 and S6 each need approval first.
@@ -457,6 +458,107 @@ telemetry, or ledger change.
    S6 (separate spend approval): real reviewed evidence (count equals billed input, whether counting
    is billed, background mode and cancel, usage on cancellation, latency, and official prices)
    before any bundle may be added. $0 so far.
+
+## S5d record (consent lifecycle, offline)
+
+**Files.** `apps/api/consent_notices.py`, `feature_routes.py`, `models.py`, `repository.py`,
+`metadata_store.py` (migration 5), `serializers.py`, `investigations.py`, `workspace_export.py`,
+`packages/governance/audit.py`, the OpenAPI contract, `apps/web/src/components/ConsentPanel.tsx` (new),
+`workspace/useConsent.ts` (new), `App.tsx`, `ConversationPanel.tsx`, `api/client.ts`,
+`investigations/useInvestigation.ts`, the operations model, and the tests below.
+
+1. **Consent API.** One workspace-scoped resource, so status and notice cannot disagree:
+
+   | Call | Capability | Result |
+   |---|---|---|
+   | `GET /workspaces/{id}/consent` | `workspace:read` | status and current notice, `Cache-Control: no-store` |
+   | `PUT /workspaces/{id}/consent` | `workspace:admin` | `{accepted: true, notice_version, notice_digest?}`; extra fields are 422 |
+   | `DELETE /workspaces/{id}/consent` | `workspace:admin` | withdraws, idempotent |
+
+   All three return `ConsentResponse`: `required`, `accepted`, `status` (`not_required`, `missing`,
+   `current`, `stale`, `withdrawn`), `questions_enabled`, `notice_version`, `accepted_at`,
+   `withdrawn_at`, `data_recipients` (what the record really authorizes), and `notice` (`version`,
+   `title`, `sections`, `recipients`, `digest`; null when this server shares data with nobody). A
+   foreign workspace is 404 on every call, before any version check.
+2. **Versioning.** `NOTICES` holds the two recognized versions. An unknown version is
+   `409 consent_notice_unknown`. `notice_digest` (SHA-256 over version, title, sections, and
+   recipients) binds acceptance to what was displayed: a mismatch, including a recipient added since
+   the page loaded, is `409 consent_notice_changed`. Recipients still come only from server
+   configuration. `2026-09` stays acceptable and valid only for what it disclosed, so an older client
+   keeps working and can never reach OpenAI. It covers no OpenAI request and reads as `stale` where
+   OpenAI is configured; that workspace needs `2026-10-openai-1`. A digest is not proof that a person
+   read the notice: it proves only which notice the client asked to accept. The UI's part is to render
+   the whole notice before offering the button.
+3. **One reading of a record.** `effective_recipients` is now the only interpretation, used by the
+   investigation live check, the question route, the SQL approval route, the workspace response, and
+   the consent response. An unrecognized version, or a record both accepted and withdrawn, grants
+   nobody. This intentionally tightens S4: such a record used to keep Gemini
+   (`test_a_stale_or_edited_record_naming_openai_is_not_trusted` now asserts the stricter result).
+4. **Withdrawal scope (decision).** The whole workspace record, every recipient at once. It is the
+   record every check reads, so it is the smallest design the backend can enforce correctly.
+   Per-recipient withdrawal is not offered. Withdrawing clears version, acceptance time, and
+   recipients and sets `consent_withdrawn_at`. Repeating it, or withdrawing with nothing on record,
+   changes nothing and adds no audit event. A new acceptance clears the marker.
+5. **Defect found and fixed: SQL approval ignored consent.** `POST /messages/{id}/approval` never
+   read consent, so approving a pending ordinary SQL request after a withdrawal would resume
+   model-backed work. Approving now needs the same consent as asking
+   (`409 gemini_consent_required`, nothing sent, message still pending). Rejecting still works, since it
+   sends nothing.
+6. **Defect found and fixed: a closed run looked paused.** The real-browser journey showed that after
+   a wave was refused `authority_revoked` the UI stayed on "Awaiting SQL approval". The server closes
+   the run just after answering, so the single read-back saw the old status. The hook now keeps
+   its bounded polling after that specific refusal. It fails no differently otherwise: an ambiguous
+   conflict still locks the controls.
+7. **Revocation limits.** Unchanged from S5a and stated in the notice and the dialog: withdrawal stops
+   the next count, create, or action after a check that observes it. It does not recall a request
+   already sent or delete what a recipient received, including OpenAI's documented retention of
+   about ten minutes, which is not a guaranteed deadline. A new acceptance never restores a stopped
+   investigation. The live check reads current consent and keeps no history, so a withdrawal followed
+   by a new acceptance before any check observes it does not stop a paused run: that run continues
+   under the new consent, and only after its own next approval.
+8. **Frontend.** `ConsentPanel` replaces the inline banner at the top of Ask. It shows the status and,
+   when action is needed, the complete notice open with every recipient. The accepted notice stays in a
+   native `<details>`. There is no checkbox and nothing is preselected. `useConsent` derives its view
+   from the workspace ID at render time, so another workspace's consent is never shown, and the newest
+   request wins. Consent is re-read on load, on opening Ask, and when an investigation moves or is
+   refused. It is never stored in the browser. Accepting and withdrawing use the existing mutation
+   lane, so a second submission is refused. A failure re-reads the server, because a timed-out
+   request may still have applied.
+9. **Accessibility.** Native buttons, `<details>`, and the existing `ConfirmDialog` (Cancel focused,
+   Escape cancels, focus returns). `aria-busy` while pending. Focus moves to the panel heading after a
+   confirmed change. Outcomes go through the one shared live region, only after the server answered;
+   the panel adds no live region. `operationMarker` gained a separate `consent_withdrawal` kind, so a
+   reload during a withdrawal cannot report it by the acceptance rule. An acceptance interrupted by a
+   reload is never reported as completed, because stale consent also reads as accepted. axe runs on
+   each state in the real browser.
+10. **Audit.** `consent.accepted` and the new `consent.withdrawn` carry `notice_version` and
+    `consent_recipients`, a token from a fixed vocabulary (`gemini+openai`; anything else is
+    `unlisted`). Withdrawal records what was really in force, not what a stale row named. No notice
+    text, prompt, key, or browser-supplied value is recorded. A repeated withdrawal is not audited.
+11. **Existing workspaces.** Migration 5 adds the nullable `consent_withdrawn_at`; every existing row
+    reads as not withdrawn, and `2026-09` consent stays `current` wherever OpenAI is not configured.
+    A rollback to older code needs the usual metadata restore, because older code refuses a newer
+    schema version. `2026-10-openai-1` was never released, so its closing sentence and the served
+    sections changed without a version bump; after release, any change needs a new version.
+12. **Evidence.** `tests/test_prod1_s5d_consent_lifecycle.py` (real API, store, approval service, and
+    gateways with scripted clients); `App.consent.test.tsx`, `ConsentPanel.test.tsx`, and one new
+    `useInvestigation` test; `apps/web/e2e/real/consent-journey.spec.ts` (6 journeys, real Chromium,
+    production API code, durable store, and an API restart). The OpenAI journey uses placeholder
+    configuration: it proves the notice and the fail-closed result, nothing about OpenAI. Scripted
+    transports and adapters only.
+13. **Unchanged.** `FailClosedAdapters` is the default, `LIVE_ADMISSION_RELEASED` is `False`,
+    `REVIEWED_PROVIDER_EVIDENCE` is empty, no snapshot is admitted, the browser selects no provider, and
+    `SCRIPTED_EXECUTION_ADMISSION` stays test-only. No startup network call was added. S5a's per-run
+    serialization and S5b's single adapter ownership are untouched. Multi-process execution stays
+    unsupported.
+14. **Limitations.** Consent is workspace-wide, not per person or per recipient. A check and a send are
+    separate operations. The UI learns of a change elsewhere only at the next read. The audit event
+    identifies the tenant and request, not the person who read the notice. Neither notice's wording has
+    had legal review.
+15. **Remaining before production admission.** S6 (separate spend approval): real evidence for every
+    provider claim, and a real reviewed bundle. Legal review of the notice text. DEP-1: activation,
+    secrets, egress, and a reviewed spend ceiling. Then, and only then, a reviewed change that opens
+    the release gate. EVAL-2 depends on S6.
 
 ## Outcome
 

@@ -13,6 +13,35 @@ export const workspaceFixture = {
   created_at: createdAt,
 };
 
+export const consentMissingFixture = {
+  workspace_id: workspaceFixture.id,
+  required: true,
+  accepted: false,
+  status: "missing",
+  questions_enabled: false,
+  notice_version: null,
+  accepted_at: null,
+  withdrawn_at: null,
+  data_recipients: [],
+  notice: {
+    version: "2026-09",
+    title: "Hosted model data sharing",
+    sections: [{ heading: "What model-backed questions send", body: "Questions may send question text." }],
+    recipients: ["Gemini"],
+    digest: "a".repeat(64),
+  },
+};
+
+export const consentCurrentFixture = {
+  ...consentMissingFixture,
+  accepted: true,
+  status: "current",
+  questions_enabled: true,
+  notice_version: "2026-09",
+  accepted_at: "2026-09-29T12:01:00Z",
+  data_recipients: ["Gemini"],
+};
+
 export const documentCollectionFixture = {
   id: "documents-1",
   workspace_id: workspaceFixture.id,

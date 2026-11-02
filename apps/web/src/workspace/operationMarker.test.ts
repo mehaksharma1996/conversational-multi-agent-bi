@@ -102,6 +102,14 @@ describe("assessing an interrupted operation against the server", () => {
     );
   });
 
+  it("never reports an interrupted acceptance as completed, since stale consent reads as accepted too", () => {
+    const text = describeAssessment(
+      assessMarker(marker("consent"), restored({ workspace: { ...workspaceFixture, consent_accepted: true } })),
+    );
+    expect(text).not.toContain("completed");
+    expect(text).toContain("may be from before that update");
+  });
+
   it("states uncertainty and never promises a retry", () => {
     const text = describeAssessment(assessMarker(marker("conversation"), restored()));
     expect(text).toContain("cannot be confirmed");

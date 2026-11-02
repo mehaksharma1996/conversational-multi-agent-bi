@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import {
   acceptConsent,
+  getConsent,
   askQuestion,
   confirmSchema,
   createConversation,
@@ -19,6 +20,8 @@ import {
   uploadTabular,
 } from "./api/client";
 import {
+  consentCurrentFixture,
+  consentMissingFixture,
   conversationFixture,
   documentCollectionFixture,
   messageFixture,
@@ -43,6 +46,8 @@ vi.mock("./api/client", async (importOriginal) => {
     confirmSchema: vi.fn(),
     uploadDocuments: vi.fn(),
     acceptConsent: vi.fn(),
+    getConsent: vi.fn(),
+    withdrawConsent: vi.fn(),
     createConversation: vi.fn(),
     askQuestion: vi.fn(),
     decideSqlApproval: vi.fn(),
@@ -62,7 +67,7 @@ async function startAsk(user: UserEvent) {
   await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
   await screen.findByText("Indexed 1 document(s)", { exact: false });
   await goTo(user, /Ask/);
-  await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+  await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
 }
 
 describe("unsaved workflow drafts across section navigation", () => {
@@ -79,7 +84,11 @@ describe("unsaved workflow drafts across section navigation", () => {
     vi.mocked(createDataset).mockResolvedValue(reviewDatasetFixture);
     vi.mocked(confirmSchema).mockResolvedValue(readyDatasetFixture);
     vi.mocked(uploadDocuments).mockResolvedValue(documentCollectionFixture);
-    vi.mocked(acceptConsent).mockResolvedValue();
+    vi.mocked(getConsent).mockResolvedValue(consentMissingFixture);
+    vi.mocked(acceptConsent).mockImplementation(() => {
+      vi.mocked(getConsent).mockResolvedValue(consentCurrentFixture);
+      return Promise.resolve(consentCurrentFixture);
+    });
     vi.mocked(createConversation).mockResolvedValue(conversationFixture);
     vi.mocked(askQuestion).mockResolvedValue(messageFixture);
     vi.mocked(decideSqlApproval).mockResolvedValue(messageFixture);
@@ -241,7 +250,7 @@ describe("unsaved workflow drafts across section navigation", () => {
     await goTo(user, /Documents/);
     await user.upload(screen.getByLabelText("PDF documents"), pdfFile());
     await goTo(user, /Ask/);
-    await user.click(screen.getByRole("button", { name: "I understand, enable Gemini" }));
+    await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
 
     await user.click(screen.getByRole("button", { name: "Reset workspace" }));
     await user.click(await screen.findByRole("button", { name: "Delete workspace" }));

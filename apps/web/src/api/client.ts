@@ -366,15 +366,38 @@ export async function runAnalysis(
   return unwrap(data, error, response);
 }
 
-export async function acceptConsent(workspaceId: string): Promise<void> {
+export type Consent = components["schemas"]["ConsentResponse"];
+export type ConsentNotice = components["schemas"]["ConsentNoticeResponse"];
+
+export async function getConsent(workspaceId: string): Promise<Consent> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/workspaces/{workspace_id}/consent",
+    { params: { path: { workspace_id: workspaceId } } },
+  );
+  return unwrap(data, error, response);
+}
+
+/** Accepts exactly the notice the server served: its version and digest, never recipients. */
+export async function acceptConsent(
+  workspaceId: string,
+  notice: Pick<ConsentNotice, "version" | "digest">,
+): Promise<Consent> {
   const { data, error, response } = await api.PUT(
     "/api/v1/workspaces/{workspace_id}/consent",
     {
       params: { path: { workspace_id: workspaceId } },
-      body: { accepted: true, notice_version: "2026-09" },
+      body: { accepted: true, notice_version: notice.version, notice_digest: notice.digest },
     },
   );
-  unwrap(data, error, response);
+  return unwrap(data, error, response);
+}
+
+export async function withdrawConsent(workspaceId: string): Promise<Consent> {
+  const { data, error, response } = await api.DELETE(
+    "/api/v1/workspaces/{workspace_id}/consent",
+    { params: { path: { workspace_id: workspaceId } } },
+  );
+  return unwrap(data, error, response);
 }
 
 export async function deleteWorkspace(workspaceId: string): Promise<void> {

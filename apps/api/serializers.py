@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pandas as pd
 
+from apps.api.consent_notices import consent_in_force
 from apps.api.models import (
     AnalysisResponse,
     AnomalyResponse,
@@ -72,7 +73,9 @@ def workspace_response(record: WorkspaceRecord, retention_hours: int) -> Workspa
         gemini_configured=record.gemini_configured,
         local_only_mode=record.local_only_mode,
         consent_required=record.gemini_configured,
-        consent_accepted=record.consent_accepted_at is not None,
+        consent_accepted=consent_in_force(
+            record.consent_notice_version, record.consent_accepted_at, record.consent_withdrawn_at
+        ),
         data_recipients=list(record.data_recipients),
         created_at=record.created_at,
     )
