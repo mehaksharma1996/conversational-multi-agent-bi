@@ -608,7 +608,16 @@ provider or says anything about how a real one behaves.
    The hardening adds a `frontend` job step running `consent-journey.spec.ts` with no key, Docker, or
    model call, and raises that job's timeout from 20 to 30 minutes. That step has not run in CI until
    this commit is pushed. The other `e2e/real/` journeys stay local-only.
-7. **Remaining.** Legal review of the notice text. S6 under a separate spend approval: real evidence for
+7. **Defect found by PR CI: a late focus move could cut a question short.** PR #208's run failed two
+   tests that passed on the push run of the same code. Moving focus to the consent or section heading on
+   the next frame ignored where focus was by then, so a late frame took it from the composer: remaining
+   keystrokes were lost, and a truncated question (`"W"`) was submitted. It reproduces whenever frames
+   are slow, so it could reach a person on a loaded device. `focusOnNextFrame` now leaves focus alone once
+   the person has moved to something they can focus themselves, and all three delayed focus sites use it.
+   Focus still moves as before otherwise. Submitting a question still moves focus to the section heading,
+   as it did; the composer is locked and the question already captured by then. No consent or approval
+   rule changed.
+8. **Remaining.** Legal review of the notice text. S6 under a separate spend approval: real evidence for
    every provider claim and a real reviewed bundle. DEP-1. The UI still learns of a change made elsewhere
    only at its next read.
 

@@ -69,6 +69,7 @@ import { consentGateReason, investigationGate, questionGate, useConsent } from "
 import { INVESTIGATION_STATUS_LABEL } from "./investigations/model";
 import { useInvestigation } from "./investigations/useInvestigation";
 import { useWorkflowDrafts } from "./workspace/drafts";
+import { focusOnNextFrame } from "./workspace/focus";
 import {
   assessMarker,
   describeAssessment,
@@ -207,9 +208,7 @@ export default function App() {
       window.history.pushState(null, "", `#${section}`);
     }
     setActiveSection(section);
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>("[data-section-heading]")?.focus();
-    });
+    focusOnNextFrame(() => document.querySelector<HTMLElement>("[data-section-heading]"));
   }, []);
 
   // Back, Forward, and typed fragments restore the section; a non-route fragment keeps the current one.
@@ -648,12 +647,6 @@ export default function App() {
     }
   };
 
-  const focusConsent = () => {
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>("[data-consent-heading]")?.focus();
-    });
-  };
-
   // Success is announced only after the server answered. A failed request may still have reached
   // the server (a timeout, for example), so the state shown afterwards is read back, never assumed.
   const changeConsent = async (
@@ -665,6 +658,7 @@ export default function App() {
     const operation = begin(kind);
     if (!operation) return;
     const from = epoch.current;
+    const startedFrom = document.activeElement;
     setError(null);
     try {
       const result = await send(workspace.id);
@@ -677,7 +671,7 @@ export default function App() {
       if (discardStale(operation, from, epoch.current)) return;
       operation.finish("succeeded");
       announce(success(result));
-      focusConsent();
+      focusOnNextFrame(() => document.querySelector<HTMLElement>("[data-consent-heading]"), startedFrom);
     } catch (caught) {
       if (discardStale(operation, from, epoch.current)) return;
       operation.finish("failed");
