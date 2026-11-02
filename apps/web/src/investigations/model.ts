@@ -26,6 +26,19 @@ export function shouldPollInvestigation(status: InvestigationStatus): boolean {
   return POLLED.has(status);
 }
 
+/** Statuses a run can publish a verified report for; other terminal statuses never have one. */
+const REPORTABLE = new Set<InvestigationStatus>([
+  "completed",
+  "completed_partial",
+  "budget_exhausted",
+  "cancelled",
+  "failed",
+]);
+
+export function isReportableInvestigation(status: InvestigationStatus): boolean {
+  return REPORTABLE.has(status);
+}
+
 export function needsPlanDecision(investigation: Investigation): boolean {
   return (
     investigation.status === "awaiting_plan_approval" &&
