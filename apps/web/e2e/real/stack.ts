@@ -28,6 +28,7 @@ const apiPidFile = resolve(stateDir, "api.pid");
 export type ApiFactory =
   | "retail"
   | "investigation-scripted"
+  | "investigation-report"
   | "investigation-production"
   | "consent-openai";
 
@@ -36,6 +37,10 @@ const FACTORIES: Record<ApiFactory, { target: string; data: string }> = {
   "investigation-scripted": {
     target: "tests.e2e.investigation_app:build_scripted_app",
     data: "investigation-scripted",
+  },
+  "investigation-report": {
+    target: "tests.e2e.investigation_app:build_scripted_report_app",
+    data: "investigation-report",
   },
   "investigation-production": {
     target: "tests.e2e.investigation_app:build_production_app",

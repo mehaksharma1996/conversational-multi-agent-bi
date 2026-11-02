@@ -84,4 +84,7 @@ executed SQL is now retained in the encrypted workspace store.
   SQL in component memory only, and is dropped on scope change. Errors offer an explicit retry.
 
 ## Delivery record
-Filled in on completion; see the PR body.
+The scripted stack does reach a full report: `build_scripted_report_app` runs the INV-7 churn
+plan on the real sample data with scripted model answers, through the real gateway, verifier, and
+store. Its journeys prove browser and API wiring only. They say nothing about a production model.
+Docker journeys were not run: Docker is unavailable on this host.

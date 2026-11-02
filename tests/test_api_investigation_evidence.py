@@ -282,6 +282,71 @@ def test_an_older_record_keeps_its_report_but_presents_no_evidence(
     assert body["report"]["verification"] == "verified"
 
 
+def test_a_failed_runs_stored_evidence_stays_unreported(
+    finished: tuple[TestClient, FastAPI, str],
+) -> None:
+    from dataclasses import replace
+
+    client, app, investigation_id = finished
+    records = app.state.investigations.records
+    record = _record(app, investigation_id)
+    report_json, evidence_json = records.load_report(record)
+    assert "SELECT" in evidence_json
+    report = VerifiedReport.model_validate_json(report_json)
+    failed = report.model_copy(
+        update={
+            "investigation_status": "failed",
+            "availability": "codes_only",
+            "query_tables": (),
+            "citations": (),
+        }
+    ).model_dump_json()
+    _tamper(app, record, "report", failed)
+    records._records[record.id] = replace(
+        record, report_sha256=report_content_digest(failed, evidence_json)
+    )
+    response = client.get(f"/api/v1/investigations/{investigation_id}/evidence")
+    assert response.status_code == 200, response.text
+    assert response.json()["evidence_state"] == "not_reported"
+    assert response.json()["evidence"] == []
+    assert "SELECT" not in response.text
+
+
+def test_the_evidence_shows_the_statement_a_person_edited_not_the_proposed_one() -> None:
+    deployment = Deployment("ui6c_edited")
+    with TestClient(deployment.app()) as client:
+        _, conversation_id, message_id = _proposal(client)
+        investigation_id = _create(client, conversation_id, message_id).json()["id"]
+        plan = _until(client, investigation_id, _status("awaiting_plan_approval", "failed"))
+        assert _approve(client, plan).status_code == 200
+        _until(client, investigation_id, _status("awaiting_sql_approval", "failed"))
+        wave = client.get(f"/api/v1/investigations/{investigation_id}/sql-wave").json()
+        item = wave["items"][0]
+        edited = f"{item['sql']} LIMIT 2"
+        decided = client.post(
+            f"/api/v1/investigations/{investigation_id}/sql-wave",
+            json={
+                "wave_id": wave["wave_id"],
+                "wave_digest": wave["wave_digest"],
+                "items": [
+                    {
+                        "task_id": item["task_id"],
+                        "sql_fingerprint": item["sql_fingerprint"],
+                        "decision": "edit",
+                        "edited_sql": edited,
+                    }
+                ],
+            },
+        )
+        assert decided.status_code == 202, decided.text
+        done = _until(client, investigation_id, _status("completed", "completed_partial", "failed"))
+        assert done["status"] == "completed", done
+        [evidence] = client.get(f"/api/v1/investigations/{investigation_id}/evidence").json()[
+            "evidence"
+        ]
+    assert evidence["sql"].endswith("LIMIT 2")
+
+
 def test_evidence_survives_a_restart_with_its_digest() -> None:
     deployment = Deployment("ui6c_restart")
     with TestClient(deployment.app()) as client:
