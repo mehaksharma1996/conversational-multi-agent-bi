@@ -52,13 +52,23 @@ describe("consent gates", () => {
     }
   });
 
-  it("does not block a workspace with no external recipient while consent is unknown", () => {
+  it("does not block questions in a workspace with no external recipient while consent is unknown", () => {
     for (const workspace of [localOnly, noRecipient]) {
       for (const view of [LOADING, FAILED]) {
         expect(questionGate(view, workspace)).toBe("open");
-        expect(investigationGate(view, workspace)).toBe("open");
       }
     }
+  });
+
+  it("opens the investigation gate on unknown consent only in local-only mode", () => {
+    // The flags describe the question chain. With only an investigation model configured they read
+    // as "no recipient" while the investigation's recipient is still unconfirmed.
+    expect(investigationGate(LOADING, noRecipient)).toBe("loading");
+    expect(investigationGate(FAILED, noRecipient)).toBe("error");
+    expect(investigationGate(LOADING, localOnly)).toBe("open");
+    expect(investigationGate(FAILED, localOnly)).toBe("open");
+    expect(investigationGate(ready(consentCurrentFixture), noRecipient)).toBe("open");
+    expect(investigationGate(ready(consentMissingFixture), noRecipient)).toBe("needs_acceptance");
   });
 
   it("follows the server once it answers", () => {
