@@ -17,7 +17,12 @@ from fastapi import APIRouter, Depends, Header, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.authorization import Capability, capabilities_for, requires
-from apps.api.dependencies import get_identity
+from apps.api.dependencies import (
+    get_api_settings,
+    get_identity,
+    get_rate_limiter,
+    get_repository,
+)
 from apps.api.errors import STANDARD_ERROR_RESPONSES, ApiError, ResourceNotFoundError
 from apps.api.investigation_store import InvestigationNotFoundError, InvestigationRecord
 from apps.api.investigations import (
@@ -25,8 +30,10 @@ from apps.api.investigations import (
     InvestigationRequestError,
     InvestigationRuntime,
 )
-from apps.api.repository import MessageRecord
+from apps.api.rate_limit import InMemoryRateLimiter, enforce_rate_limit
+from apps.api.repository import LocalResourceRepository, MessageRecord
 from apps.api.serializers import is_investigation_proposal
+from config.settings import Settings
 from packages.connectors import IdentityContext
 from packages.investigation import InvestigationStatus
 from packages.investigation.approval import SQLItemDecision
@@ -68,6 +75,9 @@ def get_investigation_runtime(request: Request) -> InvestigationRuntime:
 
 
 RuntimeDependency = Annotated[InvestigationRuntime, Depends(get_investigation_runtime)]
+RateLimiterDependency = Annotated[InMemoryRateLimiter, Depends(get_rate_limiter)]
+RepositoryDependency = Annotated[LocalResourceRepository, Depends(get_repository)]
+SettingsDependency = Annotated[Settings, Depends(get_api_settings)]
 
 
 class _Body(BaseModel):
@@ -294,6 +304,21 @@ def _capabilities(identity: IdentityContext) -> frozenset[str]:
     return frozenset(capability.value for capability in capabilities_for(identity))
 
 
+def _limit_decisions(
+    limiter: InMemoryRateLimiter, settings: Settings, record: InvestigationRecord
+) -> None:
+    """A decision can start model work, so it is limited. Cancel and reads never are: a stop must
+    always be accepted, and a 429 must not interrupt status polling (#157)."""
+    enforce_rate_limit(
+        limiter,
+        operation="investigation_decision",
+        tenant_id=record.tenant_id,
+        workspace_id=record.workspace_id,
+        limit=settings.rate_limit_investigation_decisions,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
+
+
 @router.post(
     "/conversations/{conversation_id}/investigations",
     dependencies=[requires(Capability.ANALYSIS_RUN)],
@@ -309,12 +334,25 @@ def create_investigation(
     identity: IdentityDependency,
     runtime: RuntimeDependency,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
+    limiter: RateLimiterDependency,
+    repository: RepositoryDependency,
+    settings: SettingsDependency,
 ) -> InvestigationResponse:
     """Start an investigation from an ``investigation_proposed`` message; planning runs as a job."""
 
     def source_is_proposal(message: MessageRecord) -> bool:
         return is_investigation_proposal(message)
 
+    if settings.investigation_routing_enabled:  # a disabled feature answers as disabled, not 429
+        conversation = repository.get_conversation(conversation_id, identity.tenant_id)
+        enforce_rate_limit(
+            limiter,
+            operation="investigation",
+            tenant_id=identity.tenant_id,
+            workspace_id=conversation.workspace_id,
+            limit=settings.rate_limit_investigations,
+            window_seconds=settings.rate_limit_window_seconds,
+        )
     try:
         record, _ = runtime.create(
             tenant_id=identity.tenant_id,
@@ -381,9 +419,11 @@ def decide_investigation_plan(
     command: PlanDecisionBody,
     identity: IdentityDependency,
     runtime: RuntimeDependency,
+    limiter: RateLimiterDependency,
+    settings: SettingsDependency,
 ) -> InvestigationResponse:
     """Approve or reject the exact plan (digest and epoch) shown to this approver."""
-    _owned(runtime, investigation_id, identity.tenant_id)
+    _limit_decisions(limiter, settings, _owned(runtime, investigation_id, identity.tenant_id))
     try:
         record = runtime.decide_plan(
             tenant_id=identity.tenant_id,
@@ -470,9 +510,11 @@ def decide_investigation_sql_wave(
     command: SQLWaveDecisionBody,
     identity: IdentityDependency,
     runtime: RuntimeDependency,
+    limiter: RateLimiterDependency,
+    settings: SettingsDependency,
 ) -> InvestigationResponse:
     """Decide every statement of exactly the pending wave; the run resumes as a job."""
-    _owned(runtime, investigation_id, identity.tenant_id)
+    _limit_decisions(limiter, settings, _owned(runtime, investigation_id, identity.tenant_id))
     try:
         items = tuple(
             SQLItemDecision(

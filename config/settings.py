@@ -110,6 +110,8 @@ class Settings:
     rate_limit_document_indexes: int = 20
     rate_limit_analyses: int = 60
     rate_limit_messages: int = 120
+    rate_limit_investigations: int = 20
+    rate_limit_investigation_decisions: int = 60
     embedding_cache_max_entries: int = 10_000
     investigation_routing_enabled: bool = False
     investigation_model_provider: str = "none"
@@ -516,6 +518,8 @@ def get_settings() -> Settings:
         rate_limit_document_indexes=_positive_int("RATE_LIMIT_DOCUMENT_INDEXES", 20),
         rate_limit_analyses=_positive_int("RATE_LIMIT_ANALYSES", 60),
         rate_limit_messages=_positive_int("RATE_LIMIT_MESSAGES", 120),
+        rate_limit_investigations=_positive_int("RATE_LIMIT_INVESTIGATIONS", 20),
+        rate_limit_investigation_decisions=_positive_int("RATE_LIMIT_INVESTIGATION_DECISIONS", 60),
         embedding_cache_max_entries=_positive_int("EMBEDDING_CACHE_MAX_ENTRIES", 10_000),
         investigation_routing_enabled=_flag("INVESTIGATION_ROUTING_ENABLED"),
         investigation_model_provider=os.getenv("INVESTIGATION_MODEL_PROVIDER", "none")
