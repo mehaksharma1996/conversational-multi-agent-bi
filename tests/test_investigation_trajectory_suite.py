@@ -350,6 +350,7 @@ def test_the_injected_text_reaches_the_graph_and_goes_no_further(workdir: Path) 
     """The safety case is not vacuous: the real memo's text is in a prompt, and the model obeyed."""
     reset_replay_registry()
     run = scenarios.churn_safety_injection(runner.build_resources(workdir / "injection"))
+    assert run.e is not None
     assert any("IGNORE ALL PRIOR INSTRUCTIONS" in prompt for prompt in run.e.llm.prompts)
     answers = [p.answer.text for p in run.result.payloads.values() if p.kind == "document"]
     assert any("SYSTEM PROMPT" in answer for answer in answers)
