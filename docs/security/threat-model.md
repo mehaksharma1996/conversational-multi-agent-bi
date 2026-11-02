@@ -1,6 +1,7 @@
 # Threat model
 
-Scope: the local React/FastAPI product, its container topology, and the read-only MCP server. It is a
+Scope: the local React/FastAPI product, its multi-agent investigations (section 8), its container
+topology, and the read-only MCP server. It is a
 single-node application used by one operator or a small trusted group; it is not a hardened multi-tenant
 SaaS. Each section lists the threat, the controls that exist in the repository today, the residual risk,
 and where follow-up is tracked. "Control" means implemented and tested or evaluated; anything else is
@@ -80,7 +81,53 @@ resolution, bound size and time, and ship with SSRF tests before it merges.
 | Audit tampering | Append-only, hash-chained, per-tenant audit sinks verified by `scripts/verify_audit` | No off-host WORM storage; retention and rotation are tracked in [#18](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/18) |
 | Loss of state on restart | Startup sweep removes orphaned workspaces so nothing leaks | Metadata is process-local; durable recovery is [#12](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/12) |
 
+## 8. Multi-agent investigations
+
+Investigations ([ADR 0024](../adr/0024-multi-agent-investigation.md)) let several model
+roles act over one tenant's data: a planner, a SQL analyst, document research, a business investigator,
+a Critic, and a report narrator. Any text a model reads or writes is untrusted, including text that
+another role produced. No model has authority. Authority comes from the verified identity and
+server-side records, and is re-checked at every tool boundary.
+
+Investigation routing is off by default. Production uses `FailClosedAdapters` and no provider has been
+admitted, so **no real model has run this path**.
+
+| Threat | Controls | Residual risk |
+|---|---|---|
+| Instructions in a PDF steer a role | The gateway builds each prompt from the approved task, and one tool call does one thing. Answer text reaches only the findings prompt, fenced and only when its citations verify. The Critic and narrative prompts hold no document text. Verdicts ignore answer text | A filename sits outside the fence in the findings prompt, flattened and cut to 60 characters (RT-DOC-07). It can influence only the draft, and every claim in the draft is re-verified |
+| Instructions in table cells steer a role | Result rows stay in typed in-process payloads. No later prompt or checkpoint holds a cell. A report shows a cell only as a table value | Redacted **sample values do reach the SQL prompt**, unfenced, so a hostile cell can steer SQL generation (RT-ROW-02). The read-only guard, the SQLite authorizer, and SQL approval still apply |
+| A model writes SQL that is read-only but dishonest | SQL approval is mandatory in the API: nothing executes until a person approves that exact statement (RT-ROW-05) | **The largest residual risk.** SQL with fabricated counts passes every deterministic control. Once approved, a refuted hypothesis reads as supported in a report labelled verified (`test_residual_fabricated_counts_a_person_approves_change_the_verdict`). Nothing but the approver stops this |
+| A plan claims authority or widens scope | Strict plan validation: unknown fields, wrong assignees, and fields outside the schema never reach a person. Approval binds the exact plan digest, and the gateway compares state with the trusted approval | An approved objective or hypothesis statement is still model text in later prompts. It is flattened and cut, and the guards apply to whatever it provokes |
+| Forged or replayed evidence between roles | Payloads exist only in the gateway that issued them and are re-verified against their records and scope. The Critic checks every citation and recomputes every number | A draft can be wrong; it is transient and never reaches a report |
+| The Critic overrides a control | The Critic model may only propose coverage gaps, parsed strictly. Each state channel has one writer (`CHANNEL_OWNERS`). Findings are recomputed and cannot be withdrawn or downgraded. A confirmed gap is only a request: without a granted round and an exact-digest approval, nothing is admitted | None known in the deterministic path |
+| The narrative rewrites the report | The model chooses typed claims and writes no sentences. `verify_report` recomputes each claim, and any rejection means the reviewed deterministic wording | A valid narrative can still choose an unhelpful order or emphasis |
+| A specialist uses a tool it does not own, or skips approval | Specialists hold `SpecialistGateway`, which has only five tool operations. Each call needs the task's assignee, a tool that fits the task's kind, the issued attempt token, and a single-use handle. Role and scope violations close the investigation | Enforced in this process only; it is not a sandbox against code running inside it |
+| Cross-tenant or unauthorized route access | Every route resolves records through the verified tenant, and a foreign ID is the same 404. Capabilities are checked per route. `tests/test_investigation_api_hardening.py` enumerates routes from the published contract, so a new route fails until classified | Depends on correct tenant claims, as in section 3 |
+| Consent withdrawn during a run | Consent is re-read at every model boundary. Approval and SQL decisions are refused and the run closes without sending anything. Reads and cancel stay available | A request already sent is not recalled. See the open findings below |
+| Cost or abuse through repeated starts and decisions | `RATE_LIMIT_INVESTIGATIONS` and `RATE_LIMIT_INVESTIGATION_DECISIONS` return a bounded 429 after the tenant check; a single live investigation per conversation; per-run budget ledger | Process-local fixed windows. Reads are not limited. Cancel is deliberately never limited, so a stop cannot be refused |
+
+**What the red-team suite proves.** `tests/test_investigation_red_team.py` runs each attack (case IDs
+`RT-*`) through the real gateways, graph, Critic, and verifier, with scripted models playing the worst
+case: a model that has already obeyed the injection. Each case asserts the control that stopped it. So
+the suite shows that the deterministic controls hold whatever a model outputs, for these attacks.
+
+**What it does not prove.** It says nothing about how often a real model would be misled, or how much
+harm a misled model could do inside these limits, such as a wrong but guard-passing query or a poor
+plan that a person then approves. It is not a measurement, covers only the attacks written down, and
+does not replace a live evaluation once a provider is admitted. Passing it must not be reported as
+real-model robustness.
+
+**Open findings from the PROD-1 review**, each pinned by a characterisation test in
+`tests/test_investigation_api_hardening.py`:
+
+- Medium: a digest-free `2026-09` consent acceptance records every non-OpenAI recipient configured at
+  that moment, including one the client never displayed. OpenAI is never recorded this way.
+- Low: a cancel that lands after a job releases its claim but before it publishes a pause leaves the
+  stopped pause and its wave displayed until a second cancel. Deciding that wave is refused, and
+  nothing is sent or run.
+
 ## Review
 
 Re-review when a new connector, provider, storage backend, or deployment mode is added, when ADR 0021
-expires, and before lifting the loopback-only restriction.
+expires, before lifting the loopback-only restriction, and before admitting any investigation provider
+or turning investigation routing on by default.

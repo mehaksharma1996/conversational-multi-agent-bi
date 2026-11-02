@@ -5,7 +5,11 @@ service, gateways, and job executor with scripted bounded adapters. No network, 
 account is used. These tests show the server's controls, not how any real model behaves.
 
 Adding an investigation route fails ``test_every_route_is_classified`` until it has a row in
-``CAPABILITY``, ``RATE_LIMIT``, and ``CONSENT``. A body-less route gets the tenant test automatically.
+``CAPABILITY``, ``RATE_LIMIT``, and ``CONSENT``. A body-less route gets the tenant test
+automatically.
+
+The last section characterises two open PROD-1 review findings: it pins today's behaviour, including
+the part that is wrong, so a fix must change these tests on purpose.
 """
 
 from __future__ import annotations
@@ -640,3 +644,108 @@ def test_the_limits_are_configured_from_the_environment_and_must_be_positive(
     monkeypatch.setenv(variable, "0")
     with pytest.raises(ValueError):
         get_settings()
+
+
+# --- characterisation of open PROD-1 findings: not endorsed behaviour -----------------------------
+
+
+def test_finding_1_digest_free_legacy_acceptance_records_recipients_never_shown() -> None:
+    """OPEN (Medium). ``apps/api/feature_routes.py``: a digest-free ``2026-09`` acceptance skips the
+    notice comparison, then records every non-OpenAI recipient configured now.
+
+    A client that read the notice when only Gemini was configured therefore authorises Anthropic by
+    re-sending that acceptance after the operator adds it. The re-acceptance rule was agreed, so
+    this pins it until a decision changes it. OpenAI stays out, and a digest closes the gap.
+    """
+    settings = replace(
+        _settings(isolated_directory_path("sec1_finding_1")),
+        durable_metadata=True,
+        llm_providers=("gemini", "anthropic"),
+        anthropic_api_key="offline-test-placeholder-not-a-credential",
+        investigation_model_provider="openai_responses",
+        investigation_model_activation=True,
+        openai_api_key="offline-test-placeholder-not-a-credential",
+        investigation_model_snapshot="test-model-2099-01-01",
+        investigation_model_review="review-placeholder-1",
+    )
+    app = create_app(
+        settings=settings,
+        embedder_factory=lambda _model: FakeEmbedder(),
+        llm_client_factory=lambda _settings: FakeLLM(),
+        telemetry_sink=InMemoryTelemetrySink(),
+        audit_sink=InMemoryAuditSink(),
+    )
+    with TestClient(app) as client:
+        workspace_id = client.post("/api/v1/workspaces").json()["id"]
+        url = f"/api/v1/workspaces/{workspace_id}/consent"
+        digest_free = client.put(url, json={"accepted": True, "notice_version": "2026-09"})
+        assert digest_free.status_code == 200
+        assert digest_free.json()["data_recipients"] == ["Gemini", "Anthropic"]  # the finding
+        assert "OpenAI" not in digest_free.json()["data_recipients"]  # the part that holds
+        stale = client.put(
+            url,
+            json={"accepted": True, "notice_version": "2026-09", "notice_digest": "0" * 64},
+        )
+        assert stale.status_code == 409  # a client that sends a digest is protected
+        assert stale.json()["error"]["code"] == "consent_notice_changed"
+
+
+def test_finding_2_cancel_after_claim_release_leaves_a_stopped_pause_until_a_second_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OPEN (Low; nothing is sent). ``apps/api/investigations.py``: ``_finish_run_job`` releases the
+    claim, then ``_settle`` publishes the pause. A cancel between the two sees ``running`` and no
+    claim, so nobody closes the run: the record shows a pause that can never proceed.
+    """
+    deployment, app = _paused("sec1_finding_2")
+    with TestClient(app) as client:
+        runtime = client.app.state.investigations
+        settle = runtime._settle
+        cancels: list[Any] = []
+
+        def cancel_in_the_window(investigation_id: str, tenant: str, result: Any) -> None:
+            if not cancels and result.status.value == "awaiting_sql_approval":
+                assert not runtime._live[investigation_id].run_jobs  # the claim is already released
+                cancels.append(runtime.cancel(tenant, investigation_id))
+            settle(investigation_id, tenant, result)
+
+        monkeypatch.setattr(runtime, "_settle", cancel_in_the_window)
+        flow = Flow(client, deployment)
+        body = flow.to_plan_approval()
+        approved = client.post(
+            f"/api/v1/investigations/{flow.id}/plan-decision",
+            json={
+                "decision": "approve",
+                "plan_digest": body["plan_digest"],
+                "authority_epoch": body["authority_epoch"],
+            },
+        )
+        assert approved.status_code == 200
+        stuck = flow.until("awaiting_sql_approval", *TERMINAL)
+        assert cancels and cancels[0].status.value == "running"
+        assert (
+            stuck["status"] == "awaiting_sql_approval"
+        )  # the finding: cancelled, yet shown paused
+
+        prompts = len(deployment.adapters.llm.sql_prompts)
+        # The part that holds: the stopped pause still shows its wave, but deciding it runs nothing.
+        url = f"/api/v1/investigations/{flow.id}/sql-wave"
+        wave = client.get(url).json()
+        items = [
+            {
+                "task_id": item["task_id"],
+                "sql_fingerprint": item["sql_fingerprint"],
+                "decision": "approve",
+            }
+            for item in wave["items"]
+        ]
+        refused = client.post(
+            url,
+            json={"wave_id": wave["wave_id"], "wave_digest": wave["wave_digest"], "items": items},
+        )
+        assert refused.status_code == 409
+        assert len(deployment.adapters.llm.sql_prompts) == prompts
+        assert "agent.sql_approved" not in [event.name for event in deployment.audit.events]
+
+        assert flow.cancel().status_code == 202  # the second cancel closes it
+        assert flow.until(*TERMINAL)["status"] == "cancelled"
