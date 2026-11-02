@@ -180,7 +180,7 @@ once, with a category and a **coverage** label that says what an offline scripte
 
 | Coverage | Meaning | Counted in pass rates |
 |---|---|---|
-| `measured` | The scripted model produces a correct output, so the case is graded | Yes |
+| `measured` | The scripted model produces a correct output, so the case is graded. A multi-step investigation case is measured only with `graded_by: investigation_graph` (see the trajectory suite below) | Yes |
 | `not_covered_by_script` | Supported by the product, but the scripted model has no correct output | No |
 | `requires_agent` | Defined as dependent steps; a limitation of current benchmark coverage, not proof that one query or one agent could never answer it | No |
 | `requires_live_model` | Only a person reading real model output can judge it | No |
@@ -196,7 +196,8 @@ retrieval, and comparison. Their reference queries and descriptive facts run aga
 CSV and must agree with the ground truth: regional fulfillment breaches sum to 13, category
 review-rule breaches sum to 45, each ranking has a unique leader, and every policy threshold equals
 the ground truth's `policy_rules`. The October peak question has no reference cause: the data
-records transactions, not causes, so only its descriptive facts are checkable.
+records transactions, not causes, so its grade covers the descriptive facts and whether the answer
+states no cause. It never grades a cause.
 
 The manifest pins the CSV, policy PDF, ground truth, and both case files by SHA-256 (text files with
 line endings normalised to LF, because Windows checkouts rewrite them). Any change to a pinned file
@@ -212,9 +213,10 @@ measurement of model accuracy, and the file says so.
 - Every `measured` case is in the pass-rate denominator, including failures and cases the run
   never reached (`not_attempted`). Other coverage labels are `not_measured`: run and observed,
   never counted as a pass or a failure. Rates carry Wilson 95% intervals.
-- Investigation cases are run and recorded with non-sensitive observations (whether the expected
-  cells appeared, how many causal phrases the answer used); they define no expected route and are
-  never scored.
+- The three investigation cases are `graded_by: investigation_graph`: their outcome and dimensions
+  come from scripted runs of the real investigation graph. The single-query API run still happens
+  and is recorded as non-sensitive observations (whether the expected cells appeared, how many
+  causal phrases the answer used), but it can neither pass nor fail them.
 - The file holds no timestamps, identifiers, latency, tokens, cost, answers, SQL text, or rows.
 
 Five safety invariants are judged from harness evidence, independently of the scores, and fail
@@ -253,6 +255,78 @@ only with a written justification of at least 20 characters. It is stored in the
 block with the accepted changes, so the diff shows what was accepted and why. Retiring a measured
 case on purpose is not an ordinary update; it needs a separate benchmark-maintenance process with
 explicit human review, which E1b-2 does not provide.
+
+## Scripted investigation trajectory suite
+
+**Scripted regression evidence, not real-model performance.** `evals/investigation/v1/` holds the
+suite (`trajectory_cases.json`, `trajectory-baseline.json`). Each case runs the real proposal,
+approval service, execution owner, gateway, specialists, Critic, Supervisor, and report verifier on
+the committed synthetic data. Scripted adapters supply every model output
+(`tests/e2e/investigation_trajectory_scenarios.py`); nothing about the graph is stubbed. No model is
+contacted and no credential is read.
+
+```powershell
+python -m tests.e2e.investigation_trajectory_runner                # compare; exit 1 on drift
+python -m tests.e2e.investigation_trajectory_runner --case <id>    # one case, no comparison
+python -m tests.e2e.investigation_trajectory_runner --update --justification "why this is right"
+```
+
+Each run writes `evals/results/investigation-trajectory.json` (machine-readable, with every observed
+block) and `.md` (a human-readable summary). Both are git-ignored; `--output` and `--summary` move
+them. `tests/test_investigation_trajectory_suite.py` runs the same comparison, so a worse trajectory
+fails `python -m scripts.check_all`.
+
+**Grading is expected versus actual.** A run becomes content-free observation blocks: fixed codes,
+identifiers, counts, and booleans. A case's `expect` names the dimensions it is about. A mapping
+constrains only the keys it names, and lists compare exactly and in order, so one extra tool step or
+model call is a named difference. Every graph case must state its end state and its exact calls. A
+case with no applicable dimension fails closed.
+
+| Dimension | What is compared |
+|---|---|
+| `routing_gate` | The real deterministic gate's decision on the question. A characterization: a change to the gate is a reviewed diff |
+| `planning_delegation` | The proposal outcome, assignees, the role each task ran as, and the ordered gateway decisions |
+| `sql_result_equivalence` | Query evidence against reference rows from the evaluator-only oracle or the case file, under `compare_result_sets`. Scripted SQL differs from the reference SQL |
+| `citation_quality` | Cited files and pages, invalid and absent citations, and whether every report citation is one the evidence verified |
+| `hypothesis_grounding` | Verdicts, reasons, tested tasks, and whether each decisive verdict cites existing derived evidence |
+| `critic_recall` | Critique rounds, follow-ups, and recall over the defects the scenario seeded on purpose |
+| `failure_recovery` | Final status and category, every task's outcome, and corrections spent |
+| `budget_compliance` | Ledger counters, how the ledger closed, and whether every counter stayed within its limit |
+| `security_approval` | Statements executed and whether each is read-only, refusals, audit event counts, approval outcomes, and absence of the case's forbidden text from the report |
+| `report_verification` | The verifier's decision, an independent re-verification of the returned report, limitations, notes, recommendations, and causal phrases in the report's text |
+| `unnecessary_calls` | Exact planning and execution model calls, by kind |
+
+Groups: happy path, routing, planning, approval (plan and SQL waves), cancellation, recovery, budget,
+critique and bounded replanning, citations and evidence, report, and security. Four suite invariants
+fail closed and no update can override them: `read_only_sql`, `dataset_unchanged`, `no_live_model`
+(only scripted adapters, and an audit hook saw no non-loopback connection), and
+`no_content_in_results`.
+
+Promotion: the five multi-step churn cases and the three retail investigation cases are `measured`
+with `graded_by: investigation_graph`. The churn package stays outside the v2 baseline; its grades
+are in `trajectory-baseline.json`. The retail grades also feed `workflow-baseline.json`. The three
+single-route churn cases stay `not_covered_by_script`.
+
+Limits, stated so nobody reads more into a pass:
+
+- Authors wrote the scripted plans, SQL, drafts, and narratives, so a pass says nothing about whether
+  a model would produce them. The pass rate is over scenarios the authors chose; it is not an
+  accuracy estimate.
+- Five promoted questions are **not eligible** under today's routing gate
+  (`churn-contradictory-enterprise`, `churn-insufficient-retention`, `churn-safety-injection`,
+  `investigation-top-region-fulfillment`, `investigation-review-category-rate`), and `apps/api` has
+  no route that starts an investigation directly. They are graded from an approved plan: a pass says
+  what the graph does with that plan, not that the product routes the question to it. The summary
+  lists them.
+- Expected trajectories were recorded from the code and reviewed against the oracle, so the suite
+  detects change. It does not prove today's behaviour is the best possible.
+- API wiring, durable persistence, and restart reconciliation are covered by
+  `tests/test_api_investigation*.py` and the browser journeys, not here. Checkpoints are in process.
+- The citation dimension checks locations; passage text is not part of evidence payloads.
+
+Updates follow the workflow baseline's rules: no override, and refused for a failed invariant, a
+worse outcome or check, a deleted or demoted case, or more model calls or tool steps for the same
+case. To accept a real behaviour change, update the case's `expect` in the same reviewed change.
 
 ## Optional live evaluation
 
