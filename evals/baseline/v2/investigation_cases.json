@@ -4,7 +4,7 @@
   "policy": "sample_data/retail_operations_policy.pdf",
   "ground_truth": "sample_data/retail_operations_ground_truth.json",
   "table": "uploaded_data",
-  "notes": "Multi-step investigation questions over the synthetic retail demo. None is scored offline: the scripted model has no output for them, and the current workflow runs one SQL query per question. reference_sql and descriptive facts are oracles run against the CSV and are never shown to a model. policy_rules name the ground-truth policy values each reference query applies.",
+  "notes": "Multi-step investigation questions over the synthetic retail demo. They are graded offline on scripted runs of the real investigation graph (evals/investigation/v1/trajectory_cases.json), never on the single-query workflow run, which only records observations here. That is scripted regression evidence, not real-model performance. reference_sql and descriptive facts are oracles run against the CSV and are never shown to a model. policy_rules name the ground-truth policy values each reference query applies.",
   "cases": [
     {
       "id": "investigation-top-region-fulfillment",

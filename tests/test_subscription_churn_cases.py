@@ -175,12 +175,17 @@ def test_investigation_manifest_reuses_existing_validator_and_hashes() -> None:
     manifest = load_json(MANIFEST)
 
     assert validate_manifest(manifest, ROOT) == []
-    assert manifest["manifest_version"] == "investigation-v1.0.0"
+    assert manifest["manifest_version"] == "investigation-v1.1.0"
     coverage = {entry["id"]: entry["coverage"] for entry in manifest["cases"]}
     assert coverage["churn-sql-quarter-change"] == "not_covered_by_script"
     assert coverage["churn-document-pricing"] == "not_covered_by_script"
     assert coverage["churn-hybrid-pricing"] == "not_covered_by_script"
-    assert set(coverage.values()) == {"not_covered_by_script", "requires_agent"}
+    assert set(coverage.values()) == {"not_covered_by_script", "measured"}
+    assert all(
+        entry.get("graded_by") == "investigation_graph"
+        for entry in manifest["cases"]
+        if entry["coverage"] == "measured"
+    )
 
     v2_manifest = load_json(ROOT / "evals" / "baseline" / "v2" / "manifest.json")
     assert all(
