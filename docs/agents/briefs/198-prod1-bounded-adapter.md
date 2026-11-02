@@ -612,11 +612,17 @@ provider or says anything about how a real one behaves.
    tests that passed on the push run of the same code. Moving focus to the consent or section heading on
    the next frame ignored where focus was by then, so a late frame took it from the composer: remaining
    keystrokes were lost, and a truncated question (`"W"`) was submitted. It reproduces whenever frames
-   are slow, so it could reach a person on a loaded device. `focusOnNextFrame` now leaves focus alone once
-   the person has moved to something they can focus themselves, and all three delayed focus sites use it.
-   Focus still moves as before otherwise. Submitting a question still moves focus to the section heading,
-   as it did; the composer is locked and the question already captured by then. No consent or approval
-   rule changed.
+   are slow, so it could reach a person on a loaded device. `focusOnNextFrame` now binds each delayed move
+   to the user-intent revision that requested it. Usable pointer, keyboard, editing, paste, or unmarked
+   focus on a keyboard-interactive destination invalidates the move; events on disabled controls and
+   render focus on script-only landmarks or headings cannot claim a working destination and do not. A
+   newer scheduled move overtakes an older one. Focus performed by a
+   rendering transition is explicitly marked application-controlled, so closing the phone drawer can
+   restore the toggle transiently and still deliver focus to the destination heading. This preserves
+   typing, paste, Tab and assistive-technology focus without treating every focusable element as proof of
+   user intent. New application-managed focus that must not cancel a pending destination has to use the
+   helper's explicit marker. Submitting a question still moves focus to the section heading, as it did;
+   the composer is locked and the question already captured by then. No consent or approval rule changed.
 8. **Remaining.** Legal review of the notice text. S6 under a separate spend approval: real evidence for
    every provider claim and a real reviewed bundle. DEP-1. The UI still learns of a change made elsewhere
    only at its next read.

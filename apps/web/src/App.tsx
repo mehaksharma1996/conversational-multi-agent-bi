@@ -69,7 +69,7 @@ import { consentGateReason, investigationGate, questionGate, useConsent } from "
 import { INVESTIGATION_STATUS_LABEL } from "./investigations/model";
 import { useInvestigation } from "./investigations/useInvestigation";
 import { useWorkflowDrafts } from "./workspace/drafts";
-import { focusOnNextFrame } from "./workspace/focus";
+import { captureFocusIntent, focusOnNextFrame } from "./workspace/focus";
 import {
   assessMarker,
   describeAssessment,
@@ -658,7 +658,7 @@ export default function App() {
     const operation = begin(kind);
     if (!operation) return;
     const from = epoch.current;
-    const startedFrom = document.activeElement;
+    const focusIntent = captureFocusIntent();
     setError(null);
     try {
       const result = await send(workspace.id);
@@ -671,7 +671,7 @@ export default function App() {
       if (discardStale(operation, from, epoch.current)) return;
       operation.finish("succeeded");
       announce(success(result));
-      focusOnNextFrame(() => document.querySelector<HTMLElement>("[data-consent-heading]"), startedFrom);
+      focusOnNextFrame(() => document.querySelector<HTMLElement>("[data-consent-heading]"), focusIntent);
     } catch (caught) {
       if (discardStale(operation, from, epoch.current)) return;
       operation.finish("failed");

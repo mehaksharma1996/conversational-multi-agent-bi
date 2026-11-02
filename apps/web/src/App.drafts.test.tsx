@@ -276,7 +276,7 @@ describe("unsaved workflow drafts across section navigation", () => {
       expect(askQuestion).toHaveBeenCalledWith(conversationFixture.id, "Which merchant?", false);
     });
 
-    it("keeps a pasted question when a focus move lands after the click", async () => {
+    it("keeps a pasted question when a focus move lands after the paste", async () => {
       const user = userEvent.setup();
       render(<App />);
       await screen.findByText("Local workspace ready");
@@ -284,9 +284,10 @@ describe("unsaved workflow drafts across section navigation", () => {
       const box = await readyComposer();
 
       await user.click(box);
-      flushFrames();
       await user.paste(messageFixture.question);
+      flushFrames();
 
+      expect(box).toHaveFocus();
       expect(box).toHaveValue(messageFixture.question);
     });
 
