@@ -30,11 +30,14 @@ from config.settings import Settings
 from src.llm.base import LLMGenerationError, LLMResponse
 from src.orchestration.tool_gateway import SCRIPTED_EXECUTION_ADMISSION
 from tests.e2e.retail_app import ScriptedRetailEmbedder
+from tests.investigation_critique_fakes import churn_v7_response
 from tests.investigation_execution_fakes import RoutedAdapter
 from tests.investigation_fixtures import plan_of, sql_task
 from tests.investigation_planning_fakes import ENVELOPE, ScriptedDeadlineAdapter, evidence, pricing
+from tests.investigation_report_fakes import NARRATIVE_MAX_INPUT, churn_adapter
 from tests.test_investigation_sql_gateway import GOOD_SQL
 from tests.test_investigation_tool_gateway import EXACT_BOUND, EXACT_ENVELOPE, MAX_INPUT
+from tests.test_subscription_churn_cases import _TermEmbedder
 
 MODEL_CALL_LOG = "model-calls.log"
 
@@ -95,6 +98,33 @@ class ScriptedInvestigationAdapters:
         )
 
 
+class ScriptedChurnReportAdapters:
+    """UI-6c: the INV-7 churn plan on the real sample data, under the same scripted reviews.
+
+    The findings draft seeds the memo's Enterprise claim, so the critique records a document
+    contradiction, and the Critic asks for a stratification the plan approval does not authorize.
+    The narrative is scripted out, so the report is the deterministic fallback. It produces a real
+    verified report with hypotheses, measurements, citations, and critic findings. It says nothing
+    about a production model.
+    """
+
+    def planning(self) -> PlanningProvider:
+        return PlanningProvider(
+            adapter=ScriptedDeadlineAdapter(answers=[churn_v7_response()]),
+            evidence=evidence(),
+            pricing=pricing(),
+            envelope=ENVELOPE,
+        )
+
+    def execution(self) -> ExecutionProvider:
+        return ExecutionProvider(
+            llm_client=churn_adapter(),
+            envelope=EXACT_ENVELOPE,
+            max_input_tokens_per_call=NARRATIVE_MAX_INPUT,
+            scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
+        )
+
+
 def _settings(root: Path, settings_type: type[Settings]) -> Settings:
     return settings_type(
         app_data_dir=root,
@@ -121,6 +151,16 @@ def build_scripted_app() -> FastAPI:
         embedder_factory=lambda _model: ScriptedRetailEmbedder(),
         llm_client_factory=lambda _settings: RecordingLLM(root),
         investigation_adapters=ScriptedInvestigationAdapters(),
+    )
+
+
+def build_scripted_report_app() -> FastAPI:
+    root = _data_root()
+    return create_app(
+        settings=_settings(root, _ScriptedRecipientSettings),
+        embedder_factory=lambda _model: _TermEmbedder(),
+        llm_client_factory=lambda _settings: RecordingLLM(root),
+        investigation_adapters=ScriptedChurnReportAdapters(),
     )
 
 
