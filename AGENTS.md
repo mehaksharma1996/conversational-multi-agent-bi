@@ -80,12 +80,11 @@ document retrieval, anomaly detection, visualization, and report generation.
 - `src/reporting/` produces PDF reports.
 - `packages/analytics/` exposes framework-neutral tabular commands and services.
 - `packages/connectors/` defines provider and repository ports for application code.
-- `packages/retrieval/` exposes framework-neutral PDF indexing.
+- `packages/retrieval/` exposes framework-neutral PDF and document-indexing commands and services.
 - `packages/observability/` provides request-ID context, allowlist-only telemetry, and safe error categories.
 - `packages/governance/` provides the audit vocabulary and append-only, hash-chained audit sinks.
 - `packages/investigation/` holds the framework-neutral multi-agent investigation contracts, plan validation, budget ledger, and lifecycle (ADR 0024).
 - `packages/evaluation/` and `evals/` provide the deterministic evaluation harness, fixtures, thresholds, and baseline.
-- `packages/retrieval/` exposes framework-neutral document-indexing commands and services.
 - `Dockerfile.api`, `Dockerfile.web`, `compose.yaml`, and `docker/nginx/` define the local container topology;
   `ops/` holds audit backup/restore scripts.
 - `tests/` contains the pytest suite.
