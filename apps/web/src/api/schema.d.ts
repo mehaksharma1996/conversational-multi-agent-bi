@@ -356,6 +356,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/investigations/{investigation_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Investigation Evidence
+         * @description The verified report and its evidence. 404 until terminal or without a report; 409 if the
+         *     stored content fails its digest or contracts. SQL text also needs ``analysis:run``.
+         */
+        get: operations["get_investigation_evidence_api_v1_investigations__investigation_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/investigations/{investigation_id}/plan-decision": {
         parameters: {
             query?: never;
@@ -370,6 +391,29 @@ export interface paths {
          * @description Approve or reject the exact plan (digest and epoch) shown to this approver.
          */
         post: operations["decide_investigation_plan_api_v1_investigations__investigation_id__plan_decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/investigations/{investigation_id}/report/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Investigation Report
+         * @description Streams the complete immutable representation in bounded chunks. `Content-Length` and attachment
+         *     `Content-Disposition` are always present. Byte ranges are not supported (`Accept-Ranges: none`), so
+         *     a partial transfer must be restarted with a new `GET`. A timeout or disconnect stops only that
+         *     transfer; it does not delete the resource or cancel report generation. The `GET` is safe to retry.
+         */
+        get: operations["export_investigation_report_api_v1_investigations__investigation_id__report_export_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1062,6 +1106,27 @@ export interface components {
             /** Unique Ratio */
             unique_ratio: number;
         };
+        /**
+         * ComparisonClaim
+         * @description The magnitudes of two facts' differences, in the same unit, compared exactly.
+         */
+        ComparisonClaim: {
+            /** Fact Ids */
+            fact_ids: [
+                string,
+                string
+            ];
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "larger" | "smaller" | "equal";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "comparison";
+        };
         /** ConsentNoticeResponse */
         ConsentNoticeResponse: {
             /**
@@ -1211,6 +1276,50 @@ export interface components {
             /** Price Table Version */
             price_table_version?: string | null;
         };
+        /**
+         * CritiqueFinding
+         * @description One validated Critic finding: fixed codes and identifiers only (INV-7 decision C1).
+         *
+         *     ``evidence_ids`` are existing evidence of this investigation that support the finding (a
+         *     fabricated or foreign reference is never stored; it is the finding). ``claim_index`` points
+         *     into the transient draft, which is never stored. Only a confirmed model gap
+         *     (``missing_stratification``, origin ``model_confirmed``) carries a stratification.
+         */
+        CritiqueFinding: {
+            /** Claim Index */
+            claim_index?: number | null;
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "numeric_mismatch" | "direction_mismatch" | "causal_overreach" | "document_contradiction" | "unsupported_reference" | "evidence_not_bound" | "document_evidence_unverified" | "insufficient_evidence" | "conflicting_evidence" | "incomplete_coverage" | "missing_stratification";
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "correct_from_evidence" | "downgrade_to_association" | "retain_data_verdict" | "reject_claim" | "retain_limitation" | "accept_limitation" | "follow_up";
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+            /**
+             * Origin
+             * @default deterministic
+             * @enum {string}
+             */
+            origin: "deterministic" | "model_confirmed";
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "high" | "medium" | "low";
+            stratification?: components["schemas"]["Stratification"] | null;
+            /** Task Id */
+            task_id?: string | null;
+        };
         /** DataProfileResponse */
         DataProfileResponse: {
             /** Boolean Columns */
@@ -1281,6 +1390,58 @@ export interface components {
             /** Workspace Id */
             workspace_id: string;
         };
+        /**
+         * DerivedEvidenceItem
+         * @description A fixed arithmetic operation over this task's own query evidence.
+         */
+        DerivedEvidenceItem: {
+            /** Attempt */
+            attempt: number;
+            /** Evidence Id */
+            evidence_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "derived";
+            measure: components["schemas"]["DerivedRatio"];
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "rate_difference" | "mean_difference" | "standardized_rate_difference";
+            reference: components["schemas"]["DerivedRatio"];
+            /** Source Evidence Ids */
+            source_evidence_ids: string[];
+            /** Standardized */
+            standardized: ("measure" | "reference") | null;
+            /** Strata */
+            strata: components["schemas"]["DerivedStratum"][];
+            /** Task Id */
+            task_id: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * DerivedRatio
+         * @description One exact ratio: an event count (or value sum) over a population (or row) count.
+         */
+        DerivedRatio: {
+            /** Denominator */
+            denominator: number;
+            /** Numerator */
+            numerator: number;
+        };
+        /**
+         * DerivedStratum
+         * @description One band's baseline and comparison counts (events over population), as recorded.
+         */
+        DerivedStratum: {
+            baseline: components["schemas"]["DerivedRatio"];
+            comparison: components["schemas"]["DerivedRatio"];
+            /** Label */
+            label: string;
+        };
         /** DocumentCollectionResponse */
         DocumentCollectionResponse: {
             /** Chunk Count */
@@ -1305,6 +1466,56 @@ export interface components {
             status: "ready";
             /** Workspace Id */
             workspace_id: string;
+        };
+        /**
+         * DocumentEvidenceItem
+         * @description Document evidence as locations and statuses, never the model-written answer.
+         */
+        DocumentEvidenceItem: {
+            /** Attempt */
+            attempt: number;
+            /** Citations Verified */
+            citations_verified: boolean;
+            /** Evidence Id */
+            evidence_id: string;
+            /** Evidence Statuses */
+            evidence_statuses: ("VERIFIED_REFERENCE" | "INVALID_REFERENCE" | "QUOTE_MISMATCH" | "MISSING_EVIDENCE" | "UNVERIFIED_CLAIM" | "CONFLICTING_EVIDENCE" | "NOT_EVALUATED")[];
+            /** Invalid Citations */
+            invalid_citations: number[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "document";
+            /** Sources */
+            sources: components["schemas"]["DocumentSourceItem"][];
+            /** Task Id */
+            task_id: string;
+        };
+        /**
+         * DocumentSourceItem
+         * @description A retrieved source's location; the passage itself is never stored.
+         */
+        DocumentSourceItem: {
+            /** Chunk Index */
+            chunk_index: number | null;
+            /** Cited */
+            cited: boolean;
+            /** Filename */
+            filename: string;
+            /** Number */
+            number: number;
+            /** Page Number */
+            page_number: number | null;
+            /** Relevance Score */
+            relevance_score: number | null;
+        };
+        /** EqualityFilter */
+        EqualityFilter: {
+            /** Field */
+            field: string;
+            /** Value */
+            value: string;
         };
         /** ErrorBody */
         ErrorBody: {
@@ -1395,6 +1606,44 @@ export interface components {
             /** Workspace Id */
             workspace_id: string;
         };
+        /** FactClaim */
+        FactClaim: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "increase" | "decrease" | "no_change";
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+            /** Fact Id */
+            fact_id: string;
+            /**
+             * Relationship
+             * @default association
+             * @enum {string}
+             */
+            relationship: "association" | "causation";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "fact";
+        };
+        /**
+         * FactValue
+         * @description One side of a fact: the counts as recorded and the displayed value (4 decimals).
+         */
+        FactValue: {
+            /** Denominator */
+            denominator: number;
+            /** Display */
+            display: string;
+            /** Numerator */
+            numerator: number;
+        };
         /** FieldMappingResponse */
         FieldMappingResponse: {
             /** Canonical Field */
@@ -1405,6 +1654,30 @@ export interface components {
             reason: string;
             /** Source Column */
             source_column: string | null;
+        };
+        /** FindingClaim */
+        FindingClaim: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "numeric_mismatch" | "direction_mismatch" | "causal_overreach" | "document_contradiction" | "unsupported_reference" | "evidence_not_bound" | "document_evidence_unverified" | "insufficient_evidence" | "conflicting_evidence" | "incomplete_coverage" | "missing_stratification";
+            /** Index */
+            index: number;
+            /** Round */
+            round: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "finding";
+        };
+        /** FindingRef */
+        FindingRef: {
+            /** Index */
+            index: number;
+            /** Round */
+            round: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1419,10 +1692,87 @@ export interface components {
              */
             status: "alive" | "ready";
         };
+        /**
+         * HypothesisRow
+         * @description A hypothesis as its approved tests describe it (V6), with its validated verdict.
+         *
+         *     ``status``:
+         *     - ``tested``: a decisive verdict;
+         *     - ``incomplete``: testable but ``untestable`` on the evidence;
+         *     - ``untested``: no approved data;
+         *     - ``not_evaluated``: the run stopped before its verdicts.
+         *
+         *     The approved statement is never shown: it is untrusted display text (ADR 0024 A4 D4).
+         */
+        HypothesisRow: {
+            /**
+             * Conflicting Evidence Ids
+             * @default []
+             */
+            conflicting_evidence_ids: string[];
+            /** Description */
+            description: string;
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+            /**
+             * Fact Ids
+             * @default []
+             */
+            fact_ids: string[];
+            /**
+             * Follow Up Task Ids
+             * @default []
+             */
+            follow_up_task_ids: string[];
+            /** Hypothesis Id */
+            hypothesis_id: string;
+            /**
+             * Reasons
+             * @default []
+             */
+            reasons: ("effect_in_claimed_direction" | "no_effect_in_claimed_direction" | "required_data_absent" | "test_not_completed" | "evidence_missing" | "evidence_inconsistent" | "evidence_truncated" | "null_value" | "insufficient_denominator" | "effect_below_threshold" | "conflicting_evidence" | "context_unverified")[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "tested" | "incomplete" | "untested" | "not_evaluated";
+            /**
+             * Test Task Ids
+             * @default []
+             */
+            test_task_ids: string[];
+            /** Verdict */
+            verdict?: ("supported_association" | "untestable" | "refuted") | null;
+        };
         /** InvestigationCreateRequest */
         InvestigationCreateRequest: {
             /** Message Id */
             message_id: string;
+        };
+        /**
+         * InvestigationEvidenceResponse
+         * @description The typed verified report and the evidence behind it, from one digest-checked read.
+         *
+         *     ``evidence_state``: ``available``; ``not_reported`` for a failed run, whose report carries codes
+         *     only; ``unavailable`` for a record whose stored digest does not cover its evidence.
+         */
+        InvestigationEvidenceResponse: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Evidence */
+            evidence: (components["schemas"]["QueryEvidenceItem"] | components["schemas"]["DocumentEvidenceItem"] | components["schemas"]["DerivedEvidenceItem"])[];
+            /**
+             * Evidence State
+             * @enum {string}
+             */
+            evidence_state: "available" | "not_reported" | "unavailable";
+            /** Investigation Id */
+            investigation_id: string;
+            report: components["schemas"]["VerifiedReport"];
+            status: components["schemas"]["InvestigationStatus"];
         };
         /** InvestigationProgressResponse */
         InvestigationProgressResponse: {
@@ -1612,6 +1962,32 @@ export interface components {
          * @enum {string}
          */
         JobStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
+        /** Limitation */
+        Limitation: {
+            code: components["schemas"]["LimitationCode"];
+            /** Task Id */
+            task_id?: string | null;
+        };
+        /** LimitationClaim */
+        LimitationClaim: {
+            /** Code */
+            code: string;
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "limitation";
+        };
+        /**
+         * LimitationCode
+         * @description Fixed, content-free reasons a result is incomplete. Report wording is keyed by code (S5).
+         * @enum {string}
+         */
+        LimitationCode: "task_failed" | "task_timed_out" | "task_refused" | "task_cancelled" | "dependency_failed" | "resource_unavailable" | "budget_exhausted" | "investigation_cancelled" | "investigation_failed" | "evidence_missing" | "evidence_inconsistent" | "document_evidence_unverified" | "query_rows_truncated" | "report_rows_limited" | "verdicts_not_evaluated" | "critique_unavailable" | "follow_up_not_authorized" | "follow_up_invalid" | "replan_limit_reached" | "critique_rounds_exhausted";
         /** MessageApprovalRequest */
         MessageApprovalRequest: {
             /**
@@ -1683,6 +2059,14 @@ export interface components {
              * @enum {string}
              */
             status: "complete" | "pending_approval" | "rejected";
+        };
+        /** NoRecommendationClaim */
+        NoRecommendationClaim: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "no_recommendation";
         };
         /** PlanDecisionBody */
         PlanDecisionBody: {
@@ -1760,6 +2144,109 @@ export interface components {
             /** Unverified Quote Count */
             unverified_quote_count: number;
         };
+        /**
+         * QueryEvidenceItem
+         * @description Query evidence: its first rows (no more than the report shows) and how it was produced.
+         */
+        QueryEvidenceItem: {
+            /** Attempt */
+            attempt: number;
+            /** Columns */
+            columns: string[];
+            /** Corrections Used */
+            corrections_used: number | null;
+            /** Evidence Id */
+            evidence_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "query";
+            /** Policy Sql Status */
+            policy_sql_status: string | null;
+            /** Row Count */
+            row_count: number;
+            /** Rows */
+            rows: (string | number | boolean | null)[][];
+            /** Source Truncated */
+            source_truncated: boolean;
+            /** Sql */
+            sql: string | null;
+            /**
+             * Sql State
+             * @enum {string}
+             */
+            sql_state: "shown" | "restricted" | "not_recorded";
+            /** Task Id */
+            task_id: string;
+        };
+        /**
+         * Recommendation
+         * @description One triggered investigation-method rule (V5), citing what triggered it.
+         */
+        Recommendation: {
+            /** Blocker */
+            blocker?: ("policy_refused" | "unsafe_query" | "resource_unavailable" | "provider_configuration" | "approval_rejected") | null;
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+            /**
+             * Fact Ids
+             * @default []
+             */
+            fact_ids: string[];
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["FindingRef"][];
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Limitation Codes
+             * @default []
+             */
+            limitation_codes: string[];
+            /** Rule Id */
+            rule_id: string;
+            /** Rule Version */
+            rule_version: string;
+            /**
+             * Unproven
+             * @default false
+             */
+            unproven: boolean;
+        };
+        /** RecommendationClaim */
+        RecommendationClaim: {
+            /** Recommendation Id */
+            recommendation_id: string;
+            /** Rule Id */
+            rule_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "recommendation";
+        };
+        /**
+         * ReportCitation
+         * @description A verified citation's location. Never the passage or the model's answer.
+         */
+        ReportCitation: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Filename */
+            filename: string;
+            /** Page Number */
+            page_number?: number | null;
+            /** Task Id */
+            task_id: string;
+        };
         /** ReportCreateRequest */
         ReportCreateRequest: {
             /**
@@ -1767,6 +2254,139 @@ export interface components {
              * @default true
              */
             include_charts: boolean;
+        };
+        /**
+         * ReportCritiqueRow
+         * @description One critic round as statuses, an outcome, and fixed-code findings. Never a claim.
+         */
+        ReportCritiqueRow: {
+            /**
+             * Draft Status
+             * @enum {string}
+             */
+            draft_status: "valid" | "invalid" | "unavailable";
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["CritiqueFinding"][];
+            /** Rejected Proposals */
+            rejected_proposals: number;
+            /**
+             * Replan
+             * @enum {string}
+             */
+            replan: "none_needed" | "admitted" | "not_authorized" | "invalid" | "round_limit" | "budget";
+            /**
+             * Review Status
+             * @enum {string}
+             */
+            review_status: "valid" | "invalid" | "unavailable";
+            /** Round */
+            round: number;
+        };
+        /**
+         * ReportFact
+         * @description One verified measurement: an approved test's two sides and their difference.
+         *
+         *     ``difference`` is comparison minus baseline in the metric's unit (4 decimals, signed).
+         *     For proportions:
+         *     - ``percentage_points`` is that difference × 100 (1 decimal, signed);
+         *     - ``relative_change`` is the difference over the baseline × 100, as a percent (1 decimal,
+         *       signed), and is omitted when the baseline is 0.
+         *
+         *     ``direction`` is the observed sign; ``claimed_direction`` and ``outcome`` are the approved
+         *     claim and what the verdict rules made of it. A standardized fact names its stratification.
+         */
+        ReportFact: {
+            baseline: components["schemas"]["FactValue"];
+            /** Baseline Label */
+            baseline_label: string;
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "period" | "group";
+            /**
+             * Claimed Direction
+             * @enum {string}
+             */
+            claimed_direction: "increase" | "decrease" | "higher_than";
+            comparison: components["schemas"]["FactValue"];
+            /** Comparison Label */
+            comparison_label: string;
+            /** Derived Evidence Id */
+            derived_evidence_id: string;
+            /** Difference */
+            difference: string;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "increase" | "decrease" | "no_change";
+            /** Field */
+            field: string;
+            /**
+             * Filters
+             * @default []
+             */
+            filters: components["schemas"]["EqualityFilter"][];
+            /** Hypothesis Id */
+            hypothesis_id: string;
+            /** Id */
+            id: string;
+            /** Metric Label */
+            metric_label: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "supports" | "refutes" | "below_threshold";
+            /** Percentage Points */
+            percentage_points?: string | null;
+            /** Query Evidence Id */
+            query_evidence_id: string;
+            /** Relative Change */
+            relative_change?: string | null;
+            standardized_by?: components["schemas"]["Stratification"] | null;
+            /** Task Id */
+            task_id: string;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "proportion" | "mean";
+        };
+        /** ReportNote */
+        ReportNote: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "causation_not_established" | "observational_data_only" | "hypothesis_untested" | "hypothesis_not_evaluated" | "intervention_unproven" | "no_eligible_recommendation" | "narrative_fallback";
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+        };
+        /**
+         * ReportQueryTable
+         * @description Verified query cells as recorded, cut to the first ``MAX_REPORT_QUERY_ROWS`` rows.
+         */
+        ReportQueryTable: {
+            /** Columns */
+            columns: string[];
+            /** Evidence Id */
+            evidence_id: string;
+            /**
+             * Rows
+             * @default []
+             */
+            rows: (boolean | number | string | null)[][];
+            /** Source Row Count */
+            source_row_count: number;
+            /** Source Truncated */
+            source_truncated: boolean;
+            /** Task Id */
+            task_id: string;
         };
         /** ReportResponse */
         ReportResponse: {
@@ -1789,6 +2409,19 @@ export interface components {
             /** Workspace Id */
             workspace_id: string;
         };
+        /** ReportSection */
+        ReportSection: {
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "executive_summary" | "findings" | "hypotheses" | "critique" | "limitations" | "recommendations";
+            /**
+             * Sentences
+             * @default []
+             */
+            sentences: components["schemas"]["Sentence"][];
+        };
         /** ReportSectionResponse */
         ReportSectionResponse: {
             /** Body */
@@ -1797,6 +2430,19 @@ export interface components {
             bullets: string[];
             /** Title */
             title: string;
+        };
+        /** ReportTaskRow */
+        ReportTaskRow: {
+            /** Category */
+            category?: string | null;
+            kind: components["schemas"]["TaskKind"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "succeeded" | "failed" | "skipped" | "refused" | "cancelled";
+            /** Task Id */
+            task_id: string;
         };
         /** SQLItemDecisionBody */
         SQLItemDecisionBody: {
@@ -1912,6 +2558,32 @@ export interface components {
             /** Merchant */
             merchant?: string | null;
         };
+        /** ScopeClaim */
+        ScopeClaim: {
+            /** Facts */
+            facts: number;
+            /** Hypotheses */
+            hypotheses: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "completed" | "completed_partial" | "failed" | "cancelled" | "budget_exhausted";
+            /** Tested */
+            tested: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "scope";
+        };
+        /** Sentence */
+        Sentence: {
+            /** Claim */
+            claim: components["schemas"]["ScopeClaim"] | components["schemas"]["FactClaim"] | components["schemas"]["ComparisonClaim"] | components["schemas"]["VerdictClaim"] | components["schemas"]["FindingClaim"] | components["schemas"]["TaskClaim"] | components["schemas"]["LimitationClaim"] | components["schemas"]["RecommendationClaim"] | components["schemas"]["NoRecommendationClaim"];
+            /** Text */
+            text: string;
+        };
         /**
          * SessionResponse
          * @description What the SPA may know: its CSRF value, roles for UI gating, and when the session ends.
@@ -1931,6 +2603,20 @@ export interface components {
         SourceResponse: {
             /** Citation */
             citation: string;
+        };
+        /**
+         * Stratification
+         * @description Fixed integer bands over one numeric field (INV-7 decision C4).
+         *
+         *     ``band_0`` holds values below the first cut point, ``band_i`` holds values in
+         *     ``[cut_{i-1}, cut_i)``, and the last band holds values at or above the last cut point. Labels
+         *     are fixed, so neither a model nor a reader ever names a band.
+         */
+        Stratification: {
+            /** Cut Points */
+            cut_points: number[];
+            /** Field */
+            field: string;
         };
         /** TabularUploadResponse */
         TabularUploadResponse: {
@@ -1955,6 +2641,21 @@ export interface components {
             /** Workspace Id */
             workspace_id: string;
         };
+        /** TaskClaim */
+        TaskClaim: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "succeeded" | "failed" | "skipped" | "refused" | "cancelled";
+            /** Task Id */
+            task_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "task";
+        };
         /**
          * TaskKind
          * @enum {string}
@@ -1972,6 +2673,141 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VerdictClaim */
+        VerdictClaim: {
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+            /** Hypothesis Id */
+            hypothesis_id: string;
+            /**
+             * Relationship
+             * @default association
+             * @enum {string}
+             */
+            relationship: "association" | "causation";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "verdict";
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "supported_association" | "untestable" | "refuted";
+        };
+        /**
+         * VerifiedReport
+         * @description The verified report. Construction checks only shape; ``verify_report`` checks substance.
+         *
+         *     Whatever the narrative's fate, ``investigation_status`` is the run's terminal status, and
+         *     ``availability`` follows from it:
+         *     - ``complete`` for ``completed``;
+         *     - ``codes_only`` for ``failed``;
+         *     - ``partial`` otherwise.
+         */
+        VerifiedReport: {
+            /**
+             * Availability
+             * @enum {string}
+             */
+            availability: "complete" | "partial" | "codes_only";
+            /**
+             * Citations
+             * @default []
+             */
+            citations: components["schemas"]["ReportCitation"][];
+            /**
+             * Critiques
+             * @default []
+             */
+            critiques: components["schemas"]["ReportCritiqueRow"][];
+            /**
+             * Facts
+             * @default []
+             */
+            facts: components["schemas"]["ReportFact"][];
+            /** Fallback Reason */
+            fallback_reason?: ("narrative_not_applicable" | "narrative_not_eligible" | "narrative_disabled" | "narrative_model_unavailable" | "narrative_budget_unavailable" | "narrative_unavailable" | "narrative_invalid" | "narrative_rejected") | null;
+            /**
+             * Hypotheses
+             * @default []
+             */
+            hypotheses: components["schemas"]["HypothesisRow"][];
+            /**
+             * Investigation Status
+             * @enum {string}
+             */
+            investigation_status: "completed" | "completed_partial" | "failed" | "cancelled" | "budget_exhausted";
+            /**
+             * Label
+             * @default verified, association only
+             * @constant
+             */
+            label: "verified, association only";
+            /**
+             * Limitations
+             * @default []
+             */
+            limitations: components["schemas"]["Limitation"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "model_assisted" | "deterministic_fallback";
+            /** Narrative Prompt Version */
+            narrative_prompt_version?: string | null;
+            /**
+             * Narrative Violations
+             * @default []
+             */
+            narrative_violations: ("schema_invalid" | "scope_mismatch" | "status_misrepresented" | "section_missing" | "report_inconsistent" | "numeric_unsupported" | "numeric_mismatch" | "unsupported_comparison" | "citation_unknown" | "citation_stale" | "citation_misattributed" | "evidence_omitted" | "causal_claim" | "recommendation_unsupported" | "recommendation_omitted" | "playbook_rule_unknown" | "verdict_mismatch" | "hypothesis_omitted" | "limitation_missing" | "limitation_unsupported" | "finding_mismatch" | "finding_omitted" | "claim_contradiction" | "task_status_misrepresented" | "rendered_text_mismatch")[];
+            /**
+             * Notes
+             * @default []
+             */
+            notes: components["schemas"]["ReportNote"][];
+            /**
+             * Query Tables
+             * @default []
+             */
+            query_tables: components["schemas"]["ReportQueryTable"][];
+            /**
+             * Recommendations
+             * @default []
+             */
+            recommendations: components["schemas"]["Recommendation"][];
+            /**
+             * Rules Version
+             * @default inv8-recommendation-rules-v2
+             * @constant
+             */
+            rules_version: "inv8-recommendation-rules-v2";
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Scope Digest */
+            scope_digest: string;
+            /**
+             * Sections
+             * @default []
+             */
+            sections: components["schemas"]["ReportSection"][];
+            /** Tasks */
+            tasks: components["schemas"]["ReportTaskRow"][];
+            /**
+             * Verification
+             * @default verified
+             * @constant
+             */
+            verification: "verified";
         };
         /** WorkbookSheetsResponse */
         WorkbookSheetsResponse: {
@@ -3810,6 +4646,109 @@ export interface operations {
             };
         };
     };
+    get_investigation_evidence_api_v1_investigations__investigation_id__evidence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestigationEvidenceResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     decide_investigation_plan_api_v1_investigations__investigation_id__plan_decision_post: {
         parameters: {
             query?: never;
@@ -3832,6 +4771,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvestigationResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Upload limit exceeded */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Sanitized internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dependency unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export_investigation_report_api_v1_investigations__investigation_id__report_export_get: {
+        parameters: {
+            query?: {
+                format?: "markdown" | "json";
+            };
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The verified report as an attachment. It contains no SQL. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                    "text/markdown": string;
                 };
             };
             /** @description Authentication required */

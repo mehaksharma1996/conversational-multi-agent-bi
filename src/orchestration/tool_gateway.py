@@ -1125,6 +1125,15 @@ class InvestigationToolGateway:
                 found[evidence_id] = payload
         return found
 
+    def executed_sql(self, view: InvestigationStateView) -> dict[str, str]:
+        """The statement behind each verified query evidence in ``view`` (read-only, UI-6c)."""
+        found: dict[str, str] = {}
+        for evidence_id in self.evidence_payloads(view):
+            payload = self._payloads.get(evidence_id)
+            if isinstance(payload, SQLEvidencePayload):
+                found[evidence_id] = payload.sql
+        return found
+
     def specialist_port(self) -> SpecialistGateway:
         """The only object a specialist may hold: the tool operations, and nothing else."""
         return SpecialistGateway(self)

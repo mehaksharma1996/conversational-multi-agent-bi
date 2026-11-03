@@ -124,7 +124,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from langgraph.errors import GraphRecursionError
@@ -442,6 +442,9 @@ class ExecutionResult:
     report: VerifiedReport | None = None
     # INV-10: the content-free wave awaiting a person's decision while ``awaiting_sql_approval``.
     sql_wave: SQLWaveRequest | None = None
+    # UI-6c: the statement that produced each verified query evidence, for the evidence inspector.
+    # Terminal results only. The payloads themselves never carry SQL.
+    executed_sql: Mapping[str, str] = field(default_factory=dict)
 
 
 class _PausableClock:
@@ -783,6 +786,7 @@ class InvestigationExecutionRun:
             state=view,
             payloads=self._gateway.evidence_payloads(view),
             report=report,
+            executed_sql=self._gateway.executed_sql(view),
         )
 
     def state(self) -> InvestigationStateView:

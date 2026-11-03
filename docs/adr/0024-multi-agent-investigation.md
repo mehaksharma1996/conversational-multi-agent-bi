@@ -807,6 +807,35 @@ admits no provider. The amendment's remaining blocker is unchanged: reviewed evi
 provider and snapshot (S6). The later consent hardening (mandatory digest, gated unknown consent, and
 role-aware controls) also changes no execution or admission rule, and the amendment stays Proposed.
 
+## Amendment 12: the finished report's evidence read (UI-6c, #156, 2026-11-02)
+
+- Status: **Accepted** by the project owner on 2026-11-02, including SQL retention and the
+  `workspace:read` preview-row access. Design E1 to E9: `docs/agents/briefs/156-ui6c-evidence-report.md`.
+
+UI-6c adds no authority and creates no evidence. Reading a finished investigation needed three
+changes to what INV-8 and INV-11 stored:
+
+1. **Executed SQL is retained.** A completed statement used to exist only in the gateway's process,
+   so no later read could show it. The statement behind each verified query evidence now joins that
+   evidence in the workspace's `investigations.db` (encrypted with `APP_ENCRYPTION_KEY`, removed with
+   the workspace). `QueryEvidencePayload` still carries no SQL, and no model prompt, telemetry, or
+   audit attribute receives it.
+2. **One digest binds report and evidence.** `report_sha256` now digests both stored texts, so
+   changing either refuses both (`409 investigation_content_unverifiable`). INV-11 records digested
+   the report alone: their report stays readable, and their evidence reads as `unavailable`, never as
+   verified. This needs no metadata migration.
+3. **Evidence is parsed back through its contracts on every read**, so a payload that no longer
+   satisfies its own checks is refused even if a digest were forged with it.
+
+`GET /investigations/{id}/evidence` needs `workspace:read`, because whoever may read the report may
+check it: preview rows stop at the report's own limit and citations are locations only. SQL text is
+returned only with `analysis:run`, the capability that already gates the pending-wave review. The
+model-written document answer is not returned. A `failed` run's stored evidence stays unreported
+(R8). Nothing is returned before the terminal status. `GET /investigations/{id}/report/export` needs
+`report:export`, is audited as `report.downloaded`, renders untrusted values inert, and contains no
+SQL. This narrows Amendment 10's "SQL remains available only from the pending-wave endpoint": that
+remains the only source of statements that have **not** run.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,

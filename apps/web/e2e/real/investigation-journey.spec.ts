@@ -117,7 +117,7 @@ test.afterAll(async () => {
   await restartApi("retail");
 });
 
-test("creation, plan approval, a SQL wave, and a completed investigation without the report", async ({
+test("creation, plan approval, a SQL wave, and a completed investigation with its verified report", async ({
   page,
   request,
 }) => {
@@ -149,9 +149,11 @@ test("creation, plan approval, a SQL wave, and a completed investigation without
   await submit.click();
 
   await expect(status(page)).toHaveText("Completed", SERVER_STEP);
-  await expect(page.getByText("is not shown here")).toBeVisible();
   await expect(page.locator(".investigation-wave")).toHaveCount(0);
-  await expect(page.locator(".investigation-workflow")).not.toContainText("SELECT");
+  await expect(page.getByRole("heading", { name: "Verified report" })).toBeVisible();
+  await expect(page.locator(".investigation-workflow")).toContainText("verified, association only");
+  // The statement shown now is the executed evidence, not a pending review.
+  await expect(page.locator(".evidence-card pre")).toContainText("SELECT");
   await expect(page.getByRole("button", { name: "Cancel investigation" })).toHaveCount(0);
   await axe(page);
 });

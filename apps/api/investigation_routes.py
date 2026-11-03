@@ -4,7 +4,8 @@ Every endpoint takes the tenant from the verified identity and resolves records 
 a foreign or unknown ID is the same 404. Bodies carry identifiers, digests, and choices only: the
 question, scope, schema, approver, and provider configuration come from server-side state
 (``apps/api/investigations.py``). Responses never contain SQL except the approver's own review of a
-pending SQL wave (``GET .../sql-wave``), which requires ``analysis:run``.
+pending SQL wave (``GET .../sql-wave``), which requires ``analysis:run``. The finished report's
+evidence has its own read-only routes (``apps/api/investigation_evidence_routes.py``).
 """
 
 from __future__ import annotations

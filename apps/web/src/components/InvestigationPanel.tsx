@@ -9,6 +9,7 @@ import type {
 import {
   INVESTIGATION_STATUS_LABEL,
   describePlanningCost,
+  isReportableInvestigation,
   isTerminalInvestigation,
   needsPlanDecision,
 } from "../investigations/model";
@@ -19,6 +20,9 @@ import type {
   InvestigationUnconfirmed,
 } from "../investigations/useInvestigation";
 import type { JobView } from "../operations/useJob";
+import type { OperationHandle } from "../operations/useOperations";
+import { focusUnlessEditing } from "../investigations/focusPolicy";
+import { InvestigationReportView } from "./InvestigationReportView";
 import { InvestigationSqlWavePanel } from "./InvestigationSqlWavePanel";
 import { JobProgress } from "./JobProgress";
 
@@ -44,6 +48,8 @@ interface InvestigationPanelProps {
   onCheckServerState: () => void;
   onRefreshJob: () => void;
   onSubmitSqlWave: (decision: InvestigationSqlWaveDecision) => void;
+  onAnnounce: (text: string) => void;
+  beginDownload: () => OperationHandle | null;
 }
 
 interface DisplayTask {
@@ -153,6 +159,8 @@ export function InvestigationPanel({
   onCheckServerState,
   onRefreshJob,
   onSubmitSqlWave,
+  onAnnounce,
+  beginDownload,
 }: InvestigationPanelProps) {
   const planHeading = useRef<HTMLHeadingElement>(null);
   const statusHeading = useRef<HTMLHeadingElement>(null);
@@ -162,9 +170,9 @@ export function InvestigationPanel({
   useEffect(() => {
     const previous = previousStatus.current;
     if (previous === "planning" && status === "awaiting_plan_approval") {
-      planHeading.current?.focus();
+      focusUnlessEditing(planHeading.current);
     } else if (previous !== null && status !== null && isTerminalInvestigation(status)) {
-      statusHeading.current?.focus();
+      focusUnlessEditing(statusHeading.current);
     }
     previousStatus.current = status;
   }, [status]);
@@ -431,10 +439,16 @@ export function InvestigationPanel({
       {isTerminalInvestigation(investigation.status) ? (
         <div className="investigation-terminal">
           <p>{investigation.explanation ?? `The investigation ended with status ${INVESTIGATION_STATUS_LABEL[investigation.status].toLowerCase()}.`}</p>
-          {investigation.status === "completed" || investigation.status === "completed_partial" ? (
-            <p>The verified report and evidence experience belongs to UI-6c and is not shown here.</p>
-          ) : null}
         </div>
+      ) : null}
+
+      {isReportableInvestigation(investigation.status) ? (
+        <InvestigationReportView
+          key={investigation.id}
+          investigationId={investigation.id}
+          onAnnounce={onAnnounce}
+          beginDownload={beginDownload}
+        />
       ) : null}
 
       {active ? (

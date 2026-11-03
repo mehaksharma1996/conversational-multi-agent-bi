@@ -664,6 +664,49 @@
         "title": "ColumnProfileResponse",
         "type": "object"
       },
+      "ComparisonClaim": {
+        "additionalProperties": false,
+        "description": "The magnitudes of two facts' differences, in the same unit, compared exactly.",
+        "properties": {
+          "fact_ids": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "pattern": "^f[0-9]{1,3}$",
+                "type": "string"
+              },
+              {
+                "pattern": "^f[0-9]{1,3}$",
+                "type": "string"
+              }
+            ],
+            "title": "Fact Ids",
+            "type": "array"
+          },
+          "relation": {
+            "enum": [
+              "larger",
+              "smaller",
+              "equal"
+            ],
+            "title": "Relation",
+            "type": "string"
+          },
+          "type": {
+            "const": "comparison",
+            "default": "comparison",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fact_ids",
+          "relation"
+        ],
+        "title": "ComparisonClaim",
+        "type": "object"
+      },
       "ConsentNoticeResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1027,6 +1070,124 @@
         "title": "CostEstimate",
         "type": "object"
       },
+      "CritiqueFinding": {
+        "additionalProperties": false,
+        "description": "One validated Critic finding: fixed codes and identifiers only (INV-7 decision C1).\n\n``evidence_ids`` are existing evidence of this investigation that support the finding (a\nfabricated or foreign reference is never stored; it is the finding). ``claim_index`` points\ninto the transient draft, which is never stored. Only a confirmed model gap\n(``missing_stratification``, origin ``model_confirmed``) carries a stratification.",
+        "properties": {
+          "claim_index": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 16.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Index"
+          },
+          "code": {
+            "enum": [
+              "numeric_mismatch",
+              "direction_mismatch",
+              "causal_overreach",
+              "document_contradiction",
+              "unsupported_reference",
+              "evidence_not_bound",
+              "document_evidence_unverified",
+              "insufficient_evidence",
+              "conflicting_evidence",
+              "incomplete_coverage",
+              "missing_stratification"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "disposition": {
+            "enum": [
+              "correct_from_evidence",
+              "downgrade_to_association",
+              "retain_data_verdict",
+              "reject_claim",
+              "retain_limitation",
+              "accept_limitation",
+              "follow_up"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^ev_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "pattern": "^h[0-9]{1,3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
+          },
+          "origin": {
+            "default": "deterministic",
+            "enum": [
+              "deterministic",
+              "model_confirmed"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "stratification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Stratification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "disposition"
+        ],
+        "title": "CritiqueFinding",
+        "type": "object"
+      },
       "DataProfileResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1227,6 +1388,136 @@
         "title": "DatasetResponse",
         "type": "object"
       },
+      "DerivedEvidenceItem": {
+        "description": "A fixed arithmetic operation over this task's own query evidence.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "derived",
+            "default": "derived",
+            "title": "Kind",
+            "type": "string"
+          },
+          "measure": {
+            "$ref": "#/components/schemas/DerivedRatio"
+          },
+          "operation": {
+            "enum": [
+              "rate_difference",
+              "mean_difference",
+              "standardized_rate_difference"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "reference": {
+            "$ref": "#/components/schemas/DerivedRatio"
+          },
+          "source_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Evidence Ids",
+            "type": "array"
+          },
+          "standardized": {
+            "anyOf": [
+              {
+                "enum": [
+                  "measure",
+                  "reference"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Standardized"
+          },
+          "strata": {
+            "items": {
+              "$ref": "#/components/schemas/DerivedStratum"
+            },
+            "title": "Strata",
+            "type": "array"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "task_id",
+          "attempt",
+          "operation",
+          "source_evidence_ids",
+          "measure",
+          "reference",
+          "value",
+          "strata",
+          "standardized"
+        ],
+        "title": "DerivedEvidenceItem",
+        "type": "object"
+      },
+      "DerivedRatio": {
+        "additionalProperties": false,
+        "description": "One exact ratio: an event count (or value sum) over a population (or row) count.",
+        "properties": {
+          "denominator": {
+            "minimum": 1.0,
+            "title": "Denominator",
+            "type": "integer"
+          },
+          "numerator": {
+            "title": "Numerator",
+            "type": "number"
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ],
+        "title": "DerivedRatio",
+        "type": "object"
+      },
+      "DerivedStratum": {
+        "additionalProperties": false,
+        "description": "One band's baseline and comparison counts (events over population), as recorded.",
+        "properties": {
+          "baseline": {
+            "$ref": "#/components/schemas/DerivedRatio"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/DerivedRatio"
+          },
+          "label": {
+            "pattern": "^band_[0-3]$",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "baseline",
+          "comparison"
+        ],
+        "title": "DerivedStratum",
+        "type": "object"
+      },
       "DocumentCollectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1279,6 +1570,156 @@
           "created_at"
         ],
         "title": "DocumentCollectionResponse",
+        "type": "object"
+      },
+      "DocumentEvidenceItem": {
+        "description": "Document evidence as locations and statuses, never the model-written answer.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "citations_verified": {
+            "title": "Citations Verified",
+            "type": "boolean"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "evidence_statuses": {
+            "items": {
+              "enum": [
+                "VERIFIED_REFERENCE",
+                "INVALID_REFERENCE",
+                "QUOTE_MISMATCH",
+                "MISSING_EVIDENCE",
+                "UNVERIFIED_CLAIM",
+                "CONFLICTING_EVIDENCE",
+                "NOT_EVALUATED"
+              ],
+              "type": "string"
+            },
+            "title": "Evidence Statuses",
+            "type": "array"
+          },
+          "invalid_citations": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Invalid Citations",
+            "type": "array"
+          },
+          "kind": {
+            "const": "document",
+            "default": "document",
+            "title": "Kind",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentSourceItem"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "task_id",
+          "attempt",
+          "citations_verified",
+          "sources",
+          "invalid_citations",
+          "evidence_statuses"
+        ],
+        "title": "DocumentEvidenceItem",
+        "type": "object"
+      },
+      "DocumentSourceItem": {
+        "description": "A retrieved source's location; the passage itself is never stored.",
+        "properties": {
+          "chunk_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Index"
+          },
+          "cited": {
+            "title": "Cited",
+            "type": "boolean"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "page_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Number"
+          },
+          "relevance_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevance Score"
+          }
+        },
+        "required": [
+          "number",
+          "filename",
+          "page_number",
+          "chunk_index",
+          "relevance_score",
+          "cited"
+        ],
+        "title": "DocumentSourceItem",
+        "type": "object"
+      },
+      "EqualityFilter": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Field",
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^[A-Za-z0-9 _.:/+-]{1,64}$",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "value"
+        ],
+        "title": "EqualityFilter",
         "type": "object"
       },
       "ErrorBody": {
@@ -1522,6 +1963,83 @@
         "title": "ExportResponse",
         "type": "object"
       },
+      "FactClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "increase",
+              "decrease",
+              "no_change"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^ev_[a-z0-9]{1,32}$",
+              "type": "string"
+            },
+            "maxItems": 4,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "fact_id": {
+            "pattern": "^f[0-9]{1,3}$",
+            "title": "Fact Id",
+            "type": "string"
+          },
+          "relationship": {
+            "default": "association",
+            "enum": [
+              "association",
+              "causation"
+            ],
+            "title": "Relationship",
+            "type": "string"
+          },
+          "type": {
+            "const": "fact",
+            "default": "fact",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fact_id",
+          "direction"
+        ],
+        "title": "FactClaim",
+        "type": "object"
+      },
+      "FactValue": {
+        "additionalProperties": false,
+        "description": "One side of a fact: the counts as recorded and the displayed value (4 decimals).",
+        "properties": {
+          "denominator": {
+            "minimum": 1.0,
+            "title": "Denominator",
+            "type": "integer"
+          },
+          "display": {
+            "pattern": "^[+-]?[0-9]{1,16}(\\.[0-9]{1,4})?$",
+            "title": "Display",
+            "type": "string"
+          },
+          "numerator": {
+            "title": "Numerator",
+            "type": "number"
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator",
+          "display"
+        ],
+        "title": "FactValue",
+        "type": "object"
+      },
       "FieldMappingResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1558,6 +2076,76 @@
         "title": "FieldMappingResponse",
         "type": "object"
       },
+      "FindingClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "numeric_mismatch",
+              "direction_mismatch",
+              "causal_overreach",
+              "document_contradiction",
+              "unsupported_reference",
+              "evidence_not_bound",
+              "document_evidence_unverified",
+              "insufficient_evidence",
+              "conflicting_evidence",
+              "incomplete_coverage",
+              "missing_stratification"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "index": {
+            "exclusiveMaximum": 48.0,
+            "minimum": 0.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "round": {
+            "exclusiveMaximum": 2.0,
+            "minimum": 0.0,
+            "title": "Round",
+            "type": "integer"
+          },
+          "type": {
+            "const": "finding",
+            "default": "finding",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round",
+          "index",
+          "code"
+        ],
+        "title": "FindingClaim",
+        "type": "object"
+      },
+      "FindingRef": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "exclusiveMaximum": 48.0,
+            "minimum": 0.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "round": {
+            "exclusiveMaximum": 2.0,
+            "minimum": 0.0,
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "round",
+          "index"
+        ],
+        "title": "FindingRef",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1589,6 +2177,129 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HypothesisRow": {
+        "additionalProperties": false,
+        "description": "A hypothesis as its approved tests describe it (V6), with its validated verdict.\n\n``status``:\n- ``tested``: a decisive verdict;\n- ``incomplete``: testable but ``untestable`` on the evidence;\n- ``untested``: no approved data;\n- ``not_evaluated``: the run stopped before its verdicts.\n\nThe approved statement is never shown: it is untrusted display text (ADR 0024 A4 D4).",
+        "properties": {
+          "conflicting_evidence_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^ev_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Conflicting Evidence Ids",
+            "type": "array"
+          },
+          "description": {
+            "maxLength": 1200,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^ev_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "fact_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^f[1-9][0-9]?$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Fact Ids",
+            "type": "array"
+          },
+          "follow_up_task_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Follow Up Task Ids",
+            "type": "array"
+          },
+          "hypothesis_id": {
+            "pattern": "^h[0-9]{1,3}$",
+            "title": "Hypothesis Id",
+            "type": "string"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "effect_in_claimed_direction",
+                "no_effect_in_claimed_direction",
+                "required_data_absent",
+                "test_not_completed",
+                "evidence_missing",
+                "evidence_inconsistent",
+                "evidence_truncated",
+                "null_value",
+                "insufficient_denominator",
+                "effect_below_threshold",
+                "conflicting_evidence",
+                "context_unverified"
+              ],
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Reasons",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "tested",
+              "incomplete",
+              "untested",
+              "not_evaluated"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "test_task_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Test Task Ids",
+            "type": "array"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "supported_association",
+                  "untestable",
+                  "refuted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "required": [
+          "hypothesis_id",
+          "description",
+          "status"
+        ],
+        "title": "HypothesisRow",
+        "type": "object"
+      },
       "InvestigationCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1602,6 +2313,69 @@
           "message_id"
         ],
         "title": "InvestigationCreateRequest",
+        "type": "object"
+      },
+      "InvestigationEvidenceResponse": {
+        "description": "The typed verified report and the evidence behind it, from one digest-checked read.\n\n``evidence_state``: ``available``; ``not_reported`` for a failed run, whose report carries codes\nonly; ``unavailable`` for a record whose stored digest does not cover its evidence.",
+        "properties": {
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "derived": "#/components/schemas/DerivedEvidenceItem",
+                  "document": "#/components/schemas/DocumentEvidenceItem",
+                  "query": "#/components/schemas/QueryEvidenceItem"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/QueryEvidenceItem"
+                },
+                {
+                  "$ref": "#/components/schemas/DocumentEvidenceItem"
+                },
+                {
+                  "$ref": "#/components/schemas/DerivedEvidenceItem"
+                }
+              ]
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "evidence_state": {
+            "enum": [
+              "available",
+              "not_reported",
+              "unavailable"
+            ],
+            "title": "Evidence State",
+            "type": "string"
+          },
+          "investigation_id": {
+            "title": "Investigation Id",
+            "type": "string"
+          },
+          "report": {
+            "$ref": "#/components/schemas/VerifiedReport"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvestigationStatus"
+          }
+        },
+        "required": [
+          "investigation_id",
+          "status",
+          "content_sha256",
+          "report",
+          "evidence_state",
+          "evidence"
+        ],
+        "title": "InvestigationEvidenceResponse",
         "type": "object"
       },
       "InvestigationProgressResponse": {
@@ -2143,6 +2917,103 @@
         "title": "JobStatus",
         "type": "string"
       },
+      "Limitation": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/LimitationCode"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "Limitation",
+        "type": "object"
+      },
+      "LimitationClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z_]{0,47}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "pattern": "^h[0-9]{1,3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "type": {
+            "const": "limitation",
+            "default": "limitation",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "LimitationClaim",
+        "type": "object"
+      },
+      "LimitationCode": {
+        "description": "Fixed, content-free reasons a result is incomplete. Report wording is keyed by code (S5).",
+        "enum": [
+          "task_failed",
+          "task_timed_out",
+          "task_refused",
+          "task_cancelled",
+          "dependency_failed",
+          "resource_unavailable",
+          "budget_exhausted",
+          "investigation_cancelled",
+          "investigation_failed",
+          "evidence_missing",
+          "evidence_inconsistent",
+          "document_evidence_unverified",
+          "query_rows_truncated",
+          "report_rows_limited",
+          "verdicts_not_evaluated",
+          "critique_unavailable",
+          "follow_up_not_authorized",
+          "follow_up_invalid",
+          "replan_limit_reached",
+          "critique_rounds_exhausted"
+        ],
+        "title": "LimitationCode",
+        "type": "string"
+      },
       "MessageApprovalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2346,6 +3217,19 @@
           "created_at"
         ],
         "title": "MessageResponse",
+        "type": "object"
+      },
+      "NoRecommendationClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "no_recommendation",
+            "default": "no_recommendation",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "NoRecommendationClaim",
         "type": "object"
       },
       "PlanDecisionBody": {
@@ -2575,6 +3459,296 @@
         "title": "ProvenanceResponse",
         "type": "object"
       },
+      "QueryEvidenceItem": {
+        "description": "Query evidence: its first rows (no more than the report shows) and how it was produced.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "corrections_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrections Used"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "query",
+            "default": "query",
+            "title": "Kind",
+            "type": "string"
+          },
+          "policy_sql_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Sql Status"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "source_truncated": {
+            "title": "Source Truncated",
+            "type": "boolean"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "sql_state": {
+            "enum": [
+              "shown",
+              "restricted",
+              "not_recorded"
+            ],
+            "title": "Sql State",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "task_id",
+          "attempt",
+          "columns",
+          "rows",
+          "row_count",
+          "source_truncated",
+          "sql",
+          "sql_state",
+          "policy_sql_status",
+          "corrections_used"
+        ],
+        "title": "QueryEvidenceItem",
+        "type": "object"
+      },
+      "Recommendation": {
+        "additionalProperties": false,
+        "description": "One triggered investigation-method rule (V5), citing what triggered it.",
+        "properties": {
+          "blocker": {
+            "anyOf": [
+              {
+                "enum": [
+                  "policy_refused",
+                  "unsafe_query",
+                  "resource_unavailable",
+                  "provider_configuration",
+                  "approval_rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocker"
+          },
+          "evidence_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^ev_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "fact_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^f[1-9][0-9]?$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Fact Ids",
+            "type": "array"
+          },
+          "findings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FindingRef"
+            },
+            "maxItems": 8,
+            "title": "Findings",
+            "type": "array"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "pattern": "^h[0-9]{1,3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
+          },
+          "id": {
+            "pattern": "^r[1-9][0-9]?$",
+            "title": "Id",
+            "type": "string"
+          },
+          "limitation_codes": {
+            "default": [],
+            "items": {
+              "pattern": "^[a-z][a-z_]{0,47}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Limitation Codes",
+            "type": "array"
+          },
+          "rule_id": {
+            "pattern": "^[a-z][a-z_]{0,47}$",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_version": {
+            "pattern": "^inv8-recommendation-rules-v[0-9]+$",
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "unproven": {
+            "default": false,
+            "title": "Unproven",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "rule_id",
+          "rule_version"
+        ],
+        "title": "Recommendation",
+        "type": "object"
+      },
+      "RecommendationClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "recommendation_id": {
+            "pattern": "^r[0-9]{1,3}$",
+            "title": "Recommendation Id",
+            "type": "string"
+          },
+          "rule_id": {
+            "pattern": "^[a-z][a-z_]{0,47}$",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "recommendation",
+            "default": "recommendation",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommendation_id",
+          "rule_id"
+        ],
+        "title": "RecommendationClaim",
+        "type": "object"
+      },
+      "ReportCitation": {
+        "additionalProperties": false,
+        "description": "A verified citation's location. Never the passage or the model's answer.",
+        "properties": {
+          "evidence_id": {
+            "pattern": "^ev_[0-9a-f]{32}$",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "filename": {
+            "pattern": "^[^\\x00-\\x1f\\x7f]{1,255}$",
+            "title": "Filename",
+            "type": "string"
+          },
+          "page_number": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Number"
+          },
+          "task_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "task_id",
+          "filename"
+        ],
+        "title": "ReportCitation",
+        "type": "object"
+      },
       "ReportCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2585,6 +3759,354 @@
           }
         },
         "title": "ReportCreateRequest",
+        "type": "object"
+      },
+      "ReportCritiqueRow": {
+        "additionalProperties": false,
+        "description": "One critic round as statuses, an outcome, and fixed-code findings. Never a claim.",
+        "properties": {
+          "draft_status": {
+            "enum": [
+              "valid",
+              "invalid",
+              "unavailable"
+            ],
+            "title": "Draft Status",
+            "type": "string"
+          },
+          "findings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CritiqueFinding"
+            },
+            "maxItems": 48,
+            "title": "Findings",
+            "type": "array"
+          },
+          "rejected_proposals": {
+            "minimum": 0.0,
+            "title": "Rejected Proposals",
+            "type": "integer"
+          },
+          "replan": {
+            "enum": [
+              "none_needed",
+              "admitted",
+              "not_authorized",
+              "invalid",
+              "round_limit",
+              "budget"
+            ],
+            "title": "Replan",
+            "type": "string"
+          },
+          "review_status": {
+            "enum": [
+              "valid",
+              "invalid",
+              "unavailable"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "round": {
+            "minimum": 0.0,
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "round",
+          "draft_status",
+          "review_status",
+          "replan",
+          "rejected_proposals"
+        ],
+        "title": "ReportCritiqueRow",
+        "type": "object"
+      },
+      "ReportFact": {
+        "additionalProperties": false,
+        "description": "One verified measurement: an approved test's two sides and their difference.\n\n``difference`` is comparison minus baseline in the metric's unit (4 decimals, signed).\nFor proportions:\n- ``percentage_points`` is that difference \u00d7 100 (1 decimal, signed);\n- ``relative_change`` is the difference over the baseline \u00d7 100, as a percent (1 decimal,\n  signed), and is omitted when the baseline is 0.\n\n``direction`` is the observed sign; ``claimed_direction`` and ``outcome`` are the approved\nclaim and what the verdict rules made of it. A standardized fact names its stratification.",
+        "properties": {
+          "baseline": {
+            "$ref": "#/components/schemas/FactValue"
+          },
+          "baseline_label": {
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Baseline Label",
+            "type": "string"
+          },
+          "basis": {
+            "enum": [
+              "period",
+              "group"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "claimed_direction": {
+            "enum": [
+              "increase",
+              "decrease",
+              "higher_than"
+            ],
+            "title": "Claimed Direction",
+            "type": "string"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/FactValue"
+          },
+          "comparison_label": {
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Comparison Label",
+            "type": "string"
+          },
+          "derived_evidence_id": {
+            "pattern": "^ev_[0-9a-f]{32}$",
+            "title": "Derived Evidence Id",
+            "type": "string"
+          },
+          "difference": {
+            "pattern": "^[+-]?[0-9]{1,16}(\\.[0-9]{1,4})?$",
+            "title": "Difference",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "increase",
+              "decrease",
+              "no_change"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "field": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Field",
+            "type": "string"
+          },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EqualityFilter"
+            },
+            "maxItems": 8,
+            "title": "Filters",
+            "type": "array"
+          },
+          "hypothesis_id": {
+            "pattern": "^h[0-9]{1,3}$",
+            "title": "Hypothesis Id",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^f[1-9][0-9]?$",
+            "title": "Id",
+            "type": "string"
+          },
+          "metric_label": {
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Metric Label",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "supports",
+              "refutes",
+              "below_threshold"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "percentage_points": {
+            "anyOf": [
+              {
+                "pattern": "^[+-]?[0-9]{1,16}(\\.[0-9]{1,4})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage Points"
+          },
+          "query_evidence_id": {
+            "pattern": "^ev_[0-9a-f]{32}$",
+            "title": "Query Evidence Id",
+            "type": "string"
+          },
+          "relative_change": {
+            "anyOf": [
+              {
+                "pattern": "^[+-]?[0-9]{1,16}(\\.[0-9]{1,4})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Change"
+          },
+          "standardized_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Stratification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "proportion",
+              "mean"
+            ],
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "hypothesis_id",
+          "task_id",
+          "unit",
+          "metric_label",
+          "basis",
+          "field",
+          "baseline_label",
+          "comparison_label",
+          "baseline",
+          "comparison",
+          "difference",
+          "direction",
+          "claimed_direction",
+          "outcome",
+          "derived_evidence_id",
+          "query_evidence_id"
+        ],
+        "title": "ReportFact",
+        "type": "object"
+      },
+      "ReportNote": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "causation_not_established",
+              "observational_data_only",
+              "hypothesis_untested",
+              "hypothesis_not_evaluated",
+              "intervention_unproven",
+              "no_eligible_recommendation",
+              "narrative_fallback"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "pattern": "^h[0-9]{1,3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis Id"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "ReportNote",
+        "type": "object"
+      },
+      "ReportQueryTable": {
+        "additionalProperties": false,
+        "description": "Verified query cells as recorded, cut to the first ``MAX_REPORT_QUERY_ROWS`` rows.",
+        "properties": {
+          "columns": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Columns",
+            "type": "array"
+          },
+          "evidence_id": {
+            "pattern": "^ev_[0-9a-f]{32}$",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "maximum": 9.223372036854776e+18,
+                    "minimum": -9.223372036854776e+18,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "maxLength": 4096,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "maxItems": 50,
+            "title": "Rows",
+            "type": "array"
+          },
+          "source_row_count": {
+            "minimum": 0.0,
+            "title": "Source Row Count",
+            "type": "integer"
+          },
+          "source_truncated": {
+            "title": "Source Truncated",
+            "type": "boolean"
+          },
+          "task_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "task_id",
+          "columns",
+          "source_row_count",
+          "source_truncated"
+        ],
+        "title": "ReportQueryTable",
         "type": "object"
       },
       "ReportResponse": {
@@ -2635,6 +4157,37 @@
         "title": "ReportResponse",
         "type": "object"
       },
+      "ReportSection": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "enum": [
+              "executive_summary",
+              "findings",
+              "hypotheses",
+              "critique",
+              "limitations",
+              "recommendations"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "sentences": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Sentence"
+            },
+            "maxItems": 64,
+            "title": "Sentences",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ReportSection",
+        "type": "object"
+      },
       "ReportSectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2667,6 +4220,48 @@
           "body"
         ],
         "title": "ReportSectionResponse",
+        "type": "object"
+      },
+      "ReportTaskRow": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind"
+          },
+          "status": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "skipped",
+              "refused",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "kind",
+          "status"
+        ],
+        "title": "ReportTaskRow",
         "type": "object"
       },
       "SQLItemDecisionBody": {
@@ -2985,6 +4580,114 @@
         "title": "SchemaMappingUpdateRequest",
         "type": "object"
       },
+      "ScopeClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "facts": {
+            "minimum": 0.0,
+            "title": "Facts",
+            "type": "integer"
+          },
+          "hypotheses": {
+            "minimum": 0.0,
+            "title": "Hypotheses",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "completed_partial",
+              "failed",
+              "cancelled",
+              "budget_exhausted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tested": {
+            "minimum": 0.0,
+            "title": "Tested",
+            "type": "integer"
+          },
+          "type": {
+            "const": "scope",
+            "default": "scope",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "hypotheses",
+          "tested",
+          "facts"
+        ],
+        "title": "ScopeClaim",
+        "type": "object"
+      },
+      "Sentence": {
+        "additionalProperties": false,
+        "properties": {
+          "claim": {
+            "discriminator": {
+              "mapping": {
+                "comparison": "#/components/schemas/ComparisonClaim",
+                "fact": "#/components/schemas/FactClaim",
+                "finding": "#/components/schemas/FindingClaim",
+                "limitation": "#/components/schemas/LimitationClaim",
+                "no_recommendation": "#/components/schemas/NoRecommendationClaim",
+                "recommendation": "#/components/schemas/RecommendationClaim",
+                "scope": "#/components/schemas/ScopeClaim",
+                "task": "#/components/schemas/TaskClaim",
+                "verdict": "#/components/schemas/VerdictClaim"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScopeClaim"
+              },
+              {
+                "$ref": "#/components/schemas/FactClaim"
+              },
+              {
+                "$ref": "#/components/schemas/ComparisonClaim"
+              },
+              {
+                "$ref": "#/components/schemas/VerdictClaim"
+              },
+              {
+                "$ref": "#/components/schemas/FindingClaim"
+              },
+              {
+                "$ref": "#/components/schemas/TaskClaim"
+              },
+              {
+                "$ref": "#/components/schemas/LimitationClaim"
+              },
+              {
+                "$ref": "#/components/schemas/RecommendationClaim"
+              },
+              {
+                "$ref": "#/components/schemas/NoRecommendationClaim"
+              }
+            ],
+            "title": "Claim"
+          },
+          "text": {
+            "maxLength": 1600,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim",
+          "text"
+        ],
+        "title": "Sentence",
+        "type": "object"
+      },
       "SessionResponse": {
         "description": "What the SPA may know: its CSRF value, roles for UI gating, and when the session ends.",
         "properties": {
@@ -3025,6 +4728,35 @@
           "citation"
         ],
         "title": "SourceResponse",
+        "type": "object"
+      },
+      "Stratification": {
+        "additionalProperties": false,
+        "description": "Fixed integer bands over one numeric field (INV-7 decision C4).\n\n``band_0`` holds values below the first cut point, ``band_i`` holds values in\n``[cut_{i-1}, cut_i)``, and the last band holds values at or above the last cut point. Labels\nare fixed, so neither a model nor a reader ever names a band.",
+        "properties": {
+          "cut_points": {
+            "items": {
+              "maximum": 1000000.0,
+              "minimum": -1000000.0,
+              "type": "integer"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Cut Points",
+            "type": "array"
+          },
+          "field": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "cut_points"
+        ],
+        "title": "Stratification",
         "type": "object"
       },
       "TabularUploadResponse": {
@@ -3080,6 +4812,39 @@
         "title": "TabularUploadResponse",
         "type": "object"
       },
+      "TaskClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "skipped",
+              "refused",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "task",
+            "default": "task",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "TaskClaim",
+        "type": "object"
+      },
       "TaskKind": {
         "enum": [
           "sql_analysis",
@@ -3127,6 +4892,287 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerdictClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "default": [],
+            "items": {
+              "pattern": "^ev_[a-z0-9]{1,32}$",
+              "type": "string"
+            },
+            "maxItems": 4,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "hypothesis_id": {
+            "pattern": "^h[0-9]{1,3}$",
+            "title": "Hypothesis Id",
+            "type": "string"
+          },
+          "relationship": {
+            "default": "association",
+            "enum": [
+              "association",
+              "causation"
+            ],
+            "title": "Relationship",
+            "type": "string"
+          },
+          "type": {
+            "const": "verdict",
+            "default": "verdict",
+            "title": "Type",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "supported_association",
+              "untestable",
+              "refuted"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hypothesis_id",
+          "verdict"
+        ],
+        "title": "VerdictClaim",
+        "type": "object"
+      },
+      "VerifiedReport": {
+        "additionalProperties": false,
+        "description": "The verified report. Construction checks only shape; ``verify_report`` checks substance.\n\nWhatever the narrative's fate, ``investigation_status`` is the run's terminal status, and\n``availability`` follows from it:\n- ``complete`` for ``completed``;\n- ``codes_only`` for ``failed``;\n- ``partial`` otherwise.",
+        "properties": {
+          "availability": {
+            "enum": [
+              "complete",
+              "partial",
+              "codes_only"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "citations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportCitation"
+            },
+            "maxItems": 192,
+            "title": "Citations",
+            "type": "array"
+          },
+          "critiques": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportCritiqueRow"
+            },
+            "maxItems": 2,
+            "title": "Critiques",
+            "type": "array"
+          },
+          "facts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportFact"
+            },
+            "maxItems": 48,
+            "title": "Facts",
+            "type": "array"
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "narrative_not_applicable",
+                  "narrative_not_eligible",
+                  "narrative_disabled",
+                  "narrative_model_unavailable",
+                  "narrative_budget_unavailable",
+                  "narrative_unavailable",
+                  "narrative_invalid",
+                  "narrative_rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
+          },
+          "hypotheses": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HypothesisRow"
+            },
+            "maxItems": 8,
+            "title": "Hypotheses",
+            "type": "array"
+          },
+          "investigation_status": {
+            "enum": [
+              "completed",
+              "completed_partial",
+              "failed",
+              "cancelled",
+              "budget_exhausted"
+            ],
+            "title": "Investigation Status",
+            "type": "string"
+          },
+          "label": {
+            "const": "verified, association only",
+            "default": "verified, association only",
+            "title": "Label",
+            "type": "string"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Limitation"
+            },
+            "maxItems": 104,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "model_assisted",
+              "deterministic_fallback"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "narrative_prompt_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrative Prompt Version"
+          },
+          "narrative_violations": {
+            "default": [],
+            "items": {
+              "enum": [
+                "schema_invalid",
+                "scope_mismatch",
+                "status_misrepresented",
+                "section_missing",
+                "report_inconsistent",
+                "numeric_unsupported",
+                "numeric_mismatch",
+                "unsupported_comparison",
+                "citation_unknown",
+                "citation_stale",
+                "citation_misattributed",
+                "evidence_omitted",
+                "causal_claim",
+                "recommendation_unsupported",
+                "recommendation_omitted",
+                "playbook_rule_unknown",
+                "verdict_mismatch",
+                "hypothesis_omitted",
+                "limitation_missing",
+                "limitation_unsupported",
+                "finding_mismatch",
+                "finding_omitted",
+                "claim_contradiction",
+                "task_status_misrepresented",
+                "rendered_text_mismatch"
+              ],
+              "type": "string"
+            },
+            "maxItems": 25,
+            "title": "Narrative Violations",
+            "type": "array"
+          },
+          "notes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportNote"
+            },
+            "maxItems": 32,
+            "title": "Notes",
+            "type": "array"
+          },
+          "query_tables": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportQueryTable"
+            },
+            "maxItems": 24,
+            "title": "Query Tables",
+            "type": "array"
+          },
+          "recommendations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Recommendation"
+            },
+            "maxItems": 32,
+            "title": "Recommendations",
+            "type": "array"
+          },
+          "rules_version": {
+            "const": "inv8-recommendation-rules-v2",
+            "default": "inv8-recommendation-rules-v2",
+            "title": "Rules Version",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "scope_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Scope Digest",
+            "type": "string"
+          },
+          "sections": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportSection"
+            },
+            "maxItems": 6,
+            "title": "Sections",
+            "type": "array"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ReportTaskRow"
+            },
+            "maxItems": 24,
+            "minItems": 1,
+            "title": "Tasks",
+            "type": "array"
+          },
+          "verification": {
+            "const": "verified",
+            "default": "verified",
+            "title": "Verification",
+            "type": "string"
+          }
+        },
+        "required": [
+          "investigation_status",
+          "availability",
+          "mode",
+          "scope_digest",
+          "tasks"
+        ],
+        "title": "VerifiedReport",
         "type": "object"
       },
       "WorkbookSheetsResponse": {
@@ -5622,6 +7668,137 @@
         ]
       }
     },
+    "/api/v1/investigations/{investigation_id}/evidence": {
+      "get": {
+        "description": "The verified report and its evidence. 404 until terminal or without a report; 409 if the\nstored content fails its digest or contracts. SQL text also needs ``analysis:run``.",
+        "operationId": "get_investigation_evidence_api_v1_investigations__investigation_id__evidence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestigationEvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Investigation Evidence",
+        "tags": [
+          "investigations"
+        ]
+      }
+    },
     "/api/v1/investigations/{investigation_id}/plan-decision": {
       "post": {
         "description": "Approve or reject the exact plan (digest and epoch) shown to this approver.",
@@ -5758,6 +7935,157 @@
           }
         ],
         "summary": "Decide Investigation Plan",
+        "tags": [
+          "investigations"
+        ]
+      }
+    },
+    "/api/v1/investigations/{investigation_id}/report/export": {
+      "get": {
+        "description": "Streams the complete immutable representation in bounded chunks. `Content-Length` and attachment\n`Content-Disposition` are always present. Byte ranges are not supported (`Accept-Ranges: none`), so\na partial transfer must be restarted with a new `GET`. A timeout or disconnect stops only that\ntransfer; it does not delete the resource or cancel report generation. The `GET` is safe to retry.",
+        "operationId": "export_investigation_report_api_v1_investigations__investigation_id__report_export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "investigation_id",
+            "required": true,
+            "schema": {
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "markdown",
+              "enum": [
+                "markdown",
+                "json"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The verified report as an attachment. It contains no SQL."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource state conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Upload limit exceeded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Sanitized internal error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Export Investigation Report",
         "tags": [
           "investigations"
         ]

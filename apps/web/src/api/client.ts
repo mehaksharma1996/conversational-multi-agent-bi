@@ -85,6 +85,9 @@ export type InvestigationCostEstimate = components["schemas"]["CostEstimate"];
 export type InvestigationPlanDecision = components["schemas"]["PlanDecisionBody"];
 export type InvestigationSqlWave = components["schemas"]["SQLWaveReviewResponse"];
 export type InvestigationSqlWaveDecision = components["schemas"]["SQLWaveDecisionBody"];
+export type InvestigationEvidence = components["schemas"]["InvestigationEvidenceResponse"];
+export type InvestigationEvidenceItem = InvestigationEvidence["evidence"][number];
+export type VerifiedInvestigationReport = InvestigationEvidence["report"];
 
 export class ApiClientError extends Error {
   readonly code: string;
@@ -295,6 +298,31 @@ export async function decideInvestigationSqlWave(
     { params: { path: { investigation_id: investigationId } }, body: decision },
   );
   return unwrap(data, error, response);
+}
+
+/** The typed verified report and its evidence. SQL text may be present: keep it in memory only. */
+export async function getInvestigationEvidence(investigationId: string): Promise<InvestigationEvidence> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/investigations/{investigation_id}/evidence",
+    { params: { path: { investigation_id: investigationId } } },
+  );
+  // The fetch types widen fixed-length tuples; the generated schema is the contract.
+  return unwrap(data as unknown as InvestigationEvidence | undefined, error, response);
+}
+
+export async function downloadInvestigationReport(
+  investigationId: string,
+  format: "markdown" | "json",
+): Promise<Blob> {
+  const { data, error, response } = await api.GET(
+    "/api/v1/investigations/{investigation_id}/report/export",
+    {
+      params: { path: { investigation_id: investigationId }, query: { format } },
+      parseAs: "blob",
+    },
+  );
+  if (!response.ok || data === undefined) unwrap(undefined, error, response);
+  return data as unknown as Blob;
 }
 
 export async function uploadTabular(

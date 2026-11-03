@@ -811,15 +811,18 @@ Design E1 to E9: `docs/agents/briefs/144-inv11-investigation-api.md`; ADR 0024 A
 | `POST /api/v1/investigations/{id}/cancel` | `analysis:run` | 202; further work stops |
 | `GET /api/v1/investigations/{id}/sql-wave` | `analysis:run` | the pending wave with each statement |
 | `POST /api/v1/investigations/{id}/sql-wave` | `analysis:run` | 202; resume job submitted |
+| `GET /api/v1/investigations/{id}/evidence` | `workspace:read` (SQL text also needs `analysis:run`) | typed verified report and evidence; digest-checked, `no-store`, read-only; 404 until terminal or without a report; 409 `investigation_content_unverifiable` (UI-6c, Amendment 12) |
+| `GET /api/v1/investigations/{id}/report/export?format=markdown\|json` | `report:export` | attachment; same availability; no SQL; audited `report.downloaded` (UI-6c) |
 
 Refusals use fixed codes: `investigations_disabled`, `source_message_invalid`,
 `conversation_busy`, `idempotency_key_reused`, `question_too_long`, `job_queue_full`,
 `investigation_not_pending`, `sql_wave_not_pending`, and the INV-10 approval codes.
 
 **Storage.** `investigations` (metadata migration 4) holds IDs, status, the plan digest, fixed
-explanation and terminal codes, the report SHA-256, and the hashed idempotency key and request
-fingerprint. The workspace's `investigations.db` (SQLCipher with `APP_ENCRYPTION_KEY`) holds the
-plan, the verified report, and the typed evidence payloads. Workspace deletion removes both.
+explanation and terminal codes, the digest binding the report to its evidence, and the hashed
+idempotency key and request fingerprint. The workspace's `investigations.db` (SQLCipher with
+`APP_ENCRYPTION_KEY`) holds the plan, the verified report, the typed evidence payloads, and each
+query evidence's executed SQL (UI-6c). Workspace deletion removes both.
 
 **Restart.** `_start` loads records after `repository.recover()` and moves every non-terminal one
 to `interrupted` (`interrupted_by_restart`), with one `agent.investigation_reconciled` event each
