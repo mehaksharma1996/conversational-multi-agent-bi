@@ -1358,6 +1358,7 @@ NOT_TOOLS = {
     "close",  # only ever narrows: permanent, first closure wins
     "evidence_payload",  # owner-only read of what this gateway issued
     "evidence_payloads",  # owner-only read; re-verified against the view and its scope
+    "executed_sql",  # owner-only read of verified query evidence; no decision or execution
     "specialist_port",  # hands out the narrower surface
     "parked_sql",  # owner-only, in process; refuses once closed; statements go only to the approver
     "narrative_readiness",  # no decision, reservation, or charge

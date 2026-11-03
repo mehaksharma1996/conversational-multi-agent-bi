@@ -54,6 +54,8 @@ PLAN_DECISION = ("POST", "/api/v1/investigations/{investigation_id}/plan-decisio
 CANCEL = ("POST", "/api/v1/investigations/{investigation_id}/cancel")
 WAVE_READ = ("GET", "/api/v1/investigations/{investigation_id}/sql-wave")
 WAVE_DECISION = ("POST", "/api/v1/investigations/{investigation_id}/sql-wave")
+EVIDENCE = ("GET", "/api/v1/investigations/{investigation_id}/evidence")
+REPORT_EXPORT = ("GET", "/api/v1/investigations/{investigation_id}/report/export")
 
 # What each route requires of a verified identity.
 CAPABILITY = {
@@ -64,6 +66,8 @@ CAPABILITY = {
     CANCEL: "analysis:run",
     WAVE_READ: "analysis:run",
     WAVE_DECISION: "analysis:run",
+    EVIDENCE: "workspace:read",
+    REPORT_EXPORT: "report:export",
 }
 # Which limiter operation a route spends. ``None`` is a decision: see the rate-limit section.
 RATE_LIMIT = {
@@ -74,6 +78,9 @@ RATE_LIMIT = {
     CANCEL: None,
     WAVE_READ: None,
     WAVE_DECISION: "investigation_decision",
+    EVIDENCE: None,
+    # Export is bounded local rendering: it makes no provider call and starts no work.
+    REPORT_EXPORT: None,
 }
 # What a route does once consent is withdrawn; each is proved below.
 CONSENT = {
@@ -84,6 +91,8 @@ CONSENT = {
     CANCEL: "test_withdrawn_consent_never_blocks_cancel",
     WAVE_READ: "test_withdrawn_consent_leaves_reads_available_and_sends_nothing",
     WAVE_DECISION: "test_withdrawn_consent_refuses_a_wave_decision_and_runs_nothing",
+    EVIDENCE: "test_withdrawn_consent_leaves_finished_evidence_and_export_available",
+    REPORT_EXPORT: "test_withdrawn_consent_leaves_finished_evidence_and_export_available",
 }
 
 
@@ -150,6 +159,27 @@ def _paused(name: str, *, adapters: Any = None) -> tuple[Deployment, FastAPI]:
     return deployment, deployment.app()
 
 
+def _finish(client: TestClient, flow: Flow) -> dict[str, Any]:
+    flow.to_first_wave()
+    wave = client.get(f"/api/v1/investigations/{flow.id}/sql-wave").json()
+    items = [
+        {
+            "task_id": item["task_id"],
+            "sql_fingerprint": item["sql_fingerprint"],
+            "decision": "approve",
+        }
+        for item in wave["items"]
+    ]
+    answer = client.post(
+        f"/api/v1/investigations/{flow.id}/sql-wave",
+        json={"wave_id": wave["wave_id"], "wave_digest": wave["wave_digest"], "items": items},
+    )
+    assert answer.status_code == 202
+    done = flow.until(*TERMINAL)
+    assert done["status"] == "completed" and done["report"] is not None
+    return done
+
+
 def _send(
     client: TestClient, route: tuple[str, str], url: str, body: Any, key: str = "sec1"
 ) -> Any:
@@ -204,24 +234,11 @@ def test_a_foreign_tenant_cannot_read_a_finished_report() -> None:
     app = deployment.app()
     with TestClient(app) as client:
         flow = Flow(client, deployment)
-        flow.to_first_wave()
-        wave = client.get(f"/api/v1/investigations/{flow.id}/sql-wave").json()
-        items = [
-            {
-                "task_id": item["task_id"],
-                "sql_fingerprint": item["sql_fingerprint"],
-                "decision": "approve",
-            }
-            for item in wave["items"]
-        ]
-        client.post(
-            f"/api/v1/investigations/{flow.id}/sql-wave",
-            json={"wave_id": wave["wave_id"], "wave_digest": wave["wave_digest"], "items": items},
-        )
-        done = flow.until(*TERMINAL)
-        assert done["status"] == "completed" and done["report"] is not None
+        done = _finish(client, flow)
         _as(app, OTHER_TENANT)
         assert client.get(f"/api/v1/investigations/{flow.id}").status_code == 404
+        assert client.get(f"/api/v1/investigations/{flow.id}/evidence").status_code == 404
+        assert client.get(f"/api/v1/investigations/{flow.id}/report/export").status_code == 404
         path = (
             f"/api/v1/conversations/{done['conversation_id']}/investigations/by-message/"
             f"{done['message_id']}"
@@ -298,12 +315,31 @@ def test_a_viewer_is_refused_every_route_that_needs_analysis_run() -> None:
         tenant = client.app.state.investigation_records.records()[0].tenant_id
         _as(app, tenant, roles=frozenset({"viewer"}))
         for route, needed in CAPABILITY.items():
+            if route in {EVIDENCE, REPORT_EXPORT}:
+                continue
             url = _url(route, flow, before["conversation_id"], before["message_id"])
             answer = _send(client, route, url, bodies.get(route))
             assert answer.status_code == (403 if needed == "analysis:run" else 200), route
         app.dependency_overrides.clear()
         after = flow.body()
         assert after["status"] == before["status"] and after["sql_wave"] == before["sql_wave"]
+
+
+def test_a_viewer_can_read_finished_evidence_but_cannot_export_it() -> None:
+    deployment = Deployment("sec1_viewer_report")
+    app = deployment.app()
+    with TestClient(app) as client:
+        flow = Flow(client, deployment)
+        _finish(client, flow)
+        tenant = client.app.state.investigation_records.records()[0].tenant_id
+        _as(app, tenant, roles=frozenset({"viewer"}))
+
+        evidence = client.get(f"/api/v1/investigations/{flow.id}/evidence")
+        export = client.get(f"/api/v1/investigations/{flow.id}/report/export")
+
+        assert evidence.status_code == 200
+        assert export.status_code == 403
+        assert export.json()["error"]["code"] == "permission_denied"
 
 
 # --- consent --------------------------------------------------------------------------------------
@@ -377,8 +413,26 @@ def test_withdrawn_consent_leaves_reads_available_and_sends_nothing() -> None:
         prompts = len(deployment.adapters.llm.sql_prompts)
         _withdraw(client, flow)
         for route, _ in ((r, n) for r, n in RATE_LIMIT.items() if r[0] == "GET"):
+            if route in {EVIDENCE, REPORT_EXPORT}:
+                continue
             url = _url(route, flow, body["conversation_id"], body["message_id"])
             assert client.get(url).status_code == 200, route
+        assert len(deployment.adapters.llm.sql_prompts) == prompts
+
+
+def test_withdrawn_consent_leaves_finished_evidence_and_export_available() -> None:
+    deployment = Deployment("sec1_consent_report")
+    app = deployment.app()
+    with TestClient(app) as client:
+        flow = Flow(client, deployment)
+        _finish(client, flow)
+        prompts = len(deployment.adapters.llm.sql_prompts)
+        _withdraw(client, flow)
+
+        evidence = client.get(f"/api/v1/investigations/{flow.id}/evidence")
+        export = client.get(f"/api/v1/investigations/{flow.id}/report/export")
+
+        assert evidence.status_code == export.status_code == 200
         assert len(deployment.adapters.llm.sql_prompts) == prompts
 
 
