@@ -69,7 +69,8 @@ from your provider's current price list; setting only one is a startup error. Co
 rounded to three decimals, which would erase per-call costs.
 
 The wrapper never reads prompt or completion text. Evaluation reports fill `metadata.token_usage` from the same counters for opt-in live
-runs and keep it `null` for scripted runs. There is no trace exporter: see [ADR 0015](../adr/0015-llm-telemetry-and-trace-export.md).
+runs and keep it `null` for scripted runs. Optional OTLP trace export is off by default and requires an operator-supplied collector; see
+[ADR 0015](../adr/0015-llm-telemetry-and-trace-export.md).
 
 ### Investigation telemetry (`investigation.*`)
 
@@ -87,8 +88,9 @@ Use it only on a single-user machine for short debugging sessions, never in a sh
 
 Structured logging is always on. With `METRICS_ENABLED=true` the API also keeps content-free metrics derived from the same allowlisted events and serves them in Prometheus
 text format at `GET /metrics` (outside `/api`, not in the OpenAPI contract, not proxied by the bundled web server); see [SLIs, objectives, and operator queries](../operations/slos.md).
-There is **no tracing or OpenTelemetry exporter**, no dashboard, and no alerting. Add another sink by implementing `TelemetrySink` (a single `emit` method) and passing it to
-`create_app(telemetry_sink=...)`; keep it vendor-neutral and preserve the allowlist. `FanOutTelemetrySink` delivers each event to several sinks without one failure affecting the others.
+OpenTelemetry trace export is available only when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set; it is off by default, and the repository bundles no collector, dashboard, or alerting.
+Add another sink by implementing `TelemetrySink` (a single `emit` method) and passing it to `create_app(telemetry_sink=...)`; keep it vendor-neutral and preserve the allowlist.
+`FanOutTelemetrySink` delivers each event to several sinks without one failure affecting the others.
 
 ## Audit events
 
@@ -166,6 +168,6 @@ if the full history must be provable. Nothing is ever deleted by the application
 
 - API resource metadata is process-local; restarting the API loses all workspaces, and previous workspace directories become orphaned.
 - The audit chain restarts correctly from the file, but the in-memory workspace records it describes do not survive.
-- No trace export, dashboard, alerting, or Compose telemetry profile (metrics and documented SLOs exist; see [slos.md](../operations/slos.md) for what remains).
+- No bundled collector, dashboard, alerting, or Compose telemetry profile; optional OTLP trace export requires an operator-supplied collector (metrics and documented SLOs exist; see [slos.md](../operations/slos.md) for what remains).
 - Audit write failures are surfaced but do not fail the operation that already happened.
 - Streamlit does not emit audit or structured telemetry events.
