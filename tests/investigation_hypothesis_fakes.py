@@ -94,7 +94,7 @@ def churn_index(directory: Path | str) -> Any:
     return _INDEX["retriever"]
 
 
-def v2_proposal(response: str | None = None) -> InvestigationProposalRun:
+def v2_proposal(response: str | None = None, *, telemetry: Any = None) -> InvestigationProposalRun:
     """A proposal on the real churn schema that reached ``awaiting_plan_approval``."""
     from packages.investigation.planning import PlanningContext
 
@@ -109,6 +109,7 @@ def v2_proposal(response: str | None = None) -> InvestigationProposalRun:
         live=LiveAuthority(),
         cancellation=Cancellation(),
         clock=FakeClock(),
+        telemetry=telemetry,
     )
     run.run()
     return run

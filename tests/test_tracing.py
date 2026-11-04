@@ -7,10 +7,12 @@ from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
+from opentelemetry import trace
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from apps.api.main import create_app
 from packages.observability import (
+    FanOutTelemetrySink,
     InMemoryTelemetrySink,
     Telemetry,
     TraceManager,
@@ -163,6 +165,84 @@ def test_background_event_uses_retained_request_parent_after_root_ends() -> None
     job = next(span for span in exporter.get_finished_spans() if span.name == "job.transition")
     assert job.context.trace_id == root.context.trace_id
     assert job.parent is not None and job.parent.span_id == root.context.span_id
+
+
+def test_a_scope_nests_inner_events_and_takes_its_attributes_from_its_sanitized_event() -> None:
+    manager, exporter = _manager()
+    memory = InMemoryTelemetrySink()
+    telemetry = Telemetry(FanOutTelemetrySink([manager.telemetry_sink, memory]))
+
+    with telemetry.scope(
+        "investigation.run", tenant_id="b" * 32, investigation_phase="execution"
+    ) as tracker:
+        telemetry.emit("investigation.step", investigation_step="dispatch", sql=SECRET_SQL)
+        tracker.set(question=SECRET_QUESTION, investigation_status="completed")
+
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    root, child = spans["investigation.run"], spans["investigation.step"]
+    assert root.parent is None
+    assert child.parent is not None and child.parent.span_id == root.context.span_id
+    assert child.context.trace_id == root.context.trace_id
+    assert root.attributes["bi.investigation_status"] == "completed"
+    assert root.attributes["bi.outcome"] == "success"
+    assert root.attributes["bi.dropped_attributes"] == 1
+    rendered = _render_spans(exporter)
+    for forbidden in ("Jane Doe", "SELECT", "b" * 32):
+        assert forbidden not in rendered, forbidden
+    # A sink without scopes gets the same one event, once.
+    assert [event.name for event in memory.events] == ["investigation.step", "investigation.run"]
+    assert not trace.get_current_span().get_span_context().is_valid  # the scope is detached
+
+
+def test_a_scope_keeps_the_body_exception_and_never_records_it_on_the_span() -> None:
+    manager, exporter = _manager()
+    telemetry = Telemetry(manager.telemetry_sink)
+    error = ValueError(SECRET_QUESTION)
+
+    with pytest.raises(ValueError) as raised, telemetry.scope("investigation.run"):
+        raise error
+
+    assert raised.value is error
+    (span,) = exporter.get_finished_spans()
+    assert span.status.status_code.name == "ERROR"
+    assert span.attributes["bi.error_category"] == "invalid_input"
+    assert span.events == ()
+    assert "Jane Doe" not in _render_spans(exporter)
+
+
+def test_a_body_may_state_its_scope_outcome_and_an_invalid_name_fails_before_the_body() -> None:
+    sink = InMemoryTelemetrySink()
+    telemetry = Telemetry(sink)
+    with telemetry.scope("investigation.run") as tracker:
+        tracker.set(outcome="failure")
+    assert sink.events[0].attributes["outcome"] == "failure"
+
+    def never() -> None:
+        with telemetry.scope("Not A Valid Name"):
+            raise AssertionError("the body must not run")
+
+    with pytest.raises(ValueError, match="Invalid telemetry event name"):
+        never()
+
+
+def test_fan_out_keeps_other_sinks_working_when_one_fails_to_open_or_close() -> None:
+    class Failing:
+        def emit(self, _event: object) -> None:
+            raise RuntimeError("sink down")
+
+        def open_scope(self, _name: str, _request_id: str | None) -> object:
+            raise RuntimeError("sink down")
+
+        def close_scope(self, _scope: object, _event: object) -> None:
+            raise RuntimeError("sink down")
+
+    manager, exporter = _manager()
+    memory = InMemoryTelemetrySink()
+    telemetry = Telemetry(FanOutTelemetrySink([Failing(), manager.telemetry_sink, memory]))
+    with telemetry.scope("investigation.run"):
+        pass
+    assert [span.name for span in exporter.get_finished_spans()] == ["investigation.run"]
+    assert [event.name for event in memory.events] == ["investigation.run"]
 
 
 def test_app_does_not_construct_a_trace_provider_when_endpoint_is_absent(monkeypatch) -> None:

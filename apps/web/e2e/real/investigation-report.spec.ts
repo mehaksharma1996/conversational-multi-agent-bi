@@ -147,6 +147,7 @@ test("a scripted churn run reaches a verified report whose claims and evidence l
   const workflow = page.locator(".investigation-workflow");
   await expect(workflow).toContainText("verified, association only");
   await expect(workflow).toContainText("No model wrote this narrative");
+  await expect(workflow).toContainText("can return counts that do not reflect the source data");
   await expect(page.locator(".report-claim").first()).toBeVisible();
   await expect(page.getByRole("article", { name: /^Measurement f1/ })).toBeVisible();
 
@@ -172,13 +173,27 @@ test("a scripted churn run reaches a verified report whose claims and evidence l
 
   // Export is the server's verified report, with no SQL.
   const saved = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export report as Markdown" }).click();
+  const exportMarkdown = page.getByRole("button", { name: "Export report as Markdown" });
+  await exportMarkdown.focus();
+  await page.keyboard.press("Enter");
   const download = await saved;
   expect(download.suggestedFilename()).toMatch(/^investigation-report-inv_[0-9a-f]+\.md$/);
   const text = readFileSync(await download.path(), "utf-8");
   expect(text).toContain("verified, association only");
+  expect(text).toContain("Evidence: available");
+  expect(text).toContain("can return counts that do not reflect the source data");
   expect(text).toContain("Measurements");
   expect(text).not.toContain("SELECT");
+  await expect(exportMarkdown).toBeFocused();
+
+  const savedJson = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export report as JSON" }).click();
+  const jsonDownload = await savedJson;
+  expect(jsonDownload.suggestedFilename()).toMatch(/^investigation-report-inv_[0-9a-f]+\.json$/);
+  const exported = JSON.parse(readFileSync(await jsonDownload.path(), "utf-8")) as Record<string, unknown>;
+  expect(exported.evidence_state).toBe("available");
+  expect(String(exported.verification_scope)).toContain("do not reflect the source data");
+  expect(JSON.stringify(exported)).not.toContain("SELECT");
 
   // A reload re-reads the durable report; nothing is kept in browser storage.
   await page.reload();

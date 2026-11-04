@@ -5,7 +5,9 @@ investigation case exactly once, by category and by *coverage*: whether an offli
 grade it at all. Coverage labels keep unmeasured cases out of pass rates instead of letting a
 scripted fallback answer look like a pass or a failure:
 
-- ``measured``: the scripted model produces a correct output, so the case is graded.
+- ``measured``: the scripted model produces a correct output, so the case is graded. An
+  investigation case is measured only with ``graded_by: investigation_graph``: its grade comes from
+  a scripted run of the real investigation graph, not from the single-query API run.
 - ``not_covered_by_script``: the product supports the question, but the scripted model has no
   correct output for it; a scripted run says nothing about it.
 - ``requires_agent``: the task is defined as dependent steps. This is a limitation of current
@@ -51,6 +53,23 @@ CATEGORIES = (
     "investigation",
 )
 HASH_METHODS = ("sha256-lf", "sha256-raw")
+# A manifest entry's ``graded_by``: the case is graded by a scripted run of the real investigation
+# graph (``packages/evaluation/investigation_trajectory.py``), never by the single-query API run.
+GRAPH_GRADED = "investigation_graph"
+# What a graph-graded case can be graded on; each names one observed block.
+TRAJECTORY_DIMENSIONS = (
+    "routing_gate",
+    "planning_delegation",
+    "sql_result_equivalence",
+    "citation_quality",
+    "hypothesis_grounding",
+    "critic_recall",
+    "failure_recovery",
+    "budget_compliance",
+    "security_approval",
+    "report_verification",
+    "unnecessary_calls",
+)
 # Source case kinds and the categories they may be filed under. Ground-truth cases are filed by
 # their expected route, so a table question cannot be reported as a document one.
 _CATEGORIES_BY_KIND = {
@@ -140,10 +159,16 @@ def _entry_problems(entry: Mapping[str, Any], case: Mapping[str, Any] | None) ->
     )
     if not allowed or category not in allowed:
         problems.append(f"{case_id}: category {category!r} does not fit a {kind!r} case")
-    if coverage == "measured" and not case.get("scored"):
-        problems.append(f"{case_id}: a measured case must be scored in its source")
-    if kind in {"exploratory", "investigation"} and coverage == "measured":
-        problems.append(f"{case_id}: {kind} cases cannot be measured offline")
+    graded_by = entry.get("graded_by")
+    if graded_by is not None and (graded_by != GRAPH_GRADED or kind != "investigation"):
+        problems.append(f"{case_id}: graded_by {graded_by!r} does not fit a {kind!r} case")
+    if coverage == "measured" and graded_by is None:
+        if not case.get("scored"):
+            problems.append(f"{case_id}: a measured case must be scored in its source")
+        if kind in {"exploratory", "investigation"}:
+            problems.append(f"{case_id}: {kind} cases cannot be measured offline")
+    if graded_by is not None and coverage != "measured":
+        problems.append(f"{case_id}: only a measured case has graded_by")
     return problems
 
 

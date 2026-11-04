@@ -231,6 +231,7 @@ from packages.investigation.verdicts import (
     hypothesis_tests,
     validate_verdict,
 )
+from packages.observability import Telemetry
 from src.agents.sql_agent import execute_sql
 from src.investigation.business_investigator import BusinessInvestigator
 from src.investigation.critic import Critic
@@ -242,6 +243,7 @@ from src.orchestration.investigation_approval import InvestigationApprovalServic
 from src.orchestration.investigation_checkpoint import load_investigation_state
 from src.orchestration.investigation_graph import InvestigationGraphBuilder
 from src.orchestration.investigation_proposal import InvestigationProposalRun
+from src.orchestration.investigation_telemetry import InvestigationTrace
 from src.orchestration.tool_gateway import (
     BindSQLApproval,
     ComposeNarrative,
@@ -505,6 +507,7 @@ class InvestigationExecutionRun:
         narrative: bool = True,
         execution_evidence: ReviewedExecutionEvidence | None = None,
         scripted_admission: ScriptedExecutionAdmission | None = None,
+        telemetry: Telemetry | None = None,
     ) -> None:
         try:
             check_execution_limits(limits)
@@ -612,7 +615,10 @@ class InvestigationExecutionRun:
         self._report_inputs: ReportInputs | None = None
         self._candidate: VerifiedReport | None = None
         self._report: VerifiedReport | None = None
-        builder = InvestigationGraphBuilder(self._gateway)
+        self._trace = InvestigationTrace(
+            telemetry, phase="execution", scope=scope, ledger=self._ledger
+        )
+        builder = InvestigationGraphBuilder(self._gateway, trace=self._trace)
         builder.add_step("intake", "intake", self._intake)
         builder.add_step("open_planning", "lifecycle", _status(InvestigationStatus.PLANNING))
         builder.add_step("seed_plan", "supervisor", self._seed_plan)
@@ -706,7 +712,7 @@ class InvestigationExecutionRun:
             if self._used:
                 raise ExecutionRunError("execution_run_used")
             self._used = True
-            return self._invoke({})
+            return self._observed_invoke({})
         finally:
             self._serial.release()
 
@@ -734,7 +740,7 @@ class InvestigationExecutionRun:
             raise ExecutionRunError(refused.code) from None
         if state == "pending" and not self._cancel_requested():
             raise ExecutionRunError("sql_approval_pending")
-        return self._invoke(Command(resume={"wave_id": wave.wave_id}))
+        return self._observed_invoke(Command(resume={"wave_id": wave.wave_id}))
 
     def _paused(self) -> bool:
         try:
@@ -742,6 +748,12 @@ class InvestigationExecutionRun:
         except Exception:
             return False
         return view.status is InvestigationStatus.AWAITING_SQL_APPROVAL and view.terminal is None
+
+    def _observed_invoke(self, payload: Any) -> ExecutionResult:
+        with self._trace.run() as observed:  # OBS-1: one ``investigation.run`` per invocation
+            result = self._invoke(payload)
+            observed.finish(result.status, result.category)
+            return result
 
     def _invoke(self, payload: Any) -> ExecutionResult:
         try:

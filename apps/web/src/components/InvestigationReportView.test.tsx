@@ -84,8 +84,13 @@ describe("loading and recovery", () => {
     expect(getInvestigationEvidence).toHaveBeenCalledTimes(1);
     expect(announce).toHaveBeenLastCalledWith("The verified report could not be loaded. Nothing is shown from it.");
     vi.mocked(getInvestigationEvidence).mockResolvedValue(evidenceFixture());
+    retry.focus();
     fireEvent.click(retry);
+    // The button is gone, and focus has not fallen back to the document.
+    const region = document.querySelector(".investigation-report-view");
+    expect(document.activeElement).toBe(region);
     await screen.findByRole("heading", { name: "Verified report" });
+    expect(document.activeElement).toBe(region);
     expect(getInvestigationEvidence).toHaveBeenCalledTimes(2);
   });
 
@@ -136,7 +141,7 @@ describe("the report and its states", () => {
   it("states verified, unsupported, incomplete, and context in text on each claim", async () => {
     await show();
     const claim = (id: string) => within(byId(id));
-    expect(claim("investigation-claim-findings-0").getByText("Verified against evidence")).toBeInTheDocument();
+    expect(claim("investigation-claim-findings-0").getByText("Traced to evidence")).toBeInTheDocument();
     expect(claim("investigation-claim-findings-1").getByText("Unsupported: evidence unavailable")).toBeInTheDocument();
     expect(claim("investigation-claim-hypotheses-0").getByText("Incomplete")).toBeInTheDocument();
     expect(claim("investigation-claim-limitations-0").getByText("Context")).toBeInTheDocument();
@@ -166,10 +171,31 @@ describe("the report and its states", () => {
     });
     expect(screen.getByText(/Status only: the run failed/)).toBeInTheDocument();
     expect(screen.getByText(/carries status codes only/)).toBeInTheDocument();
+    expect(screen.getByText("status only, no evidence reported")).toBeInTheDocument();
+    expect(screen.queryByText("verified, association only")).not.toBeInTheDocument();
     first.unmount();
     await show(evidenceFixture({ evidence_state: "unavailable", evidence: [] }));
     expect(screen.getByText(/evidence cannot be verified, so it is not shown/)).toBeInTheDocument();
     expect(screen.getAllByText("Unsupported: evidence unavailable").length).toBeGreaterThan(1);
+    expect(screen.getByText("evidence unavailable, not traceable")).toBeInTheDocument();
+    expect(screen.queryByText("verified, association only")).not.toBeInTheDocument();
+  });
+
+  it("always states that verification does not prove a query reflects the source data", async () => {
+    await show();
+    expect(screen.getByText(/can return counts that do not reflect the source data/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing checks these rows against the source data/)).toBeInTheDocument();
+  });
+
+  it("marks a verdict with conflicting evidence, in text, rather than as traced", async () => {
+    const base = evidenceFixture();
+    const [first, second] = base.report.hypotheses;
+    if (!first || !second) throw new Error("fixture changed");
+    await show({
+      ...base,
+      report: { ...base.report, hypotheses: [{ ...first, conflicting_evidence_ids: [QUERY_ID] }, second] },
+    });
+    expect(within(screen.getByRole("article", { name: "Hypothesis h1" })).getByText("Conflicting evidence")).toBeInTheDocument();
   });
 });
 
@@ -254,6 +280,29 @@ describe("export", () => {
     expect(await screen.findByText("You do not have permission to export reports.")).toBeInTheDocument();
     expect(finish).toHaveBeenCalledWith("failed");
     expect(createObjectURL).not.toHaveBeenCalled();
+    click.mockRestore();
+  });
+
+  it("keeps focus on the export button while busy, and ignores a second activation", async () => {
+    const { click } = stubDownloads();
+    let resolve!: (value: Blob) => void;
+    vi.mocked(downloadInvestigationReport).mockReturnValue(new Promise((done) => (resolve = done)));
+    await show();
+    const button = screen.getByRole("button", { name: "Export report as Markdown" });
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveAttribute("aria-disabled", "true"));
+    expect(button).not.toBeDisabled();
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Export report as JSON" }));
+    expect(downloadInvestigationReport).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolve(new Blob(["report"]));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(button).toHaveAttribute("aria-disabled", "false"));
+    expect(document.activeElement).toBe(button);
     click.mockRestore();
   });
 

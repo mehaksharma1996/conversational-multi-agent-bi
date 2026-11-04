@@ -278,7 +278,7 @@ input[type="file"]::file-selector-button { margin-right: .75rem; padding: .45rem
   cursor: pointer;
   font-weight: 750;
 }
-.button:disabled { cursor: not-allowed; opacity: .48; }
+.button:disabled, .button[aria-disabled="true"] { cursor: not-allowed; opacity: .48; }
 .button--primary { color: #07171c; background: var(--accent); }
 .button--primary:hover:not(:disabled) { background: var(--accent-strong); }
 .button--secondary { color: var(--text); border-color: var(--border-strong); background: var(--surface-raised); }
@@ -563,6 +563,9 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .approval-unconfirmed { margin: .5rem 0; padding: .6rem; border: 1px solid #8a6630; border-radius: var(--radius-md); background: var(--warning-surface); }
 
 /* UI-6c: verified report and evidence inspector. State is always stated in text, never colour alone. */
+.investigation-report-view { display: grid; gap: inherit; min-width: 0; }
+.investigation-report-view:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.report-scope-note { margin: 0; padding: .5rem .6rem; border-left: 3px solid var(--accent); }
 .investigation-report-part { display: grid; gap: .7rem; padding: .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); min-width: 0; }
 .investigation-report-part h5, .investigation-report-part h6 { margin: 0; }
 .investigation-report-part h6 { font-size: .85rem; }
@@ -583,3 +586,4 @@ input[type="range"] { width: min(100%, 520px); accent-color: var(--accent); }
 .claim-state { display: inline-block; padding: .1rem .45rem; border: 1px solid currentcolor; border-radius: var(--radius-sm); color: var(--text); font-size: .75rem; font-weight: 700; }
 .claim-state--unsupported { border-style: dashed; }
 .claim-state--incomplete { border-style: dotted; }
+.claim-state--conflicted { border-style: double; border-width: 3px; }

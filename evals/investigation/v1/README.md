@@ -19,6 +19,11 @@ benchmark. Its isolation prevents the evaluated system from receiving its own ex
 and coverage vocabulary. It is deliberately separate from `evals/baseline/v2`: INV-2 does not
 retrofit unimplemented investigation behavior into the existing scripted baseline.
 
+EVAL-1 grades the multi-step cases on scripted runs of the real investigation graph
+(`trajectory_cases.json`, `trajectory-baseline.json`). That is scripted regression evidence, not
+real-model performance. The oracle is read by the harness only after a run returns. See
+`docs/governance/evaluation.md`.
+
 Regenerate or check the assets from the repository root:
 
 ```powershell

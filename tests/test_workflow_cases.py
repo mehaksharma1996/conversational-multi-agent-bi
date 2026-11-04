@@ -67,16 +67,21 @@ def test_coverage_and_categories_match_the_agreed_matrix() -> None:
     counts = {label: list(coverage.values()).count(label) for label in COVERAGE_LABELS}
 
     assert counts == {
-        "measured": 9,
+        "measured": 12,
         "not_covered_by_script": 4,
-        "requires_agent": 2,
+        "requires_agent": 0,
         "requires_live_model": 1,
-        "unsupported": 2,
+        "unsupported": 1,
     }
-    # Exactly the nine ground-truth questions the scripted model answers correctly are measured.
+    # The nine ground-truth questions the scripted model answers correctly, and the three
+    # investigation cases graded on scripted runs of the real investigation graph.
     ground_truth = {case["id"] for case in LIVE["cases"] if case["kind"] == "ground_truth"}
-    assert {case_id for case_id, label in coverage.items() if label == "measured"} == ground_truth
-    assert coverage["investigation-october-peak-explanation"] == "unsupported"
+    investigation = {case["id"] for case in INVESTIGATIONS["cases"]}
+    assert len(investigation) == 3
+    assert {case_id for case_id, label in coverage.items() if label == "measured"} == (
+        ground_truth | investigation
+    )
+    assert {e["id"] for e in MANIFEST["cases"] if e.get("graded_by")} == investigation
     categories = {entry["category"] for entry in MANIFEST["cases"]}
     assert categories <= set(CATEGORIES)
     assert set(MANIFEST["coverage_labels"]) == set(COVERAGE_LABELS)
@@ -118,8 +123,22 @@ def _entry(manifest: dict[str, Any], case_id: str) -> dict[str, Any]:
             "a measured case must be scored in its source",
         ),
         (
-            lambda m: _entry(m, "investigation-top-region-fulfillment").update(coverage="measured"),
+            lambda m: _entry(m, "investigation-top-region-fulfillment").pop("graded_by"),
             "investigation cases cannot be measured offline",
+        ),
+        (
+            lambda m: _entry(m, "investigation-top-region-fulfillment").update(graded_by="api"),
+            "graded_by 'api' does not fit",
+        ),
+        (
+            lambda m: _entry(m, "total-revenue").update(graded_by="investigation_graph"),
+            "does not fit a 'ground_truth' case",
+        ),
+        (
+            lambda m: _entry(m, "investigation-top-region-fulfillment").update(
+                coverage="unsupported"
+            ),
+            "only a measured case has graded_by",
         ),
         (lambda m: _entry(m, "total-revenue").update(rationale=" "), "rationale is required"),
         (

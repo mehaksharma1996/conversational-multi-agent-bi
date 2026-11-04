@@ -41,6 +41,7 @@ cloud-neutral; it adds no container, hosting, or vendor integration (Docker is t
 | `apps/api/repository.py` | Lifecycle listener (created/expired/deleted) and `purge_expired()`. |
 | `scripts/run_evaluations.py`, `scripts/api_isolation_eval.py` | CLI/CI entry points; the latter drives the HTTP app, which `packages/` may not import. |
 | `evals/v1/` | Versioned manifest, datasets, corpora, cases, thresholds, and the committed baseline. |
+| `src/orchestration/investigation_telemetry.py`, `tests/e2e/investigation_trace_runner.py` | Content-free investigation spans and metrics, and their [offline capture command](../operations/investigation-tracing.md). |
 
 ## Key decisions
 

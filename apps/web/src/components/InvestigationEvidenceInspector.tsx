@@ -117,14 +117,15 @@ function QuerySql({ item }: { item: Item<"query"> }) {
       <div>
         <strong>Executed SQL</strong>
         <pre tabIndex={0} aria-label={`Executed SQL for task ${item.task_id}`}>{item.sql}</pre>
+        <p className="field-hint">Nothing checks these rows against the source data independently. Read the statement before relying on a result that rests on it.</p>
       </div>
     );
   }
   return (
     <p className="field-hint">
       {item.sql_state === "restricted"
-        ? "The SQL text needs permission to run analyses. The rows below are what the report shows."
-        : "The executed SQL was not recorded for this evidence."}
+        ? "The SQL text needs permission to run analyses. The rows below are what the report shows, and you cannot review here how they were produced."
+        : "The executed SQL was not recorded for this evidence, so how these rows were produced cannot be reviewed."}
     </p>
   );
 }

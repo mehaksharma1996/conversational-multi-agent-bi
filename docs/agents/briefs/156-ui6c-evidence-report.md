@@ -83,6 +83,18 @@ executed SQL is now retained in the encrypted workspace store.
 - **E9. Evidence is read once per investigation**, on reaching a reportable terminal status, keeps
   SQL in component memory only, and is dropped on scope change. Errors offer an explicit retry.
 
+- **E10. "Verified" states its limit (final review, 2026-11-04).** The verifier recomputes numbers
+  from the rows a query returned; it cannot tell whether those rows reflect the source data. A
+  read-only statement with invented counts passes every deterministic control, and once approved a
+  refuted hypothesis reads as supported (SEC-1's RT-ROW-05 residual). This is an engine boundary, so
+  UI-6c does not change it. It only stops overstating it: the report view and both exports always
+  state what verification covers, and the claim chip reads "Traced to evidence". Until the engine
+  gains a control, no release may claim that a verified report proves its numbers are correct.
+- **E11. Claim states fail towards doubt (final review).** A claim naming a fact or hypothesis the
+  report does not hold is `unsupported` whatever else it cites. Recorded conflict is `conflicted`, an
+  open follow-up is `incomplete`, and a report with no evidence behind it does not show its
+  "verified" label; its export states the evidence state.
+
 ## Delivery record
 The scripted stack does reach a full report: `build_scripted_report_app` runs the INV-7 churn
 plan on the real sample data with scripted model answers, through the real gateway, verifier, and

@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from threading import Lock
 
 from packages.observability.errors import ERROR_CATEGORIES
-from packages.observability.telemetry import TelemetryEvent, TelemetrySink
+from packages.observability.telemetry import ScopedTelemetrySink, TelemetryEvent, TelemetrySink
 
 OVERFLOW = "other"
 DURATION_BUCKETS_MS: tuple[float, ...] = (10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000)
@@ -27,6 +27,61 @@ _OUTCOMES = {"success", "failure"}
 _ROUTES = {"memory", "sql", "rag", "hybrid", "unsupported"}
 _JOB_STATUSES = {"queued", "running", "succeeded", "failed", "cancelled", "expired"}
 _ERROR_CATEGORIES = set(ERROR_CATEGORIES)
+# OBS-1 (#146): closed sets, so no investigation metric label can hold an identifier. This package
+# does not import the investigation contracts; a test keeps these equal to them.
+_INVESTIGATION_PHASES = {"planning", "execution"}
+INVESTIGATION_STATUSES = frozenset(
+    {
+        "planning",
+        "awaiting_plan_approval",
+        "queued",
+        "running",
+        "awaiting_sql_approval",
+        "completed",
+        "completed_partial",
+        "budget_exhausted",
+        "plan_invalid",
+        "plan_rejected",
+        "cancelled",
+        "failed",
+        "interrupted",
+        "expired",
+    }
+)
+INVESTIGATION_AGENTS = frozenset(
+    {
+        "supervisor",
+        "sql_analyst",
+        "document_research",
+        "business_investigator",
+        "critic",
+        "report_composer",
+        "report_verifier",
+    }
+)
+INVESTIGATION_TASK_KINDS = frozenset({"sql_analysis", "document_research", "hypothesis_test"})
+INVESTIGATION_TASK_STATUSES = frozenset({"succeeded", "failed", "skipped", "refused", "cancelled"})
+INVESTIGATION_COST_BOUNDS = frozenset({"enforced_upper_bound", "indicative", "unavailable"})
+# Per invocation, never a root's ``ledger_*`` totals: a resumed run would count them twice.
+_LEDGER_RESOURCES = {
+    "ledger_invocation_model_calls": "model_calls",
+    "ledger_invocation_input_tokens": "input_tokens",
+    "ledger_invocation_output_tokens": "output_tokens",
+    "ledger_invocation_sql_executions": "sql_executions",
+    "ledger_invocation_retrievals": "retrievals",
+    "ledger_invocation_task_attempts": "task_attempts",
+    "ledger_invocation_replan_rounds": "replan_rounds",
+    "ledger_invocation_critic_rounds": "critic_rounds",
+}
+
+
+def _closed(value: object, allowed: Collection[str]) -> str:
+    return value if isinstance(value, str) and value in allowed else OVERFLOW
+
+
+def _positive_count(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
 
 Labels = tuple[tuple[str, str], ...]
 GaugeSampler = Callable[[], Mapping[Labels, float]]
@@ -54,6 +109,28 @@ class FanOutTelemetrySink:
         for sink in self._sinks:
             try:
                 sink.emit(event)
+            except Exception:  # a metrics or log failure must not break the request path
+                continue
+
+    def open_scope(self, name: str, request_id: str | None) -> dict[int, object]:
+        """Open the scope on every scoped sink; the others receive the event when it closes."""
+        handles: dict[int, object] = {}
+        for index, sink in enumerate(self._sinks):
+            if isinstance(sink, ScopedTelemetrySink):
+                try:
+                    handles[index] = sink.open_scope(name, request_id)
+                except Exception:  # that sink just receives the closing event instead
+                    continue
+        return handles
+
+    def close_scope(self, scope: object, event: TelemetryEvent) -> None:
+        handles: Mapping[int, object] = scope if isinstance(scope, dict) else {}
+        for index, sink in enumerate(self._sinks):
+            try:
+                if index in handles and isinstance(sink, ScopedTelemetrySink):
+                    sink.close_scope(handles[index], event)
+                else:
+                    sink.emit(event)
             except Exception:  # a metrics or log failure must not break the request path
                 continue
 
@@ -216,6 +293,116 @@ class MetricsRegistry:
                 (),
                 float(rejected),
             )
+        self._investigation(event)
+
+    def _investigation(self, event: TelemetryEvent) -> None:
+        """OBS-1 (#146): closed labels only, never a tenant, investigation, or task identifier."""
+        attributes = event.attributes
+        if event.name == "investigation_record.terminal":
+            self._count(
+                "bi_investigation_ended_total",
+                "Investigations whose record reached a terminal status, once each, whichever path "
+                "ended them, including a cancellation while idle, a rejection, an expiry, or a "
+                "restart.",
+                (
+                    (
+                        "status",
+                        _closed(attributes.get("investigation_status"), INVESTIGATION_STATUSES),
+                    ),
+                ),
+            )
+        if event.name == "investigation.run":
+            phase = _closed(attributes.get("investigation_phase"), _INVESTIGATION_PHASES)
+            status = _closed(attributes.get("investigation_status"), INVESTIGATION_STATUSES)
+            self._count(
+                "bi_investigation_runs_total",
+                "Investigation graph invocations by phase and resulting status.",
+                (("phase", phase), ("status", status)),
+            )
+            if attributes.get("investigation_terminal") is True:
+                self._count(
+                    "bi_investigation_terminal_total",
+                    "Graph invocations that ended the run, by phase and terminal status. An "
+                    "end with no invocation is only in bi_investigation_ended_total.",
+                    (("phase", phase), ("status", status)),
+                )
+            for name, resource in _LEDGER_RESOURCES.items():
+                amount = _positive_count(attributes.get(name))
+                if amount:
+                    self._count(
+                        "bi_investigation_ledger_charged_total",
+                        "Usage the budget ledger charged, an upper-bound estimate where a provider "
+                        "reported no usage. Never a provider bill.",
+                        (("phase", phase), ("resource", resource)),
+                        float(amount),
+                    )
+            cost = _positive_count(attributes.get("investigation_estimated_cost_microusd"))
+            if cost:
+                bound = _closed(
+                    attributes.get("investigation_estimated_cost_bound"), INVESTIGATION_COST_BOUNDS
+                )
+                self._count(
+                    "bi_investigation_estimated_cost_microusd_total",
+                    "ESTIMATE, not spend: the ledger's cost of exhausting its token limits at the "
+                    "configured prices, in micro-USD.",
+                    (("phase", phase), ("bound", bound)),
+                    float(cost),
+                )
+        if event.name == "investigation.agent":
+            agent = _closed(attributes.get("investigation_agent"), INVESTIGATION_AGENTS)
+            outcome = _closed(attributes.get("outcome"), {"success", "failure", "paused"})
+            self._count(
+                "bi_investigation_agent_steps_total",
+                "Investigation steps taken by each agent, by outcome.",
+                (("agent", agent), ("outcome", outcome)),
+            )
+            for name, kind in (
+                ("ledger_input_tokens", "input"),
+                ("ledger_output_tokens", "output"),
+            ):
+                amount = _positive_count(attributes.get(name))
+                if amount:
+                    self._count(
+                        "bi_investigation_agent_charged_tokens_total",
+                        "Tokens the budget ledger charged to each agent's steps, an upper-bound "
+                        "estimate where a provider reported no usage. Never a provider bill.",
+                        (("agent", agent), ("kind", kind)),
+                        float(amount),
+                    )
+            duration = attributes.get("duration_ms")
+            if isinstance(duration, float):
+                self._observe(
+                    "bi_investigation_agent_duration_ms",
+                    "Duration of each agent's investigation steps in milliseconds.",
+                    (("agent", agent),),
+                    duration,
+                )
+        if event.name == "investigation.task":
+            kind_label = _closed(
+                attributes.get("investigation_task_kind"), INVESTIGATION_TASK_KINDS
+            )
+            self._count(
+                "bi_investigation_tasks_total",
+                "Investigation tasks that ended, by kind and status.",
+                (
+                    ("kind", kind_label),
+                    (
+                        "status",
+                        _closed(
+                            attributes.get("investigation_task_status"),
+                            INVESTIGATION_TASK_STATUSES,
+                        ),
+                    ),
+                ),
+            )
+            duration = attributes.get("duration_ms")
+            if isinstance(duration, float):
+                self._observe(
+                    "bi_investigation_task_duration_ms",
+                    "Active duration of investigation tasks in milliseconds; excludes waiting.",
+                    (("kind", kind_label),),
+                    duration,
+                )
 
     # --- internals ---------------------------------------------------------------------------
 
