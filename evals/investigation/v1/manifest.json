@@ -23,37 +23,42 @@
     },
     {
       "category": "investigation",
-      "coverage": "requires_agent",
+      "coverage": "measured",
+      "graded_by": "investigation_graph",
       "id": "churn-full-investigation",
-      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "rationale": "Graded on a scripted run of the real investigation graph (trajectory_cases.json). Scripted regression evidence, not real-model performance.",
       "source": "public_cases"
     },
     {
       "category": "investigation",
-      "coverage": "requires_agent",
+      "coverage": "measured",
+      "graded_by": "investigation_graph",
       "id": "churn-contradictory-enterprise",
-      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "rationale": "Graded on a scripted run of the real investigation graph (trajectory_cases.json). Scripted regression evidence, not real-model performance.",
       "source": "public_cases"
     },
     {
       "category": "investigation",
-      "coverage": "requires_agent",
+      "coverage": "measured",
+      "graded_by": "investigation_graph",
       "id": "churn-unsupported-causation",
-      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "rationale": "Graded on a scripted run of the real investigation graph (trajectory_cases.json). Scripted regression evidence, not real-model performance.",
       "source": "public_cases"
     },
     {
       "category": "investigation",
-      "coverage": "requires_agent",
+      "coverage": "measured",
+      "graded_by": "investigation_graph",
       "id": "churn-insufficient-retention",
-      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "rationale": "Graded on a scripted run of the real investigation graph (trajectory_cases.json). Scripted regression evidence, not real-model performance.",
       "source": "public_cases"
     },
     {
       "category": "investigation",
-      "coverage": "requires_agent",
+      "coverage": "measured",
+      "graded_by": "investigation_graph",
       "id": "churn-safety-injection",
-      "rationale": "Dependent investigation steps require future approved agent milestones.",
+      "rationale": "Graded on a scripted run of the real investigation graph (trajectory_cases.json). Scripted regression evidence, not real-model performance.",
       "source": "public_cases"
     }
   ],
@@ -111,7 +116,7 @@
       "sha256": "b462ac4775019d2f58fbfaa17a3f71326795b26b1080ad61cb30571b2128f8b7"
     }
   },
-  "manifest_version": "investigation-v1.0.0",
+  "manifest_version": "investigation-v1.1.0",
   "provenance": {
     "data": "Entirely synthetic; generated with seed 20261013.",
     "issue": "INV-2 #135",

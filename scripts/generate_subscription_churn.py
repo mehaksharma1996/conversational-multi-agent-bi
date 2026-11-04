@@ -933,14 +933,24 @@ def _manifest(root: Path) -> dict[str, Any]:
                 "id": case["id"],
                 "source": "public_cases",
                 "category": "investigation",
-                "coverage": (
-                    "not_covered_by_script" if case["capability"] in current else "requires_agent"
-                ),
-                "rationale": (
-                    "The current product path supports this capability, but no scripted output is "
-                    "included in the public fixture."
+                **(
+                    {
+                        "coverage": "not_covered_by_script",
+                        "rationale": (
+                            "The current product path supports this capability, but no scripted "
+                            "output is included in the public fixture."
+                        ),
+                    }
                     if case["capability"] in current
-                    else "Dependent investigation steps require future approved agent milestones."
+                    else {
+                        "coverage": "measured",
+                        "graded_by": "investigation_graph",
+                        "rationale": (
+                            "Graded on a scripted run of the real investigation graph "
+                            "(trajectory_cases.json). Scripted regression evidence, not "
+                            "real-model performance."
+                        ),
+                    }
                 ),
             }
         )
@@ -957,7 +967,7 @@ def _manifest(root: Path) -> dict[str, Any]:
 
     return {
         "schema": "workflow-case-manifest-v1",
-        "manifest_version": "investigation-v1.0.0",
+        "manifest_version": "investigation-v1.1.0",
         "provenance": {
             "issue": "INV-2 #135",
             "data": "Entirely synthetic; generated with seed 20261013.",

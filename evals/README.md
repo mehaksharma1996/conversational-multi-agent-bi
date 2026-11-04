@@ -21,7 +21,9 @@ Methodology, gates, and the review process are in
     `unsupported`), plus pinned hashes of the retail CSV, policy PDF, ground truth, and both case
     files. Validated by `packages/evaluation/workflow_cases.py` and `tests/test_workflow_cases.py`.
   - `investigation_cases.json`: three multi-step investigation questions with oracle reference
-    queries checked against the committed CSV and ground truth. None is scored offline.
+    queries checked against the committed CSV and ground truth. They are `measured` with
+    `graded_by: investigation_graph`: graded on scripted runs of the real investigation graph, not
+    on the single-query workflow run.
   - Changing a pinned file, a case id, or a coverage label is a reviewed change: update the
     manifest hash or entry in the same pull request and say why.
   - `workflow-baseline.json`: the deterministic scripted-run baseline (E1b-2): per-case outcomes,
@@ -31,11 +33,17 @@ Methodology, gates, and the review process are in
     `python -m tests.e2e.workflow_baseline_runner --update --justification "..."`, which refuses
     safety failures and any regression, deletion, or demotion of a previously measured case.
 - `investigation/v1/` is the INV-2 churn fixture package. It reuses the workflow manifest schema,
-  hash conventions, and coverage labels but is intentionally not part of the v2 scripted baseline:
+  hash conventions, and coverage labels but is intentionally not part of the v2 scripted baseline.
+  Its grades are in its own baseline:
   - `public_cases.json` contains eight answer-free questions and capability requirements.
   - `oracle.json` and `reference.sql` are evaluator-only and must never be model inputs.
   - `manifest.json` pins the CSV, four PDFs, oracle, SQL, and public cases. Current single-route
-    cases are `not_covered_by_script`; multi-step cases are `requires_agent`.
+    cases are `not_covered_by_script`; multi-step cases are `measured` with
+    `graded_by: investigation_graph`.
+  - `trajectory_cases.json` and `trajectory-baseline.json` are the EVAL-1 suite: expected versus
+    actual trajectories of scripted runs of the real investigation graph, covering happy and failure
+    paths, approval, cancellation, recovery, critique, citations, budgets, and security. Scripted
+    regression evidence, not real-model performance.
   - Tenure standardization is descriptive: Q1 SMB Basic tenure weights are applied to Q2
     within-tenure rates. The standardized change is not a causal attribution, and the fixture does
     not force a tenure-confounding narrative when the lifecycle-derived composition effect is small.
@@ -59,4 +67,5 @@ Methodology, gates, and the review process are in
 & ".\.venv\Scripts\python.exe" -m scripts.run_evaluations
 & ".\.venv\Scripts\python.exe" -m scripts.run_evaluations --output evals/results/latest.json
 & ".\.venv\Scripts\python.exe" -m scripts.run_evaluations --update-baseline
+python -m tests.e2e.investigation_trajectory_runner   # results and summary in evals/results/
 ```

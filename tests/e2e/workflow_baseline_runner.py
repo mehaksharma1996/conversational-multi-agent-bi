@@ -220,8 +220,14 @@ def run_baseline(
         fixture_hashes,
         snapshot_datasets,
     )
-    from packages.evaluation.workflow_cases import fixture_sha256, load_json, validate_manifest
+    from packages.evaluation.workflow_cases import (
+        GRAPH_GRADED,
+        fixture_sha256,
+        load_json,
+        validate_manifest,
+    )
     from scripts.live_demo_runner import RunInputs, run_live_demo_eval
+    from tests.e2e.investigation_trajectory_runner import graph_grades as run_graph_grades
     from tests.e2e.retail_app import MODEL, PROVIDER, ScriptedRetailEmbedder, ScriptedRetailLLM
 
     manifest = load_json(MANIFEST_PATH)
@@ -294,6 +300,14 @@ def run_baseline(
         )
         network_attempts = list(network)
     dataset_after = snapshot_datasets(_dataset_paths(data_dir))
+    # Multi-step cases are graded on scripted runs of the real investigation graph, in their own
+    # data. Their invariants are part of the grade: a failed invariant fails the case.
+    graph_cases = [
+        entry["id"]
+        for entry in manifest["cases"]
+        if entry.get("graded_by") == GRAPH_GRADED and (case_ids is None or entry["id"] in case_ids)
+    ]
+    graph_grades = run_graph_grades(workdir / "graph", graph_cases) if graph_cases else {}
     fixtures_after = fixture_hashes(manifest, repo_root)
 
     exchanges = list(recorder.exchanges)
@@ -319,6 +333,7 @@ def run_baseline(
             {f for case in combined["cases"] for f in case.get("forbidden_fragments", [])}
         ),
         messages=messages,
+        graph_grades=graph_grades,
     )
     if tamper is not None:
         tamper(evidence)

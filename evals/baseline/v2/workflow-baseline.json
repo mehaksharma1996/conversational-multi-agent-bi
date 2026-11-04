@@ -417,8 +417,18 @@
     {
       "attempted": true,
       "category": "investigation",
-      "coverage": "requires_agent",
-      "dimensions": {},
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
       "id": "investigation-top-region-fulfillment",
       "observations": {
         "causal_marker_count": null,
@@ -435,14 +445,24 @@
         "structured_output_failures": 0,
         "structured_output_repairs": 0
       },
-      "outcome": "not_measured",
+      "outcome": "passed",
       "source": "investigation_cases"
     },
     {
       "attempted": true,
       "category": "investigation",
-      "coverage": "requires_agent",
-      "dimensions": {},
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
       "id": "investigation-review-category-rate",
       "observations": {
         "causal_marker_count": null,
@@ -459,14 +479,25 @@
         "structured_output_failures": 0,
         "structured_output_repairs": 0
       },
-      "outcome": "not_measured",
+      "outcome": "passed",
       "source": "investigation_cases"
     },
     {
       "attempted": true,
       "category": "investigation",
-      "coverage": "unsupported",
-      "dimensions": {},
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
       "id": "investigation-october-peak-explanation",
       "observations": {
         "causal_marker_count": 0,
@@ -483,7 +514,7 @@
         "structured_output_failures": 0,
         "structured_output_repairs": 0
       },
-      "outcome": "not_measured",
+      "outcome": "passed",
       "source": "investigation_cases"
     }
   ],
@@ -541,12 +572,15 @@
       "investigation": {
         "cases": 3,
         "failed": 0,
-        "measured": 0,
+        "measured": 3,
         "not_attempted": 0,
-        "not_measured": 3,
-        "pass_rate": null,
-        "passed": 0,
-        "wilson_95": null
+        "not_measured": 0,
+        "pass_rate": 1.0,
+        "passed": 3,
+        "wilson_95": [
+          0.438503,
+          1.0
+        ]
       },
       "rag": {
         "cases": 1,
@@ -586,11 +620,11 @@
       }
     },
     "by_coverage": {
-      "measured": 9,
+      "measured": 12,
       "not_covered_by_script": 4,
-      "requires_agent": 2,
+      "requires_agent": 0,
       "requires_live_model": 1,
-      "unsupported": 2
+      "unsupported": 1
     },
     "cases": 18,
     "dimensions": {
@@ -598,7 +632,23 @@
         "applicable": 8,
         "passed": 8
       },
+      "budget_compliance": {
+        "applicable": 3,
+        "passed": 3
+      },
+      "citation_quality": {
+        "applicable": 2,
+        "passed": 2
+      },
       "citation_structure": {
+        "applicable": 3,
+        "passed": 3
+      },
+      "critic_recall": {
+        "applicable": 1,
+        "passed": 1
+      },
+      "failure_recovery": {
         "applicable": 3,
         "passed": 3
       },
@@ -606,9 +656,21 @@
         "applicable": 1,
         "passed": 1
       },
+      "hypothesis_grounding": {
+        "applicable": 1,
+        "passed": 1
+      },
+      "planning_delegation": {
+        "applicable": 3,
+        "passed": 3
+      },
       "policy_sql_consistency": {
         "applicable": 2,
         "passed": 2
+      },
+      "report_verification": {
+        "applicable": 3,
+        "passed": 3
       },
       "retrieval_relevance": {
         "applicable": 3,
@@ -618,9 +680,21 @@
         "applicable": 9,
         "passed": 9
       },
+      "routing_gate": {
+        "applicable": 3,
+        "passed": 3
+      },
+      "security_approval": {
+        "applicable": 3,
+        "passed": 3
+      },
       "sql_execution": {
         "applicable": 8,
         "passed": 8
+      },
+      "sql_result_equivalence": {
+        "applicable": 3,
+        "passed": 3
       },
       "sql_result_equivalent": {
         "applicable": 8,
@@ -641,23 +715,27 @@
       "task_completion": {
         "applicable": 9,
         "passed": 9
+      },
+      "unnecessary_calls": {
+        "applicable": 3,
+        "passed": 3
       }
     },
     "failed": 0,
-    "measured": 9,
-    "measured_attempted": 9,
+    "measured": 12,
+    "measured_attempted": 12,
     "not_attempted": 0,
-    "not_measured": 9,
+    "not_measured": 6,
     "overall": {
-      "measured": 9,
+      "measured": 12,
       "pass_rate": 1.0,
-      "passed": 9,
+      "passed": 12,
       "wilson_95": [
-        0.700855,
+        0.757506,
         1.0
       ]
     },
-    "passed": 9
+    "passed": 12
   },
   "provenance": {
     "cases_version": "live-demo-v1.1+investigation-v1",
@@ -681,8 +759,8 @@
     },
     "live_report_schema": "live-demo-eval-v2",
     "manifest_schema": "workflow-case-manifest-v1",
-    "manifest_sha256": "f977bce669abdd696407b365ed8819d54e76f3a54492c3506477054c9bddb435",
-    "manifest_version": "2026-10-14.1",
+    "manifest_sha256": "6ca84c65dd856cb8df96fa0fe8ca2c920583e31a427c9e54145d864ee337fb35",
+    "manifest_version": "2026-11-02.1",
     "mode": "scripted-baseline",
     "model": "scripted-retail-demo-v1",
     "prompt_registry_sha256": "a44fce458d04c65af0693205b4d997bb025e3b09f55b6979822c82b03703b1ad",
@@ -691,7 +769,7 @@
       "investigation_cases": {
         "hash": "sha256-lf",
         "path": "evals/baseline/v2/investigation_cases.json",
-        "sha256": "10a53d019d64c597ef127584421af3095b8b6f1f5f435fb7526ff29eb95d2be9"
+        "sha256": "5b6e7ace513ae7bcbfe9b0c03a481936e30235b5dd72e2955b30a9fc4e5698ca"
       },
       "live_cases": {
         "hash": "sha256-lf",
@@ -702,9 +780,85 @@
   },
   "review": {
     "accepted_changes": [
-      "provenance.prompt_registry_sha256: \"fa1d9f8acb6c643a2c90972b44355cdc2156f64585da914b5929b9ac3eb309bd\" -> \"a44fce458d04c65af0693205b4d997bb025e3b09f55b6979822c82b03703b1ad\""
+      "provenance.manifest_sha256: \"f977bce669abdd696407b365ed8819d54e76f3a54492c3506477054c9bddb435\" -> \"6ca84c65dd856cb8df96fa0fe8ca2c920583e31a427c9e54145d864ee337fb35\"",
+      "provenance.manifest_version: \"2026-10-14.1\" -> \"2026-11-02.1\"",
+      "provenance.sources.investigation_cases.sha256: \"10a53d019d64c597ef127584421af3095b8b6f1f5f435fb7526ff29eb95d2be9\" -> \"5b6e7ace513ae7bcbfe9b0c03a481936e30235b5dd72e2955b30a9fc4e5698ca\"",
+      "metrics.by_category.investigation.measured: 0 -> 3",
+      "metrics.by_category.investigation.not_measured: 3 -> 0",
+      "metrics.by_category.investigation.pass_rate: null -> 1.0",
+      "metrics.by_category.investigation.passed: 0 -> 3",
+      "metrics.by_category.investigation.wilson_95: null -> [0.438503, 1.0]",
+      "metrics.by_coverage.measured: 9 -> 12",
+      "metrics.by_coverage.requires_agent: 2 -> 0",
+      "metrics.by_coverage.unsupported: 2 -> 1",
+      "metrics.dimensions.budget_compliance.applicable: null -> 3",
+      "metrics.dimensions.budget_compliance.passed: null -> 3",
+      "metrics.dimensions.citation_quality.applicable: null -> 2",
+      "metrics.dimensions.citation_quality.passed: null -> 2",
+      "metrics.dimensions.critic_recall.applicable: null -> 1",
+      "metrics.dimensions.critic_recall.passed: null -> 1",
+      "metrics.dimensions.failure_recovery.applicable: null -> 3",
+      "metrics.dimensions.failure_recovery.passed: null -> 3",
+      "metrics.dimensions.hypothesis_grounding.applicable: null -> 1",
+      "metrics.dimensions.hypothesis_grounding.passed: null -> 1",
+      "metrics.dimensions.planning_delegation.applicable: null -> 3",
+      "metrics.dimensions.planning_delegation.passed: null -> 3",
+      "metrics.dimensions.report_verification.applicable: null -> 3",
+      "metrics.dimensions.report_verification.passed: null -> 3",
+      "metrics.dimensions.routing_gate.applicable: null -> 3",
+      "metrics.dimensions.routing_gate.passed: null -> 3",
+      "metrics.dimensions.security_approval.applicable: null -> 3",
+      "metrics.dimensions.security_approval.passed: null -> 3",
+      "metrics.dimensions.sql_result_equivalence.applicable: null -> 3",
+      "metrics.dimensions.sql_result_equivalence.passed: null -> 3",
+      "metrics.dimensions.unnecessary_calls.applicable: null -> 3",
+      "metrics.dimensions.unnecessary_calls.passed: null -> 3",
+      "metrics.measured: 9 -> 12",
+      "metrics.measured_attempted: 9 -> 12",
+      "metrics.not_measured: 9 -> 6",
+      "metrics.overall.measured: 9 -> 12",
+      "metrics.overall.passed: 9 -> 12",
+      "metrics.overall.wilson_95: [0.700855, 1.0] -> [0.757506, 1.0]",
+      "metrics.passed: 9 -> 12",
+      "cases.investigation-october-peak-explanation.coverage: \"unsupported\" -> \"measured\"",
+      "cases.investigation-october-peak-explanation.dimensions: {} -> null",
+      "cases.investigation-october-peak-explanation.dimensions.budget_compliance: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.critic_recall: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.failure_recovery: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.hypothesis_grounding: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.planning_delegation: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.report_verification: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.routing_gate: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.security_approval: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.sql_result_equivalence: null -> true",
+      "cases.investigation-october-peak-explanation.dimensions.unnecessary_calls: null -> true",
+      "cases.investigation-october-peak-explanation.outcome: \"not_measured\" -> \"passed\"",
+      "cases.investigation-review-category-rate.coverage: \"requires_agent\" -> \"measured\"",
+      "cases.investigation-review-category-rate.dimensions: {} -> null",
+      "cases.investigation-review-category-rate.dimensions.budget_compliance: null -> true",
+      "cases.investigation-review-category-rate.dimensions.citation_quality: null -> true",
+      "cases.investigation-review-category-rate.dimensions.failure_recovery: null -> true",
+      "cases.investigation-review-category-rate.dimensions.planning_delegation: null -> true",
+      "cases.investigation-review-category-rate.dimensions.report_verification: null -> true",
+      "cases.investigation-review-category-rate.dimensions.routing_gate: null -> true",
+      "cases.investigation-review-category-rate.dimensions.security_approval: null -> true",
+      "cases.investigation-review-category-rate.dimensions.sql_result_equivalence: null -> true",
+      "cases.investigation-review-category-rate.dimensions.unnecessary_calls: null -> true",
+      "cases.investigation-review-category-rate.outcome: \"not_measured\" -> \"passed\"",
+      "cases.investigation-top-region-fulfillment.coverage: \"requires_agent\" -> \"measured\"",
+      "cases.investigation-top-region-fulfillment.dimensions: {} -> null",
+      "cases.investigation-top-region-fulfillment.dimensions.budget_compliance: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.citation_quality: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.failure_recovery: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.planning_delegation: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.report_verification: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.routing_gate: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.security_approval: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.sql_result_equivalence: null -> true",
+      "cases.investigation-top-region-fulfillment.dimensions.unnecessary_calls: null -> true",
+      "cases.investigation-top-region-fulfillment.outcome: \"not_measured\" -> \"passed\""
     ],
-    "justification": "INV-8 (#141) decision V10: the prompt registry gains whole-module entries for the INV-7 review prompts and the INV-8 narrative prompt, so its file digest (provenance only) changes. No case, coverage, outcome, dimension, metric, or safety result changes; no baseline case exercises these prompts because investigation routing is off (#142)."
+    "justification": "EVAL-1 (#145): three investigation cases become measured, graded on scripted runs of the real investigation graph. No previously measured case changes."
   },
   "safety": {
     "dataset_unchanged": {

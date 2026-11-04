@@ -11,6 +11,7 @@ import ast
 import copy
 import inspect
 import json
+import re
 import sqlite3
 from collections.abc import Sequence
 from contextlib import closing
@@ -31,6 +32,7 @@ from packages.evaluation.workflow_baseline import (
     ModelEvidence,
     RunEvidence,
     TracedStatement,
+    _case_entry,
     build_baseline,
     combine_case_documents,
     compare_baselines,
@@ -44,7 +46,7 @@ from packages.evaluation.workflow_baseline import (
     wilson_interval,
     with_review,
 )
-from packages.evaluation.workflow_cases import load_json
+from packages.evaluation.workflow_cases import GRAPH_GRADED, TRAJECTORY_DIMENSIONS, load_json
 from tests.e2e import workflow_baseline_runner as runner
 from tests.e2e.retail_app import MODEL, PROVIDER, ScriptedRetailLLM
 from tests.test_utils import isolated_directory_path
@@ -82,13 +84,13 @@ def test_a_fresh_scripted_run_matches_the_committed_baseline(scripted_run: dict[
 def test_the_full_run_covers_all_eighteen_cases_honestly(scripted_run: dict[str, Any]) -> None:
     metrics = scripted_run["metrics"]
     assert metrics["cases"] == len(MANIFEST["cases"]) == 18
-    assert (metrics["measured"], metrics["passed"], metrics["failed"]) == (9, 9, 0)
-    assert (metrics["not_attempted"], metrics["not_measured"], metrics["attempted"]) == (0, 9, 18)
+    assert (metrics["measured"], metrics["passed"], metrics["failed"]) == (12, 12, 0)
+    assert (metrics["not_attempted"], metrics["not_measured"], metrics["attempted"]) == (0, 6, 18)
     for case in scripted_run["cases"]:
         if case["coverage"] != "measured":
             assert case["outcome"] == "not_measured"
             assert case["dimensions"] == {}
-    assert metrics["overall"]["wilson_95"] == [0.700855, 1.0]
+    assert metrics["overall"]["wilson_95"] == [0.757506, 1.0]
 
 
 def test_the_baseline_is_labelled_scripted_regression_evidence(
@@ -115,15 +117,51 @@ def test_the_baseline_holds_no_unstable_or_sensitive_values(scripted_run: dict[s
         assert f'"{key}"' not in text
 
 
-def test_investigation_cases_are_run_and_observed_but_not_scored(
+def test_investigation_cases_are_graded_on_the_graph_and_only_observed_on_the_api(
     scripted_run: dict[str, Any],
 ) -> None:
     investigations = [c for c in scripted_run["cases"] if c["category"] == "investigation"]
     assert len(investigations) == 3
     for case in investigations:
-        assert case["attempted"] is True
-        assert case["outcome"] == "not_measured"
+        assert (case["attempted"], case["coverage"], case["outcome"]) == (
+            True,
+            "measured",
+            "passed",
+        )
+        # Graph dimensions only: the single-query API run cannot pass or fail a multi-step case.
+        assert case["dimensions"] and set(case["dimensions"]) <= set(TRAJECTORY_DIMENSIONS)
         assert {"expected_cells_contained", "causal_marker_count"} <= set(case["observations"])
+
+
+def test_a_graph_graded_case_with_no_grade_is_not_attempted_and_not_passed() -> None:
+    entry = {
+        "id": "x",
+        "source": "s",
+        "category": "investigation",
+        "coverage": "measured",
+        "graded_by": GRAPH_GRADED,
+    }
+    record = {"id": "x", "passed": True, "checks": {"routing": True}}  # the API run passing
+    built = _case_entry(entry, {"kind": "investigation"}, record, {}, {})
+    assert (built["outcome"], built["attempted"], built["dimensions"]) == (
+        "not_attempted",
+        False,
+        {},
+    )
+    grade = {"passed": False, "dimensions": {"routing_gate": True, "critic_recall": False}}
+    built = _case_entry(entry, {"kind": "investigation"}, record, {}, {}, grade)
+    assert built["outcome"] == "failed"
+    assert built["dimensions"] == {"routing_gate": True, "critic_recall": False}
+    # A grade with no known dimension cannot pass: it fails closed.
+    empty = _case_entry(
+        entry,
+        {"kind": "investigation"},
+        record,
+        {},
+        {},
+        {"passed": True, "dimensions": {"x": True}},
+    )
+    assert empty["outcome"] == "failed"
 
 
 def test_every_sql_answer_was_seen_by_the_trace(scripted_run: dict[str, Any]) -> None:
@@ -562,8 +600,8 @@ def test_a_run_whose_trace_is_lost_fails_closed_end_to_end() -> None:
     )
     assert baseline["safety"]["read_only_sql"] == {"status": "fail", "reason": "missing_evidence"}
     # The partial run reports the other measured cases as not attempted, in the denominator.
-    assert baseline["metrics"]["overall"]["measured"] == 9
-    assert baseline["metrics"]["not_attempted"] == 8
+    assert baseline["metrics"]["overall"]["measured"] == 12
+    assert baseline["metrics"]["not_attempted"] == 11
     assert baseline["metrics"]["passed"] == 1
     decision = decide_update(None, baseline, "a long enough justification for this")
     assert not decision.allowed
@@ -730,8 +768,8 @@ def _refused_as_regression(committed: dict[str, Any], current: dict[str, Any]) -
         assert any("no update can accept them" in reason for reason in decision.reasons)
 
 
-def test_the_committed_baseline_has_nine_measured_cases() -> None:
-    assert len(MEASURED_IDS) == 9
+def test_the_committed_baseline_keeps_every_measured_case() -> None:
+    assert len(MEASURED_IDS) == 12  # nine by the API run, three on the investigation graph
 
 
 @pytest.mark.parametrize("previously_failing", [False, True])
@@ -767,7 +805,7 @@ def test_removing_or_demoting_an_unmeasured_case_is_not_a_regression(
 ) -> None:
     current = _current(committed)
     current["cases"] = [c for c in current["cases"] if c["id"] != "exploratory-ambiguous"]
-    _case_of(current, "investigation-october-peak-explanation")["coverage"] = "requires_agent"
+    _case_of(current, "exploratory-unsupported")["coverage"] = "requires_agent"
     current["metrics"] = compute_metrics(current["cases"])
     comparison = compare_baselines(committed, current)
     assert comparison.critical and not comparison.regressions
@@ -849,22 +887,21 @@ def test_a_first_baseline_needs_a_justification(committed: dict[str, Any]) -> No
 
 def test_the_committed_review_explains_the_baseline(committed: dict[str, Any]) -> None:
     review = committed["review"]
-    # INV-8 (#141): the only accepted change since the initial E1b-2 baseline is the prompt
-    # registry's digest (provenance); every case, outcome, metric, and safety result is unchanged.
-    assert review == {
-        "accepted_changes": [
-            'provenance.prompt_registry_sha256: "fa1d9f8acb6c643a2c90972b44355cdc2156f64585da914b'
-            '5929b9ac3eb309bd" -> "a44fce458d04c65af0693205b4d997bb025e3b09f55b6979822c82b03'
-            '703b1ad"'
-        ],
-        "justification": (
-            "INV-8 (#141) decision V10: the prompt registry gains whole-module entries for the "
-            "INV-7 review prompts and the INV-8 narrative prompt, so its file digest (provenance "
-            "only) changes. No case, coverage, outcome, dimension, metric, or safety result "
-            "changes; no baseline case exercises these prompts because investigation routing is "
-            "off (#142)."
-        ),
+    # EVAL-1 (#145): the accepted change is the three investigation cases becoming measured. No
+    # other case's coverage, outcome, or dimensions changed.
+    assert "EVAL-1 (#145)" in review["justification"]
+    graded = (
+        "investigation-top-region-fulfillment",
+        "investigation-review-category-rate",
+        "investigation-october-peak-explanation",
+    )
+    changed = {
+        match.group(1)
+        for change in review["accepted_changes"]
+        if (match := re.match(r"cases\.([\w-]+)\.(?:coverage|outcome|dimensions)", change))
     }
+    assert changed == set(graded)
+    assert not any(change.startswith("REGRESSION") for change in review["accepted_changes"])
 
 
 # ---- isolation ----------------------------------------------------------------------------------

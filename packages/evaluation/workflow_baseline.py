@@ -9,6 +9,8 @@ Scoring rules:
 
 - Only ``measured`` cases are graded. Every measured case is in the pass-rate denominator, including
   failures and cases the run never reached (``not_attempted``).
+- A ``graded_by: investigation_graph`` case is graded only on its scripted run of the real
+  investigation graph (``investigation_trajectory``). The API run stays an observation for it.
 - Cases with any other coverage label are ``not_measured``: they are run and observed, but never
   counted as a pass or a failure.
 - Rates carry a Wilson 95% interval, because the case counts are small.
@@ -42,6 +44,8 @@ from packages.evaluation.live_demo import DIMENSIONS, cells_contain
 from packages.evaluation.workflow_cases import (
     CATEGORIES,
     COVERAGE_LABELS,
+    GRAPH_GRADED,
+    TRAJECTORY_DIMENSIONS,
     causal_markers_in,
     fixture_sha256,
 )
@@ -60,6 +64,19 @@ SAFETY_INVARIANTS = (
     "dataset_unchanged",
     "no_live_model",
 )
+# The investigation trajectory suite's document (``investigation_trajectory``). It shares this
+# module's comparison and update rules, and answers no HTTP requests of its own.
+TRAJECTORY_SCHEMA = "investigation-trajectory-baseline-v1"
+TRAJECTORY_INVARIANTS = (
+    "read_only_sql",
+    "dataset_unchanged",
+    "no_live_model",
+    "no_content_in_results",
+)
+_INVARIANTS_BY_SCHEMA = {
+    BASELINE_SCHEMA: SAFETY_INVARIANTS,
+    TRAJECTORY_SCHEMA: TRAJECTORY_INVARIANTS,
+}
 WILSON_Z_95 = 1.959963984540054
 MIN_JUSTIFICATION_CHARS = 20
 _RATE_DIGITS = 6
@@ -151,6 +168,8 @@ class RunEvidence:
     secrets: Sequence[str] = ()
     forbidden_fragments: Sequence[str] = ()
     messages: dict[str, Mapping[str, Any]] = field(default_factory=dict)
+    # Grades of ``graded_by: investigation_graph`` cases, from scripted runs of the real graph.
+    graph_grades: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------------------------
@@ -445,21 +464,27 @@ def _case_entry(
     record: Mapping[str, Any] | None,
     statements_by_case: Mapping[str, int],
     message: Mapping[str, Any] | None,
+    graph_grade: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     measured = entry["coverage"] == "measured"
-    attempted = record is not None
-    checks: Mapping[str, Any] = (record or {}).get("checks") or {}
-    applicable = {k: bool(v) for k, v in checks.items() if v is not None and k in DIMENSIONS}
+    # A graph-graded case is graded on its graph run alone. The API run stays an observation: it
+    # answers with one query, so it cannot pass or fail a multi-step case.
+    graded = entry.get("graded_by") == GRAPH_GRADED
+    grade: Mapping[str, Any] | None = graph_grade if graded else record
+    attempted = grade is not None
+    checks: Mapping[str, Any] = (grade or {}).get("dimensions" if graded else "checks") or {}
+    allowed = TRAJECTORY_DIMENSIONS if graded else DIMENSIONS
+    applicable = {k: bool(v) for k, v in checks.items() if v is not None and k in allowed}
     if not measured:
         outcome = "not_measured"
     elif not attempted:
         outcome = "not_attempted"
-    elif record is not None and record.get("passed") is True and applicable:
+    elif grade is not None and grade.get("passed") is True and applicable:
         outcome = "passed"
     else:
         outcome = "failed"  # including a measured case with no applicable check: fail closed
     observations: dict[str, Any] = {name: (record or {}).get(name) for name in _RECORD_OBSERVATIONS}
-    observations["has_sql"] = bool((record or {}).get("sql")) if attempted else None
+    observations["has_sql"] = bool((record or {}).get("sql")) if record is not None else None
     observations["executed_statements"] = statements_by_case.get(entry["id"], 0)
     if case.get("kind") == "investigation":
         observations.update(investigation_observations(case, message))
@@ -476,7 +501,10 @@ def _case_entry(
     }
 
 
-def compute_metrics(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def compute_metrics(
+    cases: Sequence[Mapping[str, Any]], dimensions: Sequence[str] = ()
+) -> dict[str, Any]:
+    """Pass rates and per-dimension counts. ``dimensions`` defaults to every known dimension."""
     measured = [c for c in cases if c["coverage"] == "measured"]
     count = {o: sum(1 for c in cases if c["outcome"] == o) for o in OUTCOMES}
     by_category: dict[str, Any] = {}
@@ -490,11 +518,11 @@ def compute_metrics(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             **{o: sum(1 for c in members if c["outcome"] == o) for o in OUTCOMES},
             **rate_block(sum(1 for c in in_scope if c["outcome"] == "passed"), len(in_scope)),
         }
-    dimensions = {}
-    for name in DIMENSIONS:
+    rollup = {}
+    for name in dimensions or (*DIMENSIONS, *TRAJECTORY_DIMENSIONS):
         values = [c["dimensions"][name] for c in measured if name in c["dimensions"]]
         if values:
-            dimensions[name] = {"passed": sum(values), "applicable": len(values)}
+            rollup[name] = {"passed": sum(values), "applicable": len(values)}
     return {
         "cases": len(cases),
         "measured": len(measured),
@@ -506,7 +534,7 @@ def compute_metrics(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         },
         "overall": rate_block(count["passed"], len(measured)),
         "by_category": by_category,
-        "dimensions": dimensions,
+        "dimensions": rollup,
     }
 
 
@@ -556,6 +584,7 @@ def build_baseline(
             records.get(entry["id"]),
             statements,
             evidence.messages.get(entry["id"]),
+            evidence.graph_grades.get(entry["id"]),
         )
         for entry in entries
     ]
@@ -589,9 +618,14 @@ def build_baseline(
 
 
 def safety_failures(baseline: Mapping[str, Any]) -> list[str]:
-    """Invariants that did not pass. A missing invariant counts as failed."""
+    """Invariants that did not pass. A missing invariant counts as failed.
+
+    The document's schema selects its invariants, so no caller can pass a shorter list. An unknown
+    schema is held to the workflow baseline's list and fails closed.
+    """
     safety = baseline.get("safety") or {}
-    return [name for name in SAFETY_INVARIANTS if (safety.get(name) or {}).get("status") != "pass"]
+    invariants = _INVARIANTS_BY_SCHEMA.get(str(baseline.get("schema")), SAFETY_INVARIANTS)
+    return [name for name in invariants if (safety.get(name) or {}).get("status") != "pass"]
 
 
 # --------------------------------------------------------------------------------------------
@@ -601,6 +635,7 @@ def safety_failures(baseline: Mapping[str, Any]) -> list[str]:
 _CRITICAL_SECTIONS = ("schema", "evidence", "provenance", "metrics", "safety")
 _NONCRITICAL_SECTIONS = ("safety_evidence",)
 _OUTCOME_RANK = {"passed": 2, "failed": 1, "not_attempted": 0}
+_WORSE_WHEN_HIGHER = frozenset({"model_calls", "tool_steps"})
 
 
 @dataclass(frozen=True)
@@ -658,6 +693,9 @@ def _case_regression(path: str, before: Any, after: Any, old: Mapping[str, Any])
         return _OUTCOME_RANK.get(after, -1) < _OUTCOME_RANK.get(before, -1)
     if ".dimensions." in path:
         return before is True and after is not True
+    # A trajectory gets worse when it reaches its result with more calls or steps.
+    if ".trajectory." in path and path.rsplit(".", 1)[-1] in _WORSE_WHEN_HIGHER:
+        return isinstance(before, int) and (not isinstance(after, int) or after > before)
     return False
 
 

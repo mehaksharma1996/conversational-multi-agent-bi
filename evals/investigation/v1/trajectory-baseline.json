@@ -1,0 +1,1405 @@
+{
+  "cases": [
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
+      "group": "happy_path",
+      "id": "churn-full-investigation",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": true,
+          "primary_reason": "metric_change_causal",
+          "reason_codes": [
+            "feature_enabled",
+            "authorized_table_present",
+            "metric_change_causal",
+            "multi_part_analysis"
+          ]
+        }
+      },
+      "outcome": "passed",
+      "source": "churn-full-investigation",
+      "trajectory": {
+        "model_calls": 17,
+        "status": "completed",
+        "tool_steps": 40
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
+      "group": "critique",
+      "id": "churn-contradictory-enterprise",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": false,
+          "primary_reason": "intent_not_eligible",
+          "reason_codes": []
+        }
+      },
+      "outcome": "passed",
+      "source": "churn-contradictory-enterprise",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
+      "group": "critique",
+      "id": "churn-unsupported-causation",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": true,
+          "primary_reason": "metric_change_causal",
+          "reason_codes": [
+            "feature_enabled",
+            "authorized_table_present",
+            "metric_change_causal"
+          ]
+        }
+      },
+      "outcome": "passed",
+      "source": "churn-unsupported-causation",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "citations_evidence",
+      "id": "churn-insufficient-retention",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": false,
+          "primary_reason": "intent_not_eligible",
+          "reason_codes": []
+        }
+      },
+      "outcome": "passed",
+      "source": "churn-insufficient-retention",
+      "trajectory": {
+        "model_calls": 5,
+        "status": "completed",
+        "tool_steps": 5
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "security",
+      "id": "churn-safety-injection",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": false,
+          "primary_reason": "intent_not_eligible",
+          "reason_codes": []
+        }
+      },
+      "outcome": "passed",
+      "source": "churn-safety-injection",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed_partial",
+        "tool_steps": 7
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
+      "group": "happy_path",
+      "id": "investigation-top-region-fulfillment",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": false,
+          "primary_reason": "intent_not_eligible",
+          "reason_codes": []
+        }
+      },
+      "outcome": "passed",
+      "source": "investigation-top-region-fulfillment",
+      "trajectory": {
+        "model_calls": 4,
+        "status": "completed",
+        "tool_steps": 8
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
+      "group": "happy_path",
+      "id": "investigation-review-category-rate",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": false,
+          "primary_reason": "intent_not_eligible",
+          "reason_codes": []
+        }
+      },
+      "outcome": "passed",
+      "source": "investigation-review-category-rate",
+      "trajectory": {
+        "model_calls": 4,
+        "status": "completed",
+        "tool_steps": 8
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "routing_gate": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
+      "group": "happy_path",
+      "id": "investigation-october-peak-explanation",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "eligible": true,
+          "primary_reason": "metric_change_causal",
+          "reason_codes": [
+            "feature_enabled",
+            "authorized_table_present",
+            "metric_change_causal"
+          ]
+        }
+      },
+      "outcome": "passed",
+      "source": "investigation-october-peak-explanation",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "routing_gate": true,
+        "unnecessary_calls": true
+      },
+      "group": "routing",
+      "id": "traj-routing-gate",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {
+          "table": [
+            {
+              "eligible": true,
+              "primary_reason": "metric_change_causal"
+            },
+            {
+              "eligible": true,
+              "primary_reason": "explicit_investigation"
+            },
+            {
+              "eligible": false,
+              "primary_reason": "intent_not_eligible"
+            },
+            {
+              "eligible": false,
+              "primary_reason": "intent_not_eligible"
+            },
+            {
+              "eligible": false,
+              "primary_reason": "intent_not_eligible"
+            },
+            {
+              "eligible": false,
+              "primary_reason": "intent_not_eligible"
+            },
+            {
+              "eligible": false,
+              "primary_reason": "intent_not_eligible"
+            },
+            {
+              "eligible": false,
+              "primary_reason": "feature_disabled"
+            },
+            {
+              "eligible": false,
+              "primary_reason": "authorized_table_missing"
+            }
+          ]
+        }
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 0,
+        "status": null,
+        "tool_steps": 0
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "planning",
+      "id": "traj-plan-repair-recovers",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": null,
+        "tool_steps": 0
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "planning",
+      "id": "traj-plan-invalid-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": null,
+        "tool_steps": 0
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "approval",
+      "id": "traj-plan-rejected-runs-nothing",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 1,
+        "status": null,
+        "tool_steps": 0
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "approval",
+      "id": "traj-plan-digest-mismatch-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 1,
+        "status": null,
+        "tool_steps": 0
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "approval",
+      "id": "traj-approval-replay-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 4,
+        "status": "completed",
+        "tool_steps": 8
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "security",
+      "id": "traj-foreign-scope-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 1,
+        "status": null,
+        "tool_steps": 0
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "approval",
+      "id": "traj-sql-wave-approved",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 4,
+        "status": "completed",
+        "tool_steps": 10
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "approval",
+      "id": "traj-sql-wave-rejected",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "completed_partial",
+        "tool_steps": 6
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "approval",
+      "id": "traj-sql-wave-edit-revalidated",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "completed_partial",
+        "tool_steps": 6
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "approval",
+      "id": "traj-sql-wave-expired",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "expired",
+        "tool_steps": 4
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "cancellation",
+      "id": "traj-sql-wave-cancelled",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "cancelled",
+        "tool_steps": 4
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "cancellation",
+      "id": "traj-cancel-before-dispatch",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 1,
+        "status": "cancelled",
+        "tool_steps": 0
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "cancellation",
+      "id": "traj-cancel-between-tasks",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": "cancelled",
+        "tool_steps": 3
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "cancellation",
+      "id": "traj-cancel-late-result-discarded",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": "cancelled",
+        "tool_steps": 3
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "cancellation",
+      "id": "traj-revoked-during-run",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": "failed",
+        "tool_steps": 4
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "sql_result_equivalence": true,
+        "unnecessary_calls": true
+      },
+      "group": "recovery",
+      "id": "traj-sql-correction-recovers",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 5,
+        "status": "completed",
+        "tool_steps": 10
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "recovery",
+      "id": "traj-sql-timeout-partial",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "completed_partial",
+        "tool_steps": 6
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "recovery",
+      "id": "traj-document-index-missing",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "completed_partial",
+        "tool_steps": 7
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "recovery",
+      "id": "traj-provider-failure-fails-closed",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "failed",
+        "tool_steps": 5
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "report",
+      "id": "traj-narrative-model-failure-falls-back",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "report",
+      "id": "traj-narrative-unlisted-fact-rejected",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "report",
+      "id": "traj-narrative-missing-limitation-rejected",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "budget",
+      "id": "traj-budget-attempts-exhausted",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": "budget_exhausted",
+        "tool_steps": 4
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "budget",
+      "id": "traj-budget-wall-clock-exhausted",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": "budget_exhausted",
+        "tool_steps": 4
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "budget",
+      "id": "traj-budget-model-calls-exhausted",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 2,
+        "status": "budget_exhausted",
+        "tool_steps": 5
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "budget",
+      "id": "traj-budget-ends-replanning",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 13,
+        "status": "completed",
+        "tool_steps": 30
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "critique",
+      "id": "traj-critic-recall-seeded-defects",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 16,
+        "status": "completed",
+        "tool_steps": 37
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "critique",
+      "id": "traj-follow-up-not-delegated",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 13,
+        "status": "completed",
+        "tool_steps": 30
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "critique",
+      "id": "traj-follow-up-wrong-digest-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 13,
+        "status": "completed",
+        "tool_steps": 30
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "critique",
+      "id": "traj-replan-two-rounds-is-the-limit",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 17,
+        "status": "completed",
+        "tool_steps": 41
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "critique",
+      "id": "traj-malformed-review-changes-nothing",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 13,
+        "status": "completed",
+        "tool_steps": 30
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "citations_evidence",
+      "id": "traj-citation-invalid-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "critic_recall": true,
+        "failure_recovery": true,
+        "hypothesis_grounding": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "citations_evidence",
+      "id": "traj-citation-absent-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 6,
+        "status": "completed",
+        "tool_steps": 9
+      }
+    },
+    {
+      "attempted": true,
+      "category": "investigation",
+      "coverage": "measured",
+      "dimensions": {
+        "budget_compliance": true,
+        "citation_quality": true,
+        "failure_recovery": true,
+        "planning_delegation": true,
+        "report_verification": true,
+        "security_approval": true,
+        "unnecessary_calls": true
+      },
+      "group": "security",
+      "id": "traj-unsafe-sql-refused",
+      "mismatches": [],
+      "observations": {
+        "routing_gate": {}
+      },
+      "outcome": "passed",
+      "source": "trajectory",
+      "trajectory": {
+        "model_calls": 3,
+        "status": "completed_partial",
+        "tool_steps": 5
+      }
+    }
+  ],
+  "evidence": {
+    "kind": "scripted-investigation-trajectory-regression",
+    "model_is_live": false,
+    "statement": "Scripted regression evidence, not real-model performance. Scripted adapters supply every model output, and the real investigation graph handles them. A pass shows that the application path still behaves as recorded. It says nothing about how any real model would plan, write SQL, cite, critique, or report."
+  },
+  "metrics": {
+    "attempted": 43,
+    "by_category": {
+      "investigation": {
+        "cases": 43,
+        "failed": 0,
+        "measured": 43,
+        "not_attempted": 0,
+        "not_measured": 0,
+        "pass_rate": 1.0,
+        "passed": 43,
+        "wilson_95": [
+          0.91799,
+          1.0
+        ]
+      }
+    },
+    "by_coverage": {
+      "measured": 43,
+      "not_covered_by_script": 0,
+      "requires_agent": 0,
+      "requires_live_model": 0,
+      "unsupported": 0
+    },
+    "cases": 43,
+    "dimensions": {
+      "budget_compliance": {
+        "applicable": 37,
+        "passed": 37
+      },
+      "citation_quality": {
+        "applicable": 27,
+        "passed": 27
+      },
+      "critic_recall": {
+        "applicable": 17,
+        "passed": 17
+      },
+      "failure_recovery": {
+        "applicable": 42,
+        "passed": 42
+      },
+      "hypothesis_grounding": {
+        "applicable": 17,
+        "passed": 17
+      },
+      "planning_delegation": {
+        "applicable": 42,
+        "passed": 42
+      },
+      "report_verification": {
+        "applicable": 36,
+        "passed": 36
+      },
+      "routing_gate": {
+        "applicable": 9,
+        "passed": 9
+      },
+      "security_approval": {
+        "applicable": 42,
+        "passed": 42
+      },
+      "sql_result_equivalence": {
+        "applicable": 7,
+        "passed": 7
+      },
+      "unnecessary_calls": {
+        "applicable": 43,
+        "passed": 43
+      }
+    },
+    "failed": 0,
+    "measured": 43,
+    "measured_attempted": 43,
+    "not_attempted": 0,
+    "not_measured": 0,
+    "overall": {
+      "measured": 43,
+      "pass_rate": 1.0,
+      "passed": 43,
+      "wilson_95": [
+        0.91799,
+        1.0
+      ]
+    },
+    "passed": 43
+  },
+  "provenance": {
+    "cases_sha256": "d918da3a59064790101770508c6b5dba290ab24c938bb7bba31db3ca16264671",
+    "mode": "scripted-trajectory",
+    "oracle_sha256": "520dc795e0d0df8db6ec5874c2ae9a3cdf8fcf9b0ed93c5257d2c4a4d4a956bf",
+    "public_cases_sha256": "025ab70b0c5e537d9ec7979d1700a1601d6db119086510d42cbf7325f2ff15d5",
+    "retail_cases_sha256": "5b6e7ace513ae7bcbfe9b0c03a481936e30235b5dd72e2955b30a9fc4e5698ca"
+  },
+  "review": {
+    "accepted_changes": [
+      "initial baseline"
+    ],
+    "justification": "EVAL-1 (#145): first baseline of scripted trajectories through the real investigation graph."
+  },
+  "safety": {
+    "dataset_unchanged": {
+      "reason": "ok",
+      "status": "pass"
+    },
+    "no_content_in_results": {
+      "reason": "ok",
+      "status": "pass"
+    },
+    "no_live_model": {
+      "reason": "ok",
+      "status": "pass"
+    },
+    "read_only_sql": {
+      "reason": "ok",
+      "status": "pass"
+    }
+  },
+  "safety_evidence": {
+    "dataset_unchanged": {
+      "runs": 43
+    },
+    "no_content_in_results": {
+      "patterns_checked": 5
+    },
+    "no_live_model": {
+      "network_attempts": 0
+    },
+    "read_only_sql": {
+      "statements": 69
+    }
+  },
+  "schema": "investigation-trajectory-baseline-v1"
+}

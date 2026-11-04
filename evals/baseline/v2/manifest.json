@@ -1,6 +1,6 @@
 {
   "schema": "workflow-case-manifest-v1",
-  "manifest_version": "2026-10-14.1",
+  "manifest_version": "2026-11-02.1",
   "provenance": {
     "issue": "Iteration 2 E1b-1",
     "data": "Synthetic retail demo produced by scripts.generate_retail_demo (generator seed 20261011); no real customer data.",
@@ -50,7 +50,7 @@
     "investigation_cases": {
       "path": "evals/baseline/v2/investigation_cases.json",
       "hash": "sha256-lf",
-      "sha256": "10a53d019d64c597ef127584421af3095b8b6f1f5f435fb7526ff29eb95d2be9"
+      "sha256": "5b6e7ace513ae7bcbfe9b0c03a481936e30235b5dd72e2955b30a9fc4e5698ca"
     }
   },
   "cases": [
@@ -69,8 +69,8 @@
     {"id": "safety-prompt-injection", "source": "live_cases", "category": "safety", "coverage": "not_covered_by_script", "rationale": "The scripted model never follows the injected instruction, so a pass would prove nothing; the v1 offline gate covers injected content."},
     {"id": "exploratory-ambiguous", "source": "live_cases", "category": "exploratory", "coverage": "requires_live_model", "rationale": "Whether the model asks for clarification or picks a sensible reading needs a human reviewer of real output."},
     {"id": "exploratory-unsupported", "source": "live_cases", "category": "exploratory", "coverage": "unsupported", "rationale": "The data supports no forecast; a good answer declines or limits itself to history."},
-    {"id": "investigation-top-region-fulfillment", "source": "investigation_cases", "category": "investigation", "coverage": "requires_agent", "rationale": "Ranking, policy retrieval, and a dependent count; the fixed workflow runs one SQL query per question and the scripted model has no output for it."},
-    {"id": "investigation-review-category-rate", "source": "investigation_cases", "category": "investigation", "coverage": "requires_agent", "rationale": "Three policy rules, a per-category ranking, and two rates to compare; graded once an agent or a live model produces output."},
-    {"id": "investigation-october-peak-explanation", "source": "investigation_cases", "category": "investigation", "coverage": "unsupported", "rationale": "The data cannot show causes; only descriptive facts are checkable, and judging the wording needs real model output."}
+    {"id": "investigation-top-region-fulfillment", "source": "investigation_cases", "category": "investigation", "coverage": "measured", "graded_by": "investigation_graph", "rationale": "Graded on a scripted run of the real investigation graph: ranking, policy retrieval, and a dependent count against the case's reference rows. Application-path regression evidence only."},
+    {"id": "investigation-review-category-rate", "source": "investigation_cases", "category": "investigation", "coverage": "measured", "graded_by": "investigation_graph", "rationale": "Graded on a scripted run of the real investigation graph: three policy rules, a ranking, and a rate comparison against the case's reference rows. Application-path regression evidence only."},
+    {"id": "investigation-october-peak-explanation", "source": "investigation_cases", "category": "investigation", "coverage": "measured", "graded_by": "investigation_graph", "rationale": "The data cannot show causes, so the case grades what a good answer does: on a scripted run of the real investigation graph the descriptive facts match, the cause stays untestable, and the report states none. It never grades a cause."}
   ]
 }
