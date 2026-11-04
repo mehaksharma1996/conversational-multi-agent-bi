@@ -701,6 +701,107 @@ def test_the_limits_are_configured_from_the_environment_and_must_be_positive(
         get_settings()
 
 
+# --- replay and stale authority at the route ------------------------------------------------------
+
+
+def _plan_decision(flow: Flow, body: dict[str, Any], **overrides: Any) -> Any:
+    decision = {
+        "decision": "approve",
+        "plan_digest": body["plan_digest"],
+        "authority_epoch": body["authority_epoch"],
+    }
+    return flow.client.post(
+        f"/api/v1/investigations/{flow.id}/plan-decision", json=decision | overrides
+    )
+
+
+def test_a_replayed_plan_approval_is_refused_and_starts_nothing() -> None:
+    deployment, app = _paused("sec1_replay_plan")
+    with TestClient(app) as client:
+        flow = Flow(client, deployment)
+        body = flow.to_plan_approval()
+        assert _plan_decision(flow, body).status_code == 200
+        paused = flow.until("awaiting_sql_approval", *TERMINAL)
+        assert paused["status"] == "awaiting_sql_approval"
+        prompts = len(deployment.adapters.llm.sql_prompts)
+        wave = flow.wave_id()
+
+        replay = _plan_decision(flow, body)
+
+        assert replay.status_code == 409
+        assert flow.body()["status"] == "awaiting_sql_approval" and flow.wave_id() == wave
+        assert len(deployment.adapters.llm.sql_prompts) == prompts
+
+
+@pytest.mark.parametrize(
+    ("stale", "code"),
+    [
+        pytest.param({"plan_digest": "0" * 64}, "plan_digest_mismatch", id="another_plan"),
+        pytest.param({"authority_epoch": 999}, "epoch_mismatch", id="another_epoch"),
+    ],
+)
+def test_a_plan_decision_for_another_plan_or_epoch_is_refused_and_starts_nothing(
+    stale: dict[str, Any], code: str
+) -> None:
+    deployment, app = _paused("sec1_stale_plan")
+    with TestClient(app) as client:
+        flow = Flow(client, deployment)
+        body = flow.to_plan_approval()
+
+        refused = _plan_decision(flow, body, **stale)
+
+        assert refused.status_code == 409 and refused.json()["error"]["code"] == code
+        assert (
+            flow.body()["status"] == "awaiting_plan_approval"
+        )  # the shown plan is still decidable
+        assert deployment.adapters.llm.sql_prompts == []
+
+
+def test_a_replayed_wave_decision_is_refused_and_runs_nothing_more() -> None:
+    deployment, app = _paused("sec1_replay_wave")
+    with TestClient(app) as client:
+        flow = Flow(client, deployment)
+        flow.to_first_wave()
+        decided = flow.wave_id()
+        body = _valid_bodies(client, flow, flow.body()["message_id"])[WAVE_DECISION]
+        url = f"/api/v1/investigations/{flow.id}/sql-wave"
+        assert client.post(url, json=body).status_code == 202
+        settled = flow.after_resume(decided)
+        assert settled["status"] == "awaiting_sql_approval" and flow.wave_id() != decided
+        prompts = len(deployment.adapters.llm.sql_prompts)
+        approved = [e.name for e in deployment.audit.events].count("agent.sql_approved")
+
+        replay = client.post(url, json=body)
+
+        assert replay.status_code == 409
+        assert len(deployment.adapters.llm.sql_prompts) == prompts
+        assert [e.name for e in deployment.audit.events].count("agent.sql_approved") == approved
+
+
+@pytest.mark.parametrize("tamper", ["wave_digest", "sql_fingerprint", "wave_id", "missing_item"])
+def test_a_wave_decision_that_differs_from_the_shown_wave_runs_nothing(tamper: str) -> None:
+    deployment, app = _paused(f"sec1_stale_wave_{tamper}")
+    with TestClient(app) as client:
+        flow = Flow(client, deployment)
+        flow.to_first_wave()
+        body = _valid_bodies(client, flow, flow.body()["message_id"])[WAVE_DECISION]
+        if tamper == "wave_digest":
+            body["wave_digest"] = "0" * 64
+        elif tamper == "sql_fingerprint":
+            body["items"][0]["sql_fingerprint"] = "0" * 64
+        elif tamper == "wave_id":
+            body["wave_id"] = "0" * len(body["wave_id"])
+        else:
+            body["items"] = []
+        prompts = len(deployment.adapters.llm.sql_prompts)
+
+        refused = client.post(f"/api/v1/investigations/{flow.id}/sql-wave", json=body)
+
+        assert 400 <= refused.status_code < 500 and refused.status_code != 429
+        assert len(deployment.adapters.llm.sql_prompts) == prompts
+        assert "agent.sql_approved" not in [event.name for event in deployment.audit.events]
+
+
 # --- characterisation of open PROD-1 findings: not endorsed behaviour -----------------------------
 
 
