@@ -418,6 +418,11 @@ def _record_configuration(settings: Settings, observability: ApiObservability) -
         "session_retention_hours": settings.session_retention_hours,
         "sweep_orphaned_workspaces": settings.sweep_orphaned_workspaces,
         "hosted_recipients": "+".join(settings.hosted_recipients()),
+        "investigation_model_provider": settings.investigation_model_provider,
+        "investigation_model_activation": settings.investigation_model_activation,
+        "investigation_model_snapshot": settings.investigation_model_snapshot,
+        "investigation_model_review": settings.investigation_model_review,
+        "investigation_recipients": "+".join(settings.investigation_recipients()),
     }
     record_configuration(
         observability.recorder,

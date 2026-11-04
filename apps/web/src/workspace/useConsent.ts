@@ -31,8 +31,14 @@ export function questionGate(view: ConsentView, workspace: Workspace): ConsentGa
   return gate(view, workspace, (consent) => consent.questions_enabled);
 }
 
-/** The gate on starting an investigation, which may also need the investigation model's recipient. */
+/**
+ * The gate on starting an investigation, which may also need the investigation model's recipient.
+ * The workspace flags describe only the question chain, so they cannot show that an investigation
+ * has no recipient: until the server answers, only local-only mode (which withholds every hosted
+ * recipient) stays open.
+ */
 export function investigationGate(view: ConsentView, workspace: Workspace): ConsentGate {
+  if (view.phase !== "ready") return workspace.local_only_mode ? "open" : view.phase;
   return gate(view, workspace, (consent) => consent.status === "current" || consent.status === "not_required");
 }
 

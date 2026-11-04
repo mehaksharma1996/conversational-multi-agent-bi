@@ -102,6 +102,37 @@ def test_other_governed_changes_are_recorded_too() -> None:
         assert [e.name for e in _system_events(audit)][-1] == "config.changed", change
 
 
+def test_every_investigation_model_setting_is_governed_and_only_hashed() -> None:
+    base: dict[str, Any] = {
+        "investigation_model_provider": "openai_responses",
+        "investigation_model_activation": True,
+        "openai_api_key": "offline-test-placeholder-not-a-credential",
+        "investigation_model_snapshot": "test-model-2099-01-01",
+        "investigation_model_review": "review-placeholder-1",
+    }
+    for change in (
+        {"investigation_model_provider": "none"},
+        {"investigation_model_activation": False},
+        {"investigation_model_snapshot": "test-model-2099-02-02"},
+        {"investigation_model_review": "review-placeholder-2"},
+        {"openai_api_key": None},  # the recipient disappears, so consent's meaning changes
+    ):
+        root = isolated_directory_path("config_investigation")
+        audit = InMemoryAuditSink()
+        _start(_settings_for(root, **base), audit)
+        _start(_settings_for(root, **(base | change)), audit)
+        assert [e.name for e in _system_events(audit)] == ["config.recorded", "config.changed"], (
+            change
+        )
+        serialized = json.dumps([e.attributes for e in _system_events(audit)], default=str)
+        for value in (
+            "offline-test-placeholder-not-a-credential",
+            "review-placeholder",
+            "test-model",
+        ):
+            assert value not in serialized
+
+
 def test_secrets_never_reach_the_audit_record() -> None:
     root = isolated_directory_path("config_secrets")
     audit = InMemoryAuditSink()
