@@ -12,11 +12,13 @@ import re
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import Token
+from dataclasses import dataclass
 from threading import Lock
 from urllib.parse import urlparse
 
 from opentelemetry import trace
-from opentelemetry.context import Context
+from opentelemetry.context import Context, attach, detach
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -200,6 +202,25 @@ class TraceManager:
             return
 
 
+@dataclass(frozen=True)
+class _SpanScope:
+    span: Span
+    token: Token[Context]
+
+
+def _span_attributes(event: TelemetryEvent) -> dict[str, str | int | float | bool]:
+    attributes: dict[str, str | int | float | bool] = {
+        f"bi.{name}": value for name, value in event.attributes.items()
+    }
+    if event.request_id is not None and _OPAQUE_REQUEST_ID.fullmatch(event.request_id):
+        attributes["bi.request_id"] = event.request_id
+    if event.tenant_ref is not None and _OPAQUE_TENANT_REF.fullmatch(event.tenant_ref):
+        attributes["bi.tenant_ref"] = event.tenant_ref
+    if event.dropped_attributes:
+        attributes["bi.dropped_attributes"] = event.dropped_attributes
+    return attributes
+
+
 class TracingTelemetrySink:
     """Create a span from an event that has already passed the telemetry allowlist."""
 
@@ -207,19 +228,34 @@ class TracingTelemetrySink:
         self._tracer = tracer
         self._requests = requests
 
-    def emit(self, event: TelemetryEvent) -> None:
-        attributes: dict[str, str | int | float | bool] = {
-            f"bi.{name}": value for name, value in event.attributes.items()
-        }
-        if event.request_id is not None and _OPAQUE_REQUEST_ID.fullmatch(event.request_id):
-            attributes["bi.request_id"] = event.request_id
-        if event.tenant_ref is not None and _OPAQUE_TENANT_REF.fullmatch(event.tenant_ref):
-            attributes["bi.tenant_ref"] = event.tenant_ref
-        if event.dropped_attributes:
-            attributes["bi.dropped_attributes"] = event.dropped_attributes
+    def open_scope(self, name: str, request_id: str | None) -> _SpanScope:
+        """Start a span with no attributes yet; events emitted inside become its children."""
+        span = self._tracer.start_span(
+            name,
+            context=self._parent(request_id),
+            kind=SpanKind.INTERNAL,
+            record_exception=False,
+            set_status_on_exception=False,
+        )
+        return _SpanScope(span, attach(set_span_in_context(span)))
 
+    def close_scope(self, scope: object, event: TelemetryEvent) -> None:
+        """End the scope's span with the attributes of its sanitized event, and nothing else."""
+        if not isinstance(scope, _SpanScope):
+            raise TypeError("Not a scope this sink opened.")
+        detach(scope.token)
+        scope.span.set_attributes(_span_attributes(event))
+        if event.attributes.get("outcome") == "failure":
+            scope.span.set_status(Status(StatusCode.ERROR))
+        scope.span.end()
+
+    def _parent(self, request_id: str | None) -> Context | None:
         current = trace.get_current_span().get_span_context()
-        parent = None if current.is_valid else self._requests.parent(event.request_id)
+        return None if current.is_valid else self._requests.parent(request_id)
+
+    def emit(self, event: TelemetryEvent) -> None:
+        attributes = _span_attributes(event)
+        parent = self._parent(event.request_id)
         end_time = int(event.occurred_at.timestamp() * 1_000_000_000)
         duration = event.attributes.get("duration_ms")
         duration_ms = (

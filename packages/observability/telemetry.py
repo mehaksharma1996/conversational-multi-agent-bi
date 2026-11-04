@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from threading import Lock
 from time import perf_counter
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from packages.observability.context import current_request_id
 from packages.observability.errors import error_category
@@ -132,6 +132,50 @@ ALLOWED_ATTRIBUTES: dict[str, str] = {
     "job_operation": "token",
     "job_status": "token",
     "job_attempt": "int",
+    # OBS-1 (#146): closed vocabularies, plan-order indexes, and ledger counts. Never a task,
+    # tenant, or investigation identifier in the clear; ``investigation_ref`` is a digest.
+    "investigation_phase": "token",
+    "investigation_ref": "token",
+    "investigation_status": "token",
+    "investigation_terminal": "bool",
+    "investigation_terminal_category": "token",
+    "investigation_step": "token",
+    "investigation_writer": "token",
+    "investigation_agent": "token",
+    "investigation_tool": "token",
+    "investigation_decision": "token",
+    "investigation_refusal_code": "token",
+    "investigation_task_index": "int",
+    "investigation_task_kind": "token",
+    "investigation_task_status": "token",
+    "investigation_task_attempts": "int",
+    "investigation_task_category": "token",
+    "investigation_cost_is_estimate": "bool",
+    "investigation_estimated_cost_bound": "token",
+    "investigation_estimated_cost_microusd": "int",
+    "ledger_model_calls": "int",
+    "ledger_input_tokens": "int",
+    "ledger_output_tokens": "int",
+    "ledger_sql_executions": "int",
+    "ledger_retrievals": "int",
+    "ledger_task_attempts": "int",
+    "ledger_replan_rounds": "int",
+    "ledger_critic_rounds": "int",
+    "ledger_invocation_model_calls": "int",
+    "ledger_invocation_input_tokens": "int",
+    "ledger_invocation_output_tokens": "int",
+    "ledger_invocation_sql_executions": "int",
+    "ledger_invocation_retrievals": "int",
+    "ledger_invocation_task_attempts": "int",
+    "ledger_invocation_replan_rounds": "int",
+    "ledger_invocation_critic_rounds": "int",
+    "ledger_elapsed_ms": "float",
+    "ledger_unmetered_model_calls": "int",
+    "ledger_verified_model_settlements": "int",
+    "ledger_exceeded_reservations": "int",
+    "ledger_reservation_bound": "token",
+    "ledger_closed_reason": "token",
+    "ledger_exhausted_resource": "token",
 }
 
 AttributeValue = str | int | float | bool
@@ -160,6 +204,19 @@ class TelemetryEvent:
 class TelemetrySink(Protocol):
     def emit(self, event: TelemetryEvent) -> None:
         """Deliver an already-sanitized event. Must not raise for normal operation."""
+
+
+@runtime_checkable
+class ScopedTelemetrySink(Protocol):
+    """A sink that can hold a scope open, so events emitted inside it nest under it.
+
+    ``close_scope`` receives the scope's sanitized event in place of ``emit``. A scope carries
+    nothing else: its name is a validated event name, and all its attributes come from that event.
+    """
+
+    def open_scope(self, name: str, request_id: str | None) -> object: ...
+
+    def close_scope(self, scope: object, event: TelemetryEvent) -> None: ...
 
 
 class InMemoryTelemetrySink:
@@ -272,10 +329,19 @@ class Telemetry:
         self._sink: TelemetrySink = sink or NullTelemetrySink()
 
     def emit(self, name: str, *, tenant_id: str | None = None, **attributes: object) -> None:
+        event = self._event(name, tenant_id, dict(attributes))
+        try:
+            self._sink.emit(event)
+        except Exception:
+            LOGGER.warning("telemetry_sink_failed event=%s", name)
+
+    def _event(
+        self, name: str, tenant_id: str | None, attributes: dict[str, object]
+    ) -> TelemetryEvent:
         if _EVENT_NAME.fullmatch(name) is None:
             raise ValueError(f"Invalid telemetry event name: {name!r}")
-        kept, dropped = sanitize_attributes(dict(attributes))
-        event = TelemetryEvent(
+        kept, dropped = sanitize_attributes(attributes)
+        return TelemetryEvent(
             name=name,
             occurred_at=datetime.now(UTC),
             request_id=current_request_id(),
@@ -283,10 +349,6 @@ class Telemetry:
             attributes=kept,
             dropped_attributes=dropped,
         )
-        try:
-            self._sink.emit(event)
-        except Exception:
-            LOGGER.warning("telemetry_sink_failed event=%s", name)
 
     @contextmanager
     def operation(
@@ -310,3 +372,51 @@ class Telemetry:
         finally:
             tracker.attributes["duration_ms"] = (perf_counter() - started) * 1000
             self.emit(name, tenant_id=tenant_id, **tracker.attributes)
+
+    @contextmanager
+    def scope(
+        self,
+        name: str,
+        *,
+        tenant_id: str | None = None,
+        **attributes: object,
+    ) -> Iterator[OperationTracker]:
+        """Like ``operation``, and events emitted inside nest under it on a scoped sink.
+
+        Other sinks just receive the one event at the end. A body may set its own ``outcome``. A
+        sink failure in opening or closing is swallowed: the body's result or exception is
+        unchanged.
+        """
+        event_name = self._event(name, None, {}).name  # an invalid name fails before the body
+        tracker = OperationTracker(dict(attributes))
+        handle = self._open_scope(event_name)
+        started = perf_counter()
+        try:
+            yield tracker
+        except BaseException as exc:
+            tracker.attributes["outcome"] = "failure"
+            tracker.attributes["error_category"] = error_category(exc)
+            raise
+        else:
+            tracker.attributes.setdefault("outcome", "success")
+        finally:
+            tracker.attributes["duration_ms"] = (perf_counter() - started) * 1000
+            self._close_scope(handle, self._event(event_name, tenant_id, tracker.attributes))
+
+    def _open_scope(self, name: str) -> object | None:
+        if not isinstance(self._sink, ScopedTelemetrySink):
+            return None
+        try:
+            return self._sink.open_scope(name, current_request_id())
+        except Exception:
+            LOGGER.warning("telemetry_sink_failed event=%s", name)
+            return None
+
+    def _close_scope(self, handle: object | None, event: TelemetryEvent) -> None:
+        try:
+            if handle is not None and isinstance(self._sink, ScopedTelemetrySink):
+                self._sink.close_scope(handle, event)
+            else:
+                self._sink.emit(event)
+        except Exception:
+            LOGGER.warning("telemetry_sink_failed event=%s", event.name)

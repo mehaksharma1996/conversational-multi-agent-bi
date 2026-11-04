@@ -294,7 +294,7 @@ def v7_execution(
     return v2_execution(
         index,
         plan=plan,
-        proposal=v2_proposal(churn_v7_response()),
+        proposal=kwargs.pop("proposal", None) or v2_proposal(churn_v7_response()),
         llm=llm,
         authorizer=authorizer,
         **kwargs,

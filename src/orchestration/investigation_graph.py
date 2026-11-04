@@ -43,6 +43,7 @@ from src.orchestration.investigation_checkpoint import (
     require_guarded_graph,
 )
 from src.orchestration.investigation_planning import InvestigationPlanningGateway
+from src.orchestration.investigation_telemetry import InvestigationTrace
 from src.orchestration.tool_gateway import InvestigationToolGateway
 
 # The only writers a proposal graph may register (ADR 0024 D7).
@@ -52,7 +53,13 @@ PROPOSAL_WRITERS: frozenset[Writer] = frozenset({"intake", "supervisor", "lifecy
 class InvestigationGraphBuilder:
     """Build an investigation graph whose every node is guarded and ledger-bound."""
 
-    def __init__(self, gateway: InvestigationToolGateway | InvestigationPlanningGateway) -> None:
+    def __init__(
+        self,
+        gateway: InvestigationToolGateway | InvestigationPlanningGateway,
+        *,
+        trace: InvestigationTrace | None = None,
+    ) -> None:
+        self.__trace = trace  # OBS-1: observes each step inside its guard; it changes nothing
         if type(gateway) is InvestigationToolGateway:
             self.__proposal = False
             self.__bound_owner: Writer = CHANNEL_OWNERS["budget_usage"]
@@ -79,7 +86,8 @@ class InvestigationGraphBuilder:
         if self.__proposal and owner not in PROPOSAL_WRITERS:
             raise ValueError("A proposal graph registers only intake, supervisor, and lifecycle.")
         ledger = self.__ledger if owner == self.__bound_owner else None
-        self.__graph.add_node(name, guarded_node(owner, step, ledger=ledger))
+        observed = step if self.__trace is None else self.__trace.observe(name, owner, step)
+        self.__graph.add_node(name, guarded_node(owner, observed, ledger=ledger))
         self.__names.add(name)
 
     def add_edge(self, start: str | Sequence[str], end: str) -> None:
