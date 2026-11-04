@@ -4,6 +4,9 @@ Everything is rendered from the ``VerifiedReport``. Nothing is computed, and no 
 is added. Report values can hold untrusted strings (filenames, cell values, schema labels), so every
 one goes through ``_text``: a rendered file cannot carry a link, an image, HTML, or a table break
 from its data, and a cell cannot start a spreadsheet formula.
+
+Every export states what its verification covers and whether its evidence can be inspected: a
+reader of the file sees no SQL, so the label "verified" must not read as more than it is.
 """
 
 from __future__ import annotations
@@ -11,14 +14,32 @@ from __future__ import annotations
 import json
 import re
 
+from apps.api.investigation_content import EvidenceState
 from packages.investigation.interim_report import LIMITATION_TEMPLATES
 from packages.investigation.report import NOTE_TEMPLATES, VerifiedReport
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f  ]+")
-_SPECIAL = re.compile(r"([\\`*_{}\[\]<>()#|~!&])")
+# C0 and C1 controls, zero-width and bidirectional formatting, line and paragraph separators.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]+")
+_SPECIAL = re.compile(r"([\\`*_{}\[\]<>()#|~!&@])")
 _SCHEME = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{1,31}):")
 _WWW = re.compile(r"(?i)\bwww\.")
 _FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+# What the verifier establishes, and the residual it cannot catch (see
+# docs/architecture/investigation-workflow.md). A read-only statement with invented counts passes
+# every deterministic control, so only the person reviewing the statement can stop it.
+VERIFICATION_SCOPE = (
+    "Verified means each number was recomputed from the rows its query returned, and each claim "
+    "cites evidence from this run. It does not show that a query measures what its hypothesis "
+    "says: an approved read-only statement can return counts that do not reflect the source data. "
+    "This file has no SQL, so review each statement in the evidence inspector before relying on "
+    "a result."
+)
+_EVIDENCE_TEXT = {
+    "available": "available in the evidence inspector",
+    "not_reported": "not reported, because the run failed",
+    "unavailable": "unavailable: its digest does not cover evidence, so claims cannot be traced",
+}
 
 _SECTION_TITLES = {
     "executive_summary": "Executive summary",
@@ -63,7 +84,12 @@ def _limitation_text(code: str) -> str:
     return NOTE_TEMPLATES.get(code, code)
 
 
-def render_markdown(investigation_id: str, content_sha256: str, report: VerifiedReport) -> str:
+def render_markdown(
+    investigation_id: str,
+    content_sha256: str,
+    report: VerifiedReport,
+    evidence_state: EvidenceState,
+) -> str:
     """The report as Markdown: its label and state, narrative, measurements, and evidence rows."""
     lines = [
         "# Verified investigation report",
@@ -74,6 +100,11 @@ def render_markdown(investigation_id: str, content_sha256: str, report: Verified
         f"- Availability: {_text(report.availability)}",
         f"- Narrative: {_text(report.mode)}",
         f"- Content SHA-256: {_text(content_sha256)}",
+        f"- Evidence: {_EVIDENCE_TEXT[evidence_state]}",
+        "",
+        "## What verified covers",
+        "",
+        VERIFICATION_SCOPE,
         "",
     ]
     for section in report.sections:
@@ -90,9 +121,9 @@ def render_markdown(investigation_id: str, content_sha256: str, report: Verified
                 [
                     _text(fact.id),
                     _text(fact.hypothesis_id),
-                    _text(fact.metric_label),
-                    f"{_text(fact.baseline_label)} {_text(fact.baseline.display)}",
-                    f"{_text(fact.comparison_label)} {_text(fact.comparison.display)}",
+                    _cell(fact.metric_label),
+                    f"{_cell(fact.baseline_label)} {_text(fact.baseline.display)}",
+                    f"{_cell(fact.comparison_label)} {_text(fact.comparison.display)}",
                     _text(fact.difference),
                     f"{_text(fact.derived_evidence_id)}, {_text(fact.query_evidence_id)}",
                 ]
@@ -147,13 +178,20 @@ def render_markdown(investigation_id: str, content_sha256: str, report: Verified
     return "\n".join(lines)
 
 
-def render_json(investigation_id: str, content_sha256: str, report: VerifiedReport) -> str:
+def render_json(
+    investigation_id: str,
+    content_sha256: str,
+    report: VerifiedReport,
+    evidence_state: EvidenceState,
+) -> str:
     """The report as ASCII JSON: inert data whatever its values, with a stable wrapper."""
     return json.dumps(
         {
             "format": "investigation-report-export/v1",
             "investigation_id": investigation_id,
             "content_sha256": content_sha256,
+            "evidence_state": evidence_state,
+            "verification_scope": VERIFICATION_SCOPE,
             "report": report.model_dump(mode="json"),
         },
         ensure_ascii=True,
@@ -162,4 +200,4 @@ def render_json(investigation_id: str, content_sha256: str, report: VerifiedRepo
     )
 
 
-__all__ = ["render_json", "render_markdown"]
+__all__ = ["VERIFICATION_SCOPE", "render_json", "render_markdown"]

@@ -14,19 +14,29 @@ export type CritiqueRound = Report["critiques"][number];
 export type CritiqueFinding = CritiqueRound["findings"][number];
 
 /**
- * - `verified`: every reference resolves to evidence the server returned.
+ * - `verified`: every reference resolves to evidence the server returned. This traces a claim to the
+ *   rows behind it; it does not show those rows reflect the source data, see `VERIFICATION_SCOPE`.
  * - `unsupported`: a reference does not resolve, or a claim that needs evidence cites none.
+ * - `conflicted`: the references resolve, but the critic recorded evidence in tension with the claim.
  * - `incomplete`: the report itself says this could not be tested, finished, or evaluated.
  * - `context`: a disclosure or summary that does not rest on one piece of evidence.
  */
-export type ClaimState = "verified" | "unsupported" | "incomplete" | "context";
+export type ClaimState = "verified" | "unsupported" | "conflicted" | "incomplete" | "context";
 
 export const CLAIM_STATE_LABEL: Record<ClaimState, string> = {
-  verified: "Verified against evidence",
+  verified: "Traced to evidence",
   unsupported: "Unsupported: evidence unavailable",
+  conflicted: "Conflicting evidence",
   incomplete: "Incomplete",
   context: "Context",
 };
+
+/** Keep in step with `VERIFICATION_SCOPE` in `apps/api/investigation_report_export.py`. */
+export const VERIFICATION_SCOPE =
+  "Verified means each number was recomputed from the rows its query returned, and each claim cites " +
+  "evidence from this run. It does not show that a query measures what its hypothesis says: an approved " +
+  "read-only statement can return counts that do not reflect the source data. Review each statement " +
+  "below before relying on a result.";
 
 /** One evidence reference. `resolved` false means there is nothing to link to. */
 export interface EvidenceRef {
@@ -131,6 +141,11 @@ export function buildReportIndex(data: InvestigationEvidence): ReportIndex {
       state: found.length > 0 && found.every((ref) => ref.resolved) ? "verified" : "unsupported",
     };
   };
+  /** As `resting`, except that a claim whose references all resolve takes `whenResolved`. */
+  const traced = (ids: readonly string[], whenResolved: ClaimState): ClaimLinks => {
+    const known = resting(ids);
+    return known.state === "verified" ? { ...known, state: whenResolved } : known;
+  };
   const factEvidence = (ids: readonly string[]): string[] =>
     ids.flatMap((id) => {
       const fact = facts.get(id);
@@ -140,29 +155,37 @@ export function buildReportIndex(data: InvestigationEvidence): ReportIndex {
   const hypothesisState = (row: HypothesisRow): ClaimLinks => {
     const ids = [...row.evidence_ids, ...row.conflicting_evidence_ids];
     if (row.status !== "tested") return { state: "incomplete", refs: refs(ids) };
-    return resting(ids);
+    return row.conflicting_evidence_ids.length > 0 ? traced(ids, "conflicted") : resting(ids);
   };
 
   const findingState = (finding: CritiqueFinding): ClaimLinks => {
     const found = refs(finding.evidence_ids);
     if (finding.disposition === "reject_claim") return { state: "unsupported", refs: found };
-    if (finding.disposition === "accept_limitation" || finding.disposition === "retain_limitation") {
+    if (
+      finding.disposition === "accept_limitation" ||
+      finding.disposition === "retain_limitation" ||
+      finding.disposition === "follow_up"
+    ) {
       return { state: "incomplete", refs: found };
     }
+    if (finding.code === "document_contradiction") return traced(finding.evidence_ids, "conflicted");
     return resting(finding.evidence_ids);
   };
 
   const claimLinks = (claim: Claim): ClaimLinks => {
     switch (claim.type) {
       case "fact": {
-        if (!claim.fact_id || !facts.has(claim.fact_id)) return resting(claim.evidence_ids);
+        // A claim about something the report does not hold rests on nothing, whatever else it cites.
+        if (!claim.fact_id || !facts.has(claim.fact_id)) return { state: "unsupported", refs: refs(claim.evidence_ids) };
         return resting([...factEvidence([claim.fact_id]), ...claim.evidence_ids]);
       }
-      case "comparison":
-        return resting(factEvidence(claim.fact_ids));
+      case "comparison": {
+        const ids = factEvidence(claim.fact_ids);
+        return claim.fact_ids.every((id) => facts.has(id)) ? resting(ids) : { state: "unsupported", refs: refs(ids) };
+      }
       case "verdict": {
         const row = hypotheses.get(claim.hypothesis_id);
-        if (!row) return resting(claim.evidence_ids);
+        if (!row) return { state: "unsupported", refs: refs(claim.evidence_ids) };
         const known = hypothesisState(row);
         return { ...known, refs: unique([...known.refs.map((ref) => ref.id), ...claim.evidence_ids]).map((id) => ({ id, resolved: items.has(id) })) };
       }
@@ -173,7 +196,9 @@ export function buildReportIndex(data: InvestigationEvidence): ReportIndex {
       case "task": {
         const task = tasks.get(claim.task_id);
         const ids = data.evidence.filter((item) => item.task_id === claim.task_id).map((item) => item.evidence_id);
-        return { state: task?.status === "succeeded" ? "verified" : "incomplete", refs: refs(ids) };
+        if (task?.status !== "succeeded") return { state: "incomplete", refs: refs(ids) };
+        // A status with no evidence to show is stated as context, never as traced to evidence.
+        return { state: ids.length > 0 ? "verified" : "context", refs: refs(ids) };
       }
       case "limitation":
         return { state: DISCLOSURES.has(claim.code) ? "context" : "incomplete", refs: [] };

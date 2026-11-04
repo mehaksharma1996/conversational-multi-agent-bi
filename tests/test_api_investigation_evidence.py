@@ -16,14 +16,19 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps.api.investigation_report_export import render_json, render_markdown
+from apps.api.investigation_report_export import (
+    VERIFICATION_SCOPE,
+    _cell,
+    render_json,
+    render_markdown,
+)
 from apps.api.investigation_store import (
     CONTENT_FILENAME,
     InvestigationRecord,
     content_digest,
     report_content_digest,
 )
-from packages.investigation.report import VerifiedReport
+from packages.investigation.report import FactValue, ReportFact, VerifiedReport
 from tests.e2e import investigation_app
 from tests.test_api_investigations import (
     OTHER_TENANT,
@@ -265,6 +270,37 @@ def test_a_digest_valid_but_unparsable_envelope_is_never_returned(
     assert response.status_code == 409
 
 
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"sql": 7, "policy_sql_status": None, "corrections_used": None},
+        {"sql": "SELECT 1", "policy_sql_status": 7, "corrections_used": None},
+        {"sql": "SELECT 1", "policy_sql_status": None, "corrections_used": "many"},
+        {"sql": "SELECT 1", "policy_sql_status": None, "corrections_used": True},
+    ],
+)
+def test_digest_valid_but_mistyped_query_details_are_refused_not_a_server_error(
+    finished: tuple[TestClient, FastAPI, str], details: dict[str, Any]
+) -> None:
+    from dataclasses import replace
+
+    client, app, investigation_id = finished
+    records = app.state.investigations.records
+    record = _record(app, investigation_id)
+    report_json, evidence_json = records.load_report(record)
+    envelope = json.loads(evidence_json)
+    envelope["query_details"] = dict.fromkeys(envelope["query_details"], details)
+    assert envelope["query_details"]
+    forged = json.dumps(envelope)
+    _tamper(app, record, "evidence", forged)
+    records._records[record.id] = replace(
+        record, report_sha256=report_content_digest(report_json, forged)
+    )
+    response = client.get(f"/api/v1/investigations/{investigation_id}/evidence")
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "investigation_content_unverifiable"
+
+
 def test_an_older_record_keeps_its_report_but_presents_no_evidence(
     finished: tuple[TestClient, FastAPI, str],
 ) -> None:
@@ -280,6 +316,41 @@ def test_an_older_record_keeps_its_report_but_presents_no_evidence(
     body = client.get(f"/api/v1/investigations/{investigation_id}/evidence").json()
     assert body["evidence_state"] == "unavailable" and body["evidence"] == []
     assert body["report"]["verification"] == "verified"
+    # Its export keeps the report's label, so it has to say the evidence cannot be traced.
+    url = f"/api/v1/investigations/{investigation_id}/report/export"
+    assert "Evidence: unavailable" in client.get(url).text
+    exported = client.get(url, params={"format": "json"}).json()
+    assert exported["evidence_state"] == "unavailable"
+
+
+def test_withdrawing_consent_leaves_a_finished_report_readable_and_calls_no_model() -> None:
+    """Withdrawal stops new model requests and deletes nothing (``consent_notices``). Reading a
+    finished report is local and starts none, so it keeps working, and it stays digest-checked."""
+
+    def no_model(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("reading a finished report must not reach a model")
+
+    deployment = Deployment("ui6c_consent")
+    app = deployment.app()
+    with TestClient(app) as client:
+        investigation_id = _completed(client)
+        record = _record(app, investigation_id)
+        url = f"/api/v1/investigations/{investigation_id}"
+        before = client.get(f"{url}/evidence").json()
+        withdrawn = client.delete(f"/api/v1/workspaces/{record.workspace_id}/consent")
+        assert withdrawn.status_code == 200 and withdrawn.json()["status"] == "withdrawn"
+
+        adapters: Any = deployment.adapters
+        adapters.llm.generate_once = no_model
+        adapters.planning = no_model
+        adapters.execution = no_model
+        after = client.get(f"{url}/evidence")
+        assert after.status_code == 200 and after.json() == before
+        export = client.get(f"{url}/report/export")
+        assert export.status_code == 200 and "SELECT" not in export.text
+
+        _tamper(app, record, "report", "{}")
+        assert client.get(f"{url}/evidence").status_code == 409
 
 
 def test_a_failed_runs_stored_evidence_stays_unreported(
@@ -424,7 +495,9 @@ def test_untrusted_values_cannot_inject_into_the_markdown_export(
             "source_row_count": len(hostile),
         }
     )
-    text = render_markdown("inv_x", "a" * 64, _report_with(report, query_tables=(table,)))
+    text = render_markdown(
+        "inv_x", "a" * 64, _report_with(report, query_tables=(table,)), "available"
+    )
     assert "<script>" not in text and "\\<script\\>" in text
     assert "](" not in text
     assert "![" not in text
@@ -437,14 +510,79 @@ def test_untrusted_values_cannot_inject_into_the_markdown_export(
             assert not cell.startswith(("=", "@", "+", "-")), line
     assert "\\=HYPERLINK" in text and "\\@SUM" in text
     exported = json.loads(
-        render_json("inv_x", "a" * 64, _report_with(report, query_tables=(table,)))
+        render_json("inv_x", "a" * 64, _report_with(report, query_tables=(table,)), "available")
     )
     assert exported["report"]["query_tables"][0]["rows"][0] == ["<script>alert(1)</script>"]
     assert "<script>" not in render_json(
         "inv_x",
         "a" * 64,
         _report_with(report, query_tables=()),
+        "available",
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "rendered"),
+    [
+        ("attacker@evil.example", "attacker\\@evil.example"),  # a GFM email autolink
+        ("‮exe.fdp", "exe.fdp"),  # bidirectional override
+        ("​=1+1", "\\=1+1"),  # a zero-width character hiding a formula
+        ("\u0085=1", "\\=1"),  # a C1 control hiding a formula
+    ],
+)
+def test_invisible_characters_and_autolinks_cannot_survive_into_a_cell(
+    value: str, rendered: str
+) -> None:
+    assert _cell(value) == rendered
+
+
+def test_a_measurement_label_cannot_start_a_spreadsheet_formula(
+    finished: tuple[TestClient, FastAPI, str],
+) -> None:
+    client, _, investigation_id = finished
+    report = VerifiedReport.model_validate(
+        client.get(f"/api/v1/investigations/{investigation_id}/evidence").json()["report"]
+    )
+    side = FactValue(numerator=1, denominator=10, display="0.1000")
+    fact = ReportFact(
+        id="f1",
+        hypothesis_id="h1",
+        task_id="trend",
+        unit="mean",
+        metric_label="=A1",
+        basis="group",
+        field="segment",
+        baseline_label="=B1",
+        comparison_label="+C1",
+        baseline=side,
+        comparison=side,
+        difference="0.0000",
+        direction="no_change",
+        claimed_direction="increase",
+        outcome="refutes",
+        derived_evidence_id="ev_" + "a" * 32,
+        query_evidence_id="ev_" + "b" * 32,
+    )
+    text = render_markdown("inv_x", "a" * 64, _report_with(report, facts=(fact,)), "available")
+    row = next(line for line in text.splitlines() if line.startswith("| f1 "))
+    cells = [cell.strip() for cell in row.strip("|").split(" | ")]
+    assert cells[2] == "\\=A1"
+    assert cells[3].startswith("\\=B1 ") and cells[4].startswith("\\+C1 ")
+
+
+def test_every_export_states_what_verification_covers(
+    finished: tuple[TestClient, FastAPI, str],
+) -> None:
+    """The residual behind RT-ROW-05: approved read-only SQL can invent counts and still verify. An
+    export has no SQL to review, so the label "verified" never travels without its limit."""
+    client, _, investigation_id = finished
+    url = f"/api/v1/investigations/{investigation_id}/report/export"
+    markdown = client.get(url).text
+    assert VERIFICATION_SCOPE in markdown and "Evidence: available" in markdown
+    assert markdown.index(VERIFICATION_SCOPE) < markdown.index("## Executive summary")
+    exported = client.get(url, params={"format": "json"}).json()
+    assert exported["verification_scope"] == VERIFICATION_SCOPE
+    assert exported["evidence_state"] == "available"
 
 
 # --- the scripted churn journey the browser test relies on ----------------------------------------

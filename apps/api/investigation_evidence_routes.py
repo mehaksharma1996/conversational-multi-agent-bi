@@ -260,7 +260,9 @@ def export_investigation_report(
     record = _owned(runtime, investigation_id, identity.tenant_id)
     content = _content(runtime, record)
     render = render_markdown if export_format == "markdown" else render_json
-    payload = render(record.id, content.content_sha256, content.report).encode("utf-8")
+    payload = render(
+        record.id, content.content_sha256, content.report, content.evidence_state
+    ).encode("utf-8")
     observability.audit(
         "report.downloaded",
         identity,

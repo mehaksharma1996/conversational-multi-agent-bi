@@ -814,6 +814,12 @@ Design E1 to E9: `docs/agents/briefs/144-inv11-investigation-api.md`; ADR 0024 A
 | `GET /api/v1/investigations/{id}/evidence` | `workspace:read` (SQL text also needs `analysis:run`) | typed verified report and evidence; digest-checked, `no-store`, read-only; 404 until terminal or without a report; 409 `investigation_content_unverifiable` (UI-6c, Amendment 12) |
 | `GET /api/v1/investigations/{id}/report/export?format=markdown\|json` | `report:export` | attachment; same availability; no SQL; audited `report.downloaded` (UI-6c) |
 
+**What "verified" covers.** Report verification recomputes every number from the rows its query
+returned and checks that each claim cites evidence from this run. It does not check those rows
+against the source data, so an approved read-only statement with invented counts still verifies and
+can change a verdict; only the person reviewing the statement can stop it. The evidence view and both
+exports state this limit on every report (UI-6c, E10).
+
 Refusals use fixed codes: `investigations_disabled`, `source_message_invalid`,
 `conversation_busy`, `idempotency_key_reused`, `question_too_long`, `job_queue_full`,
 `investigation_not_pending`, `sql_wave_not_pending`, and the INV-10 approval codes.

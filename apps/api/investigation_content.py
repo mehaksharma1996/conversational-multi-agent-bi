@@ -103,17 +103,19 @@ def _parse_evidence(text: str) -> tuple[tuple[Payload, ...], dict[str, QueryDeta
         if payload.evidence_id != key:
             raise ValueError("evidence is filed under another identifier")
         payloads.append(payload)
-    if any(type(value["sql"]) is not str for value in raw["query_details"].values()):
-        raise ValueError("a recorded statement is text")
-    details = {
-        key: QueryDetails(
-            sql=value["sql"],
-            policy_sql_status=value["policy_sql_status"],
-            corrections_used=value["corrections_used"],
-        )
-        for key, value in raw["query_details"].items()
-    }
+    details = {key: _query_details(value) for key, value in raw["query_details"].items()}
     return tuple(sorted(payloads, key=lambda item: (item.task_id, item.evidence_id))), details
+
+
+def _query_details(value: dict[str, object]) -> QueryDetails:
+    sql, status, corrections = value["sql"], value["policy_sql_status"], value["corrections_used"]
+    if type(sql) is not str:
+        raise ValueError("a recorded statement is text")
+    if status is not None and type(status) is not str:
+        raise ValueError("a policy status is text")
+    if corrections is not None and type(corrections) is not int:
+        raise ValueError("a correction count is an integer")
+    return QueryDetails(sql=sql, policy_sql_status=status, corrections_used=corrections)
 
 
 def read_verified_content(
