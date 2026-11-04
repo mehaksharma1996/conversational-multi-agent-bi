@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 from collections.abc import Callable, Iterator
@@ -66,6 +67,7 @@ _SCHEMA = (
 )
 
 Clock = Callable[[], datetime]
+LOGGER = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -171,7 +173,9 @@ class InvestigationRecordStore:
         metadata: MetadataStore | None = None,
         encryption_key: bytes | None = None,
         clock: Clock = _now,
+        on_terminal: Callable[[InvestigationRecord], None] | None = None,
     ) -> None:
+        self._on_terminal = on_terminal  # OBS-1: told once per record; it cannot change the record
         self._root = storage_root.resolve()
         self._metadata = metadata
         self._key = encryption_key
@@ -463,6 +467,11 @@ class InvestigationRecordStore:
         if self._metadata is not None:
             self._metadata.save_investigation(updated.stored())
         self._records[updated.id] = updated
+        if updated.terminal and not record.terminal and self._on_terminal is not None:
+            try:
+                self._on_terminal(updated)
+            except Exception:
+                LOGGER.warning("investigation_terminal_observer_failed")
         return updated
 
     def _path(self, record: InvestigationRecord) -> Path:

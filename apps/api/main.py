@@ -20,7 +20,7 @@ from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
 from apps.api.investigation_providers import select_investigation_adapters
 from apps.api.investigation_routes import router as investigation_router
-from apps.api.investigation_store import InvestigationRecordStore
+from apps.api.investigation_store import InvestigationRecord, InvestigationRecordStore
 from apps.api.investigations import InvestigationAdapters, InvestigationRuntime
 from apps.api.job_routes import router as job_router
 from apps.api.metadata_store import MetadataError, MetadataStore
@@ -54,6 +54,7 @@ from src.documents.embedding_cache import EmbeddingVectorCache
 from src.documents.reranker import Reranker, SentenceTransformerReranker
 from src.llm.base import LLMClient
 from src.llm.factory import build_llm_client
+from src.orchestration.investigation_telemetry import report_investigation_ended
 
 
 def create_app(
@@ -172,6 +173,7 @@ def create_app(
         storage_root=application.state.repository.storage_root,
         metadata=application.state.repository.metadata_store,
         encryption_key=application.state.repository.encryption_key,
+        on_terminal=_investigation_ended(observability),
     )
     # Trusted provider configuration comes from this factory's caller (tests inject scripted
     # adapters) or else from server settings through the PROD-1 admission sequence, which admits
@@ -482,6 +484,21 @@ def _start(app: FastAPI) -> None:
         conversations_pending=recovery.conversations_pending,
         investigations_interrupted=reconciled,
     )
+
+
+def _investigation_ended(observability: ApiObservability) -> Callable[[InvestigationRecord], None]:
+    """OBS-1 (#146): report a record's terminal status once, whichever path ended it."""
+
+    def observe(record: InvestigationRecord) -> None:
+        report_investigation_ended(
+            observability.telemetry,
+            tenant_id=record.tenant_id,
+            investigation_id=record.id,
+            status=record.status,
+            category=record.terminal_category,
+        )
+
+    return observe
 
 
 def _reconcile_investigations(

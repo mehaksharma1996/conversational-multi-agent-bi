@@ -84,3 +84,8 @@ IDs have the allowlist's token shape, so the allowlist alone would not stop them
 `bi.investigation_ref` is a truncated digest for joining a run's traces and is never a metric label. Ledger
 counts are charges and monetary figures are the ledger's own estimates, as in decision 4; no price is inferred.
 See [investigation-tracing.md](../operations/investigation-tracing.md).
+
+A graph invocation cannot count investigations that end without one, such as a cancellation while idle, a
+rejection, an expiry, or a restart. So the record store reports each record's one terminal transition as an
+`investigation_record.terminal` event, which `bi_investigation_ended_total` counts. Metrics take ledger usage from
+`ledger_invocation_*`, because a resumed run's root repeats the ledger's running totals.

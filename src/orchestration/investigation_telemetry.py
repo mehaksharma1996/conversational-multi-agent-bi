@@ -8,7 +8,10 @@ through ``packages.observability.Telemetry``, so every attribute crosses the tel
 - ``investigation.agent``: one step in which an agent acted, with its tool, decision, task index,
   and the ledger usage that step charged;
 - ``investigation.step``: one step of the owner's own bookkeeping;
-- ``investigation.task``: one task that ended, with its active duration and charged usage.
+- ``investigation.task``: one task that ended, with its active duration and charged usage;
+- ``investigation_record.terminal``: one per investigation, when its durable record reaches a
+  terminal status, whichever path ended it (``report_investigation_ended``). It is not a graph
+  invocation: a cancellation while idle, a rejection, an expiry, or a restart has no run to report.
 
 Task spans are siblings of agent spans, related by ``investigation_task_index``, because a parked
 SQL task interleaves with others and can end in a later invocation than it began.
@@ -22,6 +25,15 @@ passage, or model output, and a step's exception is reduced to a safe category.
 **No effect on the run.** An observed step returns exactly what the step returned and re-raises
 exactly what it raised. A failure while observing is swallowed. Reading the ledger's snapshot
 touches no clock, so telemetry cannot close a ledger. Nothing reads a span or an event back.
+
+**Outcome.** ``outcome`` says how something ended, and only a real failure is ``failure`` (an
+error span). A cancelled or refused task, or an incomplete or paused run, is not a success, and it
+is not a fault either. A step's ``outcome`` says only whether the step returned; what a guard
+decided inside it is ``investigation_decision``.
+
+**A resumed run.** A root's ``ledger_*`` values are the ledger's running totals, so a resumed run
+repeats what its earlier invocation charged. ``ledger_invocation_*`` is what this invocation added,
+and metrics count only that.
 
 **Cost.** Ledger counts are what was *charged*, which is an upper-bound estimate where a provider
 reported no usage (see ``BudgetUsage``). The only monetary figure is the ledger's own
@@ -93,6 +105,28 @@ _STEP_USAGE = (
     "task_attempts",
 )
 _RUN_USAGE = (*_STEP_USAGE, "replan_rounds", "critic_rounds")
+# How a task that ended ended. Only ``failed`` is an error.
+TASK_OUTCOMES: Mapping[str, str] = {
+    "succeeded": "success",
+    "failed": "failure",
+    "refused": "refused",
+    "skipped": "skipped",
+    "cancelled": "cancelled",
+}
+_PAUSED = frozenset(
+    {InvestigationStatus.AWAITING_PLAN_APPROVAL, InvestigationStatus.AWAITING_SQL_APPROVAL}
+)
+
+
+def run_outcome(status: InvestigationStatus) -> str:
+    """How a graph invocation that returned ``status`` went. Only ``failed`` is an error."""
+    if status is InvestigationStatus.COMPLETED:
+        return "success"
+    if status is InvestigationStatus.FAILED:
+        return "failure"
+    if status is InvestigationStatus.CANCELLED:
+        return "cancelled"
+    return "paused" if status in _PAUSED else "incomplete"
 
 
 def investigation_reference(investigation_id: str) -> str:
@@ -124,6 +158,14 @@ def _usage_attributes(usage: BudgetUsage) -> dict[str, object]:
         "ledger_reservation_bound": usage.reservation_bound,
         "ledger_closed_reason": _optional_closed(usage.closed_reason, _CLOSE_REASONS),
         "ledger_exhausted_resource": _optional_closed(usage.exhausted_resource, _RESOURCES),
+    }
+
+
+def _invocation_attributes(before: BudgetUsage | None, after: BudgetUsage) -> dict[str, object]:
+    """What this invocation added to the ledger; the first invocation starts from nothing."""
+    return {
+        f"ledger_invocation_{name}": getattr(after, name) - (getattr(before, name) if before else 0)
+        for name in _RUN_USAGE
     }
 
 
@@ -168,9 +210,8 @@ class RunObservation:
             investigation_status=status.value,
             investigation_terminal=terminal,
             investigation_terminal_category=_optional_closed(category, OUTCOME_CATEGORIES),
+            outcome=run_outcome(status),
         )
-        if status is InvestigationStatus.FAILED:
-            self._tracker.set(outcome="failure")
 
     def cost(self, cost: CostEstimate | None) -> None:
         if self._tracker is not None:
@@ -194,6 +235,7 @@ class InvestigationTrace:
         self._reference = investigation_reference(scope.investigation_id)
         self._ledger = ledger
         self._tasks: dict[str, _Task] = {}
+        self._reported: BudgetUsage | None = None  # the ledger when the last invocation closed
 
     def observe(self, name: str, writer: Writer, step: Step) -> Step:
         """Wrap ``step`` so it is timed and reported; its result and exceptions are unchanged."""
@@ -244,7 +286,10 @@ class InvestigationTrace:
                 )
             usage = self._usage()
             if usage is not None:
-                tracker.set(**_usage_attributes(usage))
+                tracker.set(
+                    **_usage_attributes(usage), **_invocation_attributes(self._reported, usage)
+                )
+                self._reported = usage
         except Exception:
             LOGGER.warning("investigation_telemetry_failed")
 
@@ -351,7 +396,7 @@ class InvestigationTrace:
                 investigation_task_status=_closed(status, TERMINAL_TASK_STATUSES),
                 investigation_task_attempts=attempts,
                 investigation_task_category=_optional_closed(category, OUTCOME_CATEGORIES),
-                outcome="failure" if status == "failed" else "success",
+                outcome=TASK_OUTCOMES.get(str(status), OTHER),
                 duration_ms=task.duration_ms,
                 **{f"ledger_{key}": value for key, value in task.usage.items()},
             )
@@ -376,4 +421,30 @@ def _task_kind(task_id: str, state: Mapping[str, Any]) -> str:
     return OTHER
 
 
-__all__ = ["InvestigationTrace", "RunObservation", "investigation_reference"]
+def report_investigation_ended(
+    telemetry: Telemetry,
+    *,
+    tenant_id: str,
+    investigation_id: str,
+    status: InvestigationStatus,
+    category: str | None = None,
+) -> None:
+    """One investigation's durable record reached ``status``; it reports nothing else about it."""
+    telemetry.emit(
+        "investigation_record.terminal",
+        tenant_id=tenant_id,
+        investigation_ref=investigation_reference(investigation_id),
+        investigation_status=status.value,
+        investigation_terminal=is_terminal(status),
+        investigation_terminal_category=_optional_closed(category, OUTCOME_CATEGORIES),
+    )
+
+
+__all__ = [
+    "TASK_OUTCOMES",
+    "InvestigationTrace",
+    "RunObservation",
+    "investigation_reference",
+    "report_investigation_ended",
+    "run_outcome",
+]

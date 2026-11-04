@@ -62,15 +62,16 @@ INVESTIGATION_AGENTS = frozenset(
 INVESTIGATION_TASK_KINDS = frozenset({"sql_analysis", "document_research", "hypothesis_test"})
 INVESTIGATION_TASK_STATUSES = frozenset({"succeeded", "failed", "skipped", "refused", "cancelled"})
 INVESTIGATION_COST_BOUNDS = frozenset({"enforced_upper_bound", "indicative", "unavailable"})
+# Per invocation, never a root's ``ledger_*`` totals: a resumed run would count them twice.
 _LEDGER_RESOURCES = {
-    "ledger_model_calls": "model_calls",
-    "ledger_input_tokens": "input_tokens",
-    "ledger_output_tokens": "output_tokens",
-    "ledger_sql_executions": "sql_executions",
-    "ledger_retrievals": "retrievals",
-    "ledger_task_attempts": "task_attempts",
-    "ledger_replan_rounds": "replan_rounds",
-    "ledger_critic_rounds": "critic_rounds",
+    "ledger_invocation_model_calls": "model_calls",
+    "ledger_invocation_input_tokens": "input_tokens",
+    "ledger_invocation_output_tokens": "output_tokens",
+    "ledger_invocation_sql_executions": "sql_executions",
+    "ledger_invocation_retrievals": "retrievals",
+    "ledger_invocation_task_attempts": "task_attempts",
+    "ledger_invocation_replan_rounds": "replan_rounds",
+    "ledger_invocation_critic_rounds": "critic_rounds",
 }
 
 
@@ -297,6 +298,19 @@ class MetricsRegistry:
     def _investigation(self, event: TelemetryEvent) -> None:
         """OBS-1 (#146): closed labels only, never a tenant, investigation, or task identifier."""
         attributes = event.attributes
+        if event.name == "investigation_record.terminal":
+            self._count(
+                "bi_investigation_ended_total",
+                "Investigations whose record reached a terminal status, once each, whichever path "
+                "ended them, including a cancellation while idle, a rejection, an expiry, or a "
+                "restart.",
+                (
+                    (
+                        "status",
+                        _closed(attributes.get("investigation_status"), INVESTIGATION_STATUSES),
+                    ),
+                ),
+            )
         if event.name == "investigation.run":
             phase = _closed(attributes.get("investigation_phase"), _INVESTIGATION_PHASES)
             status = _closed(attributes.get("investigation_status"), INVESTIGATION_STATUSES)
@@ -308,7 +322,8 @@ class MetricsRegistry:
             if attributes.get("investigation_terminal") is True:
                 self._count(
                     "bi_investigation_terminal_total",
-                    "Investigation runs that ended, by phase and terminal status.",
+                    "Graph invocations that ended the run, by phase and terminal status. An "
+                    "end with no invocation is only in bi_investigation_ended_total.",
                     (("phase", phase), ("status", status)),
                 )
             for name, resource in _LEDGER_RESOURCES.items():

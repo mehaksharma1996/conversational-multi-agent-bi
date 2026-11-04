@@ -56,3 +56,7 @@ they are. ADR 0015 gets an addendum; the governance and workflow docs link the n
 - String attributes pass through closed vocabularies; anything else exports as `other`.
 - Execution reports `investigation_estimated_cost_bound=unavailable`; no price is invented.
 - Metric labels never hold tenant, investigation, or task identifiers.
+- `outcome` is `failure` only for a real failure; refused, skipped, cancelled, paused, and incomplete are
+  their own values. Metrics count `ledger_invocation_*`, because a resumed root repeats the running totals.
+- `InvestigationRecordStore(on_terminal=...)` reports every terminal record once, so ends with no graph
+  invocation are counted. Linking job traces to their HTTP request is not an acceptance item and stays out.

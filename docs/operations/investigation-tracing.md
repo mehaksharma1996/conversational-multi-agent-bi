@@ -36,10 +36,11 @@ There is no parent across invocations, because the investigation's jobs carry no
 
 | Span | One per | Main attributes (each prefixed `bi.`) |
 | --- | --- | --- |
-| `investigation.run` | Graph invocation; the root | `investigation_phase`, `investigation_ref`, `investigation_status`, `investigation_terminal`, `investigation_terminal_category`, the ledger's totals (`ledger_*`), the cost estimate, `tenant_ref` |
+| `investigation.run` | Graph invocation; the root | `investigation_phase`, `investigation_ref`, `investigation_status`, `investigation_terminal`, `investigation_terminal_category`, `outcome`, the ledger's running totals (`ledger_*`), what this invocation added (`ledger_invocation_*`), the cost estimate, `tenant_ref` |
 | `investigation.agent` | Step in which an agent acted | `investigation_agent`, `investigation_step`, `investigation_writer`, `investigation_tool`, `investigation_decision`, `investigation_refusal_code`, `investigation_task_index`, `investigation_task_kind`, the usage this step charged |
 | `investigation.step` | Step of owner bookkeeping | `investigation_step`, `investigation_writer`, `outcome` |
-| `investigation.task` | Task that ended | `investigation_task_index`, `investigation_task_kind`, `investigation_task_status`, `investigation_task_attempts`, `investigation_task_category`, active `duration_ms`, the usage charged to it |
+| `investigation.task` | Task that ended | `investigation_task_index`, `investigation_task_kind`, `investigation_task_status`, `investigation_task_attempts`, `investigation_task_category`, `outcome`, active `duration_ms`, the usage charged to it |
+| `investigation_record.terminal` | Investigation whose durable record reached a terminal status; not part of a run's trace | `investigation_ref`, `investigation_status`, `investigation_terminal`, `investigation_terminal_category`, `tenant_ref` |
 
 `investigation.agent`, `.step`, and `.task` are direct children of the root. A task span is related to
 its agent spans by `investigation_task_index`, not by nesting, because a parked SQL task interleaves
@@ -48,6 +49,40 @@ with others and can end in a later invocation than it began. Its duration counts
 An `outcome` of `paused` marks the step that stopped for a person's SQL decision. That step runs
 again on resume, so it has a second span. The `investigation_status` of `awaiting_sql_approval` on a
 root is not terminal.
+
+## How things are classified
+
+`outcome` says how something ended, and only a real failure is `failure` (an error span). A guard
+that refused a task did its job, and a person who cancelled made a decision, so neither is an error
+and neither is a success.
+
+| Span | `outcome` |
+| --- | --- |
+| `investigation.task` | `success` (`succeeded`), `failure` (`failed`), `refused`, `skipped`, or `cancelled` |
+| `investigation.run` | `success` (`completed`), `failure` (`failed` or an exception), `cancelled`, `paused` (awaiting a person's plan or SQL decision), or `incomplete` (`completed_partial`, `budget_exhausted`, `plan_invalid`, `plan_rejected`, `expired`, `interrupted`) |
+| `investigation.agent`, `.step` | `success` (the step returned), `failure` (it raised), or `paused`. What a guard decided inside the step is `investigation_decision` and `investigation_refusal_code` |
+
+`bi_events_total` keeps its `success`, `failure`, and `none` labels, so the other values count as
+`none` there. Read the investigation metrics below for the detail.
+
+## Stops, restarts, and recovery
+
+- **Cancellation while a run is active or paused.** The run closes itself out: its root reports
+  `cancelled`, and each task it closed has an `investigation.task` span with `outcome=cancelled`. Calls
+  already in flight finish first.
+- **Cancellation while idle, plan rejection, approval expiry, or a failure before a run starts.** No
+  graph runs, so there is no `investigation.run` for that end. The record's
+  `investigation_record.terminal` event and `bi_investigation_ended_total` still report it.
+- **A restart.** Runs are process-local, so nothing resumes. Startup marks each unfinished record
+  `interrupted` and emits one record event for it, so the count appears in the new process.
+  `investigation_ref` joins that event to any trace the old process exported. The root span of an
+  invocation the old process never finished is lost with it, and its finished children may or may
+  not have been exported.
+- **A defect that stops the graph.** The root reports `failed`. Tasks that were still open have no
+  `investigation.task` span, because nothing closed them.
+
+The record is the authority for how an investigation ended. A run's root reports what that invocation
+returned, which can differ if a stop overtook it and its late result was discarded.
 
 ## What a trace never contains
 
@@ -62,7 +97,9 @@ each reached the run, and asserts that none reaches a span, an attribute, or a m
 
 ## Usage and cost are estimates
 
-`ledger_*` values are what the budget ledger **charged**. Where a provider reported no usage, the charge
+`ledger_*` values on a root are the ledger's running totals, so a resumed run repeats what its earlier
+invocation charged; `ledger_invocation_*` is what this invocation added, and metrics count only that.
+They are what the budget ledger **charged**, never a provider's bill. Where a provider reported no usage, the charge
 is the full reservation, so it is an upper bound only if the provider enforced the cap. Read
 `ledger_reservation_bound` (`held`, `unverified`, `exceeded`, or `none`) and
 `ledger_unmetered_model_calls` before treating a count as measured.
@@ -82,7 +119,8 @@ No tenant, investigation, or task identifier is ever a label.
 | Metric | Labels |
 | --- | --- |
 | `bi_investigation_runs_total` | `phase`, `status` |
-| `bi_investigation_terminal_total` | `phase`, `status` |
+| `bi_investigation_terminal_total` (graph invocations that ended the run) | `phase`, `status` |
+| `bi_investigation_ended_total` (each investigation once, however it ended) | `status` |
 | `bi_investigation_ledger_charged_total` | `phase`, `resource` |
 | `bi_investigation_estimated_cost_microusd_total` (an estimate) | `phase`, `bound` |
 | `bi_investigation_agent_steps_total` | `agent`, `outcome` |
@@ -105,4 +143,15 @@ No tenant, investigation, or task identifier is ever a label.
 Telemetry never affects an investigation. An observed step returns what the step returned and
 re-raises what it raised, a sink or observer failure is swallowed, and nothing reads a span or an
 event back, so span status cannot change control flow. Tests compare the outcome of a run under a
-failing sink with a healthy one. A failed telemetry sink can leave gaps in a trace.
+failing sink with a healthy one. A failed telemetry sink can leave gaps in a trace. A failing
+terminal-record observer is logged and cannot change the record.
+
+## Limitations
+
+- **Job traces are not linked to the HTTP request that started them.** Investigation jobs carry no
+  request ID, so each invocation has its own root, and `bi.investigation_ref` joins the investigation's
+  own traces. Issue #146 does not require this link.
+- **Nothing is bundled to receive telemetry.** The repository has no collector, dashboard, or alerting.
+  OTLP export needs an endpoint and a collector that you run yourself.
+- **Metrics are per process.** They restart from zero with the API and are not durable records.
+- **Scripted traces prove the instrumentation, not real-model behavior or performance.**

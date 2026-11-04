@@ -74,7 +74,7 @@ runs and keep it `null` for scripted runs. Optional OTLP trace export is off by 
 
 ### Investigation telemetry (`investigation.*`)
 
-OBS-1 adds `investigation.run`, `investigation.agent`, `investigation.step`, and `investigation.task`, with ledger usage, estimated cost, and terminal status, through the same
+OBS-1 adds `investigation.run`, `investigation.agent`, `investigation.step`, `investigation.task`, and `investigation_record.terminal`, with ledger usage, estimated cost, and terminal status, through the same
 allowlist and sinks. String values come from closed vocabularies; tasks appear as plan-order indexes. Ledger counts and cost are estimates. See
 [Inspecting an investigation trace locally](../operations/investigation-tracing.md) for the fields, metrics, and an offline command that captures a trace.
 
