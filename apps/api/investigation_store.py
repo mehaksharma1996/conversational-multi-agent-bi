@@ -9,7 +9,10 @@ Two stores, split by sensitivity exactly as ADR 0022 splits other resources:
 - **Content** (the plan's model-written text, the verified report, and its typed evidence
   payloads) lives in the workspace's own ``investigations.db``, encrypted with SQLCipher whenever
   ``APP_ENCRYPTION_KEY`` is set, removed with the workspace directory, and included in workspace
-  backups. A stored report is returned only when its digest equals the recorded one.
+  backups. A stored report is returned only when its digest equals the recorded one. The recorded
+  ``report_sha256`` binds the report and its evidence together (``report_content_digest``, UI-6c);
+  a record written before that digests the report alone, so its evidence is never presented as
+  verified.
 
 Status changes go through ``packages.investigation.lifecycle.transition`` only, so a terminal record
 never changes. ``reconcile`` (startup) moves every non-terminal record to ``interrupted`` with a
@@ -159,6 +162,11 @@ def request_fingerprint(conversation_id: str, message_id: str) -> str:
 
 def content_digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def report_content_digest(report_json: str, evidence_json: str) -> str:
+    """One digest over both stored texts; the JSON array keeps their boundary unambiguous."""
+    return content_digest(json.dumps([report_json, evidence_json]))
 
 
 class InvestigationRecordStore:
@@ -380,8 +388,8 @@ class InvestigationRecordStore:
     def save_report(
         self, record: InvestigationRecord, report_json: str, evidence_json: str
     ) -> InvestigationRecord:
-        """Store the verified report and its evidence, then record the report's digest."""
-        digest = content_digest(report_json)
+        """Store the verified report and its evidence, then record the digest binding them."""
+        digest = report_content_digest(report_json, evidence_json)
         with self._lock:
             current = self.get(record.id, record.tenant_id)
             if current.report_sha256 is not None:
@@ -402,7 +410,16 @@ class InvestigationRecordStore:
             return updated
 
     def load_report(self, record: InvestigationRecord) -> tuple[str, str] | None:
-        """The stored report and evidence JSON, only when the report's digest matches."""
+        """The stored report and evidence JSON, only when the recorded digest matches."""
+        verified = self._verified_report(record)
+        return None if verified is None else verified[0]
+
+    def evidence_is_bound(self, record: InvestigationRecord) -> bool:
+        """Whether the recorded digest covers the evidence too (false for an older record)."""
+        verified = self._verified_report(record)
+        return verified is not None and verified[1]
+
+    def _verified_report(self, record: InvestigationRecord) -> tuple[tuple[str, str], bool] | None:
         if record.report_sha256 is None:
             return None
         if self._metadata is None:
@@ -419,9 +436,11 @@ class InvestigationRecordStore:
             stored = None if row is None else (str(row[0]), str(row[1]))
         if stored is None:
             raise InvestigationContentError("report_missing")
-        if content_digest(stored[0]) != record.report_sha256:
-            raise InvestigationContentError("report_digest_mismatch")
-        return stored
+        if report_content_digest(*stored) == record.report_sha256:
+            return stored, True
+        if content_digest(stored[0]) == record.report_sha256:
+            return stored, False
+        raise InvestigationContentError("report_digest_mismatch")
 
     # --- internals -----------------------------------------------------------------------------
 
@@ -514,5 +533,6 @@ __all__ = [
     "InvestigationRecord",
     "InvestigationRecordStore",
     "content_digest",
+    "report_content_digest",
     "request_fingerprint",
 ]

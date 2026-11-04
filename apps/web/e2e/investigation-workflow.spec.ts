@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page, Route } from "@playwright/test";
 
+import { HOSTILE, QUERY_ID, evidenceFixture } from "../src/test/investigationReportFixture";
 import { conversationFixture, fulfillConsent, documentCollectionFixture, messageFixture, workspaceFixture } from "./fixtures";
 import { expect, test } from "./test";
 
@@ -203,6 +204,8 @@ interface Api {
   waveGet: Handler;
   wavePost: Handler;
   job: Handler;
+  evidence: Handler;
+  exportReport: Handler;
   nextProposal: string;
   counts: Record<"create" | "plan" | "cancel" | "wave", number>;
   bodies: { plan: unknown[]; wave: unknown[] };
@@ -227,6 +230,8 @@ async function routeApi(page: Page): Promise<Api> {
       return route.fulfill({ status: 202, json: api.server });
     },
     job: (route) => route.fulfill({ status: 200, json: job() }),
+    evidence: (route) => route.fulfill(notFound),
+    exportReport: (route) => route.fulfill(notFound),
     nextProposal: PROPOSAL,
     counts: { create: 0, plan: 0, cancel: 0, wave: 0 },
     bodies: { plan: [], wave: [] },
@@ -263,7 +268,9 @@ async function routeApi(page: Page): Promise<Api> {
     } else if (path.endsWith("/cancel")) {
       api.counts.cancel += 1;
       await api.cancel(route);
-    } else if (path.endsWith("/sql-wave") && method === "GET") await api.waveGet(route);
+    } else if (path.endsWith("/evidence")) await api.evidence(route);
+    else if (path.endsWith("/report/export")) await api.exportReport(route);
+    else if (path.endsWith("/sql-wave") && method === "GET") await api.waveGet(route);
     else if (path.endsWith("/sql-wave") && method === "POST") {
       api.counts.wave += 1;
       api.bodies.wave.push(request.postDataJSON());
@@ -491,7 +498,7 @@ test("cancellation that arrives too late says the investigation finished first",
 
   await pressAndConfirm(page, page.getByRole("button", { name: "Cancel investigation" }), "Cancel investigation");
   await expect(panel(page)).toContainText("reached completed before cancellation took effect");
-  await expect(panel(page)).toContainText("belongs to UI-6c and is not shown here");
+  await expect(panel(page)).toContainText("has no verified report");
   await expect(panel(page)).not.toContainText("Cancellation is confirmed");
 });
 
@@ -661,5 +668,147 @@ test("a 409 after the SQL-wave deadline shows the server's expired state, not a 
   await expect(status(page)).toHaveText("Expired");
   await expect(checkServer(page)).toHaveCount(0);
   await expect(page.locator(".investigation-wave")).toHaveCount(0);
+  await expectNoAxeViolations(page);
+});
+
+// --- UI-6c (#156): the verified report and evidence inspector ---------------------------------------
+
+const completed = (overrides: Record<string, unknown> = {}) =>
+  investigation({ status: "completed_partial", plan: PLAN, job_id: null, ...overrides });
+
+const evidenceBody = () => ({ ...evidenceFixture(), investigation_id: INVESTIGATION });
+
+async function openReport(page: Page, api: Api, viewport?: { width: number; height: number }) {
+  api.server = completed();
+  api.evidence = (route) => route.fulfill({ status: 200, json: evidenceBody() });
+  await openProposal(page, viewport);
+  await expect(page.getByRole("heading", { name: "Verified report" })).toBeVisible();
+}
+
+for (const [name, viewport] of VIEWPORTS) {
+  test(`${name}: the report and inspector are complete, inert, keyboard-navigable, and pass axe`, async ({ page }) => {
+    const api = await routeApi(page);
+    await openReport(page, api, viewport);
+
+    await expect(panel(page)).toContainText("verified, association only");
+    await expect(page.locator(".report-claim", { hasText: "A claim citing evidence" })).toContainText("Unsupported: evidence unavailable");
+    await expect(page.locator(".report-claim", { hasText: "could not be tested" })).toContainText("Incomplete");
+    await expect(page.getByRole("heading", { name: "Evidence inspector" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Hypothesis board" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Critic findings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "SQL and preview rows" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Document citations" })).toBeVisible();
+
+    // Untrusted strings stay text: nothing executes, and no element or link is created from them.
+    await expect(panel(page)).toContainText(HOSTILE);
+    expect(await page.evaluate("window.__pwned === undefined")).toBe(true);
+    await expect(panel(page).locator("img, script, a[href]")).toHaveCount(0);
+
+    // Keyboard only: claim to evidence, then evidence back to the claim.
+    const claim = page.locator(".report-claim", { hasText: "Measurement f1:" });
+    await claim.getByRole("button", { name: `Inspect evidence ${QUERY_ID}` }).focus();
+    await page.keyboard.press("Enter");
+    const card = page.locator(`[id="investigation-evidence-${QUERY_ID}"]`);
+    await expect(card).toBeFocused();
+    await expect(card).toBeInViewport();
+    await expect(card.locator("pre")).toContainText("SELECT quarter_start");
+    await card.getByRole("button", { name: "Findings claim 1" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(claim).toBeFocused();
+
+    // The scrollable regions are reachable by keyboard, and the page itself does not overflow.
+    await expect(card.getByRole("group", { name: /Rows returned by task h1_rate/ })).toHaveAttribute("tabindex", "0");
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+  });
+}
+
+test("the report states loading accessibly, recovers from a transient failure, and announces both", async ({ page }) => {
+  const api = await routeApi(page);
+  api.server = completed();
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((done) => (release = done));
+  let attempts = 0;
+  api.evidence = async (route) => {
+    attempts += 1;
+    await held;
+    if (attempts === 1) {
+      await route.fulfill({ status: 503, json: { error: { code: "unavailable", message: "x", request_id: "r" } } });
+    } else {
+      await route.fulfill({ status: 200, json: evidenceBody() });
+    }
+  };
+  await openProposal(page);
+  await expect(panel(page).locator('[aria-busy="true"]')).toContainText("Loading the verified report");
+  await expectNoAxeViolations(page);
+  release();
+
+  const retry = page.getByRole("button", { name: "Try loading the report again" });
+  await expect(retry).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Verified report" })).toHaveCount(0);
+  await expectNoAxeViolations(page);
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Verified report" })).toBeVisible();
+  expect(attempts).toBe(2);
+  await expect(page.locator('[aria-live="polite"]').filter({ hasText: "The verified report is ready." })).toHaveCount(1);
+});
+
+test("content that fails its integrity check is not shown, and no retry pretends otherwise", async ({ page }) => {
+  const api = await routeApi(page);
+  api.server = completed();
+  api.evidence = (route) =>
+    route.fulfill({
+      status: 409,
+      json: { error: { code: "investigation_content_unverifiable", message: "x", request_id: "r" } },
+    });
+  await openProposal(page);
+  await expect(panel(page)).toContainText("failed its integrity check");
+  await expect(page.getByRole("heading", { name: "Evidence inspector" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Export report|Try loading/ })).toHaveCount(0);
+  await expectNoAxeViolations(page);
+});
+
+test("a report finishing in the background does not take focus from a question being typed", async ({ page }) => {
+  const api = await routeApi(page);
+  api.server = running();
+  api.evidence = (route) => route.fulfill({ status: 200, json: evidenceBody() });
+  await openProposal(page);
+  await expect(status(page)).toHaveText("Running");
+  const box = page.getByLabel("Business question");
+  await expect(box).toBeEnabled();
+  await box.focus();
+  await page.keyboard.type("still typ");
+
+  api.server = completed();
+  await expect(page.getByRole("heading", { name: "Verified report" })).toBeVisible();
+  await expect(box).toBeFocused();
+  await page.keyboard.type("ing");
+  await expect(box).toHaveValue("still typing");
+});
+
+test("export downloads the server's file, and a refused export is stated and saves nothing", async ({ page }) => {
+  const api = await routeApi(page);
+  let format: string | null = null;
+  api.exportReport = (route) => {
+    format = new URL(route.request().url()).searchParams.get("format");
+    return route.fulfill({
+      status: 200,
+      contentType: "text/markdown; charset=utf-8",
+      body: "# Verified investigation report\n",
+      headers: { "Content-Disposition": 'attachment; filename="investigation-report.md"' },
+    });
+  };
+  await openReport(page, api);
+
+  const saved = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export report as Markdown" }).click();
+  expect((await saved).suggestedFilename()).toBe(`investigation-report-${INVESTIGATION}.md`);
+  expect(format).toBe("markdown");
+
+  api.exportReport = (route) =>
+    route.fulfill({ status: 403, json: { error: { code: "permission_denied", message: "x", request_id: "r" } } });
+  await page.getByRole("button", { name: "Export report as JSON" }).click();
+  await expect(panel(page)).toContainText("You do not have permission to export reports.");
   await expectNoAxeViolations(page);
 });

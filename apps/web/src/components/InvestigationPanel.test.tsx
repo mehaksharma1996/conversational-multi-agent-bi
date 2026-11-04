@@ -6,6 +6,16 @@ import type { InvestigationAvailability } from "../investigations/useInvestigati
 import { investigationProposalMessageFixture } from "../test/fixtures";
 import { InvestigationPanel } from "./InvestigationPanel";
 
+vi.mock("../api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/client")>();
+  return {
+    ...actual,
+    getInvestigationEvidence: vi.fn(() =>
+      Promise.reject(new actual.ApiClientError("none", "not_found", "r", 404)),
+    ),
+  };
+});
+
 const proposal = investigationProposalMessageFixture.proposal;
 const callbacks = {
   onStart: vi.fn(),
@@ -15,6 +25,8 @@ const callbacks = {
   onCheckServerState: vi.fn(),
   onRefreshJob: vi.fn(),
   onSubmitSqlWave: vi.fn(),
+  onAnnounce: vi.fn(),
+  beginDownload: vi.fn(() => null),
 };
 
 function pendingPlan(overrides: Partial<Investigation> = {}): Investigation {

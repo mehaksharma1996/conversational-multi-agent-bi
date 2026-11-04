@@ -43,6 +43,11 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from apps.api.consent_notices import effective_recipients
+from apps.api.investigation_content import (
+    VerifiedContent,
+    read_verified_content,
+    stored_evidence_json,
+)
 from apps.api.investigation_store import (
     InvestigationConflictError,
     InvestigationRecord,
@@ -741,11 +746,8 @@ class InvestigationRuntime:
             except LookupError:
                 return  # the workspace was deleted underneath the run
             if not record.terminal:
-                evidence = {
-                    key: value.model_dump(mode="json") for key, value in result.payloads.items()
-                }
                 self._records.save_report(
-                    record, result.report.model_dump_json(), json.dumps(evidence, sort_keys=True)
+                    record, result.report.model_dump_json(), stored_evidence_json(result)
                 )
         live = self._live.get(investigation_id)
         stopped_by = live.stop_explanation if live is not None else None
@@ -965,6 +967,14 @@ class InvestigationRuntime:
             return None
         value: Mapping[str, Any] = json.loads(stored[0])
         return value
+
+    def verified_content(self, record: InvestigationRecord) -> VerifiedContent | None:
+        """The digest-checked report and evidence of a terminal record; read-only (UI-6c).
+
+        ``None`` until the record is terminal or when it has no report. Unreadable, tampered, or
+        unparsable content raises ``InvestigationContentError``: it is never returned.
+        """
+        return read_verified_content(self._records, record)
 
     def synchronize(self, record: InvestigationRecord) -> InvestigationRecord:
         """Apply due server-side approval expiry before publishing a status read.

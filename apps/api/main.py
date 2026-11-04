@@ -18,6 +18,7 @@ from apps.api.content_store import WorkspaceContentStore
 from apps.api.dependencies import get_repository
 from apps.api.errors import ApiError, install_exception_handlers
 from apps.api.feature_routes import router as feature_router
+from apps.api.investigation_evidence_routes import router as investigation_evidence_router
 from apps.api.investigation_providers import select_investigation_adapters
 from apps.api.investigation_routes import router as investigation_router
 from apps.api.investigation_store import InvestigationRecordStore
@@ -299,6 +300,7 @@ def create_app(
     application.include_router(feature_router)
     application.include_router(job_router)
     application.include_router(investigation_router)
+    application.include_router(investigation_evidence_router)
     return application
 
 

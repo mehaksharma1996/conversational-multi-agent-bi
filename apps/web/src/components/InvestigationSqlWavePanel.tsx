@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { InvestigationSqlWave, InvestigationSqlWaveDecision } from "../api/client";
+import { focusUnlessEditing } from "../investigations/focusPolicy";
 
 type Choice = "approve" | "reject" | "edit";
 interface Draft {
@@ -38,7 +39,7 @@ function SqlWaveContents({ wave, busy, onSubmit }: InvestigationSqlWavePanelProp
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
   useEffect(() => {
-    heading.current?.focus();
+    focusUnlessEditing(heading.current);
   }, []);
 
   const decisions = useMemo(

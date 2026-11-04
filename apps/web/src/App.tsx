@@ -1381,6 +1381,8 @@ export default function App() {
                     onCheckServerState={() => void investigation.checkServerState()}
                     onRefreshJob={investigation.refreshJob}
                     onSubmitSqlWave={(decision) => void investigation.submitSqlWave(decision)}
+                    onAnnounce={announce}
+                    beginDownload={() => begin("download")}
                   />
                   </Suspense>
                 ) : null
