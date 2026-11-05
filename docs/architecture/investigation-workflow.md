@@ -1,5 +1,10 @@
 # Investigation workflow
 
+**New here?** Start with the [investigation guide](../investigation.md), which has the current
+architecture, a reproducible demo, and the limits. The components below are reachable through the
+investigations API (INV-11). The milestone notes in this section and under "Topology" record how the
+pieces arrived.
+
 How the multi-agent investigation fits beside the existing question graph. The decisions are in
 [ADR 0024](../adr/0024-multi-agent-investigation.md), and delivery is tracked by
 [#131](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/131). Status

@@ -1,0 +1,1105 @@
+{
+  "evidence": {
+    "kind": "scripted-investigation-demo",
+    "model_is_live": false,
+    "real": [
+      "FastAPI routes, identity, consent, rate limits, and jobs",
+      "the routing gate, plan validation, and the approval service",
+      "the SQL and document gateways, the read-only SQL guards, and SQLite execution",
+      "the independent check, verdicts, Critic checks, and report verifier",
+      "ChromaDB retrieval and durable storage, under a temporary directory"
+    ],
+    "scripted": [
+      "planner: the churn plan (tests/investigation_critique_fakes.py)",
+      "SQL analyst model: the SQL text of each task (tests/investigation_hypothesis_fakes.py)",
+      "document answers: one cited answer per research task",
+      "findings draft and Critic review: one seeded contradiction and one stratification gap",
+      "narrative model: an empty answer, so the verifier falls back to the deterministic report",
+      "embedder: a term-matching test embedder instead of SentenceTransformers",
+      "human approver: this script, calling the same HTTP routes the browser calls"
+    ],
+    "statement": "Scripted demonstration, not real-model performance. Scripted adapters supply every model output, and the production application handles them. It says nothing about how any real model would plan, write SQL, cite, critique, or report.",
+    "verified_means": "Verified means agreement with the authorized source table under the approved definitions. It is not proof that the source data is accurate or that the definitions are the right ones."
+  },
+  "question": "Why did customer churn increase last quarter?",
+  "routing_gate": [
+    {
+      "case": "Feature flag on, table ready",
+      "eligible": true,
+      "reason": "metric_change_causal"
+    },
+    {
+      "case": "Feature flag off (the default)",
+      "eligible": false,
+      "reason": "feature_disabled"
+    },
+    {
+      "case": "No table in the conversation",
+      "eligible": false,
+      "reason": "authorized_table_missing"
+    },
+    {
+      "case": "A single-fact question",
+      "eligible": false,
+      "reason": "intent_not_eligible"
+    }
+  ],
+  "runs": {
+    "approved": {
+      "altered_plan_digest_refused": {
+        "code": "plan_digest_mismatch",
+        "status_code": 409
+      },
+      "before_approval": {
+        "approval_requirements": [
+          {
+            "kind": "plan",
+            "status": "required"
+          },
+          {
+            "kind": "statement_sql",
+            "status": "deferred_to_statement_preparation"
+          }
+        ],
+        "evidence_status_code": 404,
+        "execution_providers_built": 0,
+        "hypotheses": {
+          "h1": "SMB Basic churn rose contemporaneously with the pricing change.",
+          "h2": "APAC churn is associated with the support backlog and long resolutions.",
+          "h3": "The retention playbook reduced churn.",
+          "h4": "Enterprise churn increased in 2026-Q2."
+        },
+        "plan_digest": "7f8f42417b086f88bbcb6464e8dd5274791a2e2ab5665a859f67f55d383d21b1",
+        "status": "awaiting_plan_approval",
+        "tasks": [
+          {
+            "assignee": "sql_analyst",
+            "id": "trend",
+            "kind": "sql_analysis"
+          },
+          {
+            "assignee": "document_research",
+            "id": "pricing",
+            "kind": "document_research"
+          },
+          {
+            "assignee": "document_research",
+            "id": "support",
+            "kind": "document_research"
+          },
+          {
+            "assignee": "document_research",
+            "id": "playbook",
+            "kind": "document_research"
+          },
+          {
+            "assignee": "document_research",
+            "id": "memo",
+            "kind": "document_research"
+          },
+          {
+            "assignee": "sql_analyst",
+            "id": "h1_rate",
+            "kind": "hypothesis_test"
+          },
+          {
+            "assignee": "sql_analyst",
+            "id": "h2_rate",
+            "kind": "hypothesis_test"
+          },
+          {
+            "assignee": "sql_analyst",
+            "id": "h2_resolution",
+            "kind": "hypothesis_test"
+          },
+          {
+            "assignee": "sql_analyst",
+            "id": "h4_rate",
+            "kind": "hypothesis_test"
+          }
+        ]
+      },
+      "citations": [
+        "subscription_churn_draft_board_memo.pdf p.1",
+        "subscription_churn_pricing_change_notice.pdf p.1",
+        "subscription_churn_retention_playbook.pdf p.1",
+        "subscription_churn_support_operations_update.pdf p.1"
+      ],
+      "critic": [
+        {
+          "findings": [
+            {
+              "code": "document_contradiction",
+              "disposition": "retain_data_verdict",
+              "hypothesis": "h4",
+              "severity": "high"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h1",
+              "severity": "low"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h2",
+              "severity": "low"
+            },
+            {
+              "code": "missing_stratification",
+              "disposition": "follow_up",
+              "hypothesis": "h1",
+              "severity": "medium"
+            }
+          ],
+          "replan": "admitted",
+          "round": 0
+        },
+        {
+          "findings": [
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h1",
+              "severity": "low"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h2",
+              "severity": "low"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h4",
+              "severity": "low"
+            }
+          ],
+          "replan": "none_needed",
+          "round": 1
+        }
+      ],
+      "export_states_verification_limit": true,
+      "facts": {
+        "f1": {
+          "baseline": "30/500 = 0.0600",
+          "comparison": "70/500 = 0.1400",
+          "difference": "+0.0800",
+          "evidence": [
+            "derived:h1_rate",
+            "query:h1_rate"
+          ],
+          "hypothesis": "h1",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h1_rate"
+        },
+        "f2": {
+          "baseline": "30/500 = 0.0600",
+          "comparison": "41063/291200 = 0.1410",
+          "difference": "+0.0810",
+          "evidence": [
+            "derived:h1_rate_r1s0",
+            "query:h1_rate_r1s0"
+          ],
+          "hypothesis": "h1",
+          "outcome": "supports",
+          "standardized_by": {
+            "cut_points": [
+              6
+            ],
+            "field": "tenure_months_start"
+          },
+          "task": "h1_rate_r1s0"
+        },
+        "f3": {
+          "baseline": "20/400 = 0.0500",
+          "comparison": "36/400 = 0.0900",
+          "difference": "+0.0400",
+          "evidence": [
+            "derived:h2_rate",
+            "query:h2_rate"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_rate"
+        },
+        "f4": {
+          "baseline": "7722/227 = 34.0176",
+          "comparison": "12675/260 = 48.7500",
+          "difference": "+14.7324",
+          "evidence": [
+            "derived:h2_resolution",
+            "query:h2_resolution"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_resolution"
+        },
+        "f5": {
+          "baseline": "14/700 = 0.0200",
+          "comparison": "14/700 = 0.0200",
+          "difference": "0.0000",
+          "evidence": [
+            "derived:h4_rate",
+            "query:h4_rate"
+          ],
+          "hypothesis": "h4",
+          "outcome": "refutes",
+          "standardized_by": null,
+          "task": "h4_rate"
+        }
+      },
+      "follow_up_rounds_delegated": 1,
+      "hypotheses": {
+        "h1": {
+          "evidence": [
+            "derived:h1_rate",
+            "derived:h1_rate_r1s0",
+            "document:pricing",
+            "query:h1_rate",
+            "query:h1_rate_r1s0"
+          ],
+          "facts": [
+            "f1",
+            "f2"
+          ],
+          "follow_ups": [
+            "h1_rate_r1s0"
+          ],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h1_rate"
+          ],
+          "verdict": "supported_association"
+        },
+        "h2": {
+          "evidence": [
+            "derived:h2_rate",
+            "derived:h2_resolution",
+            "document:support",
+            "query:h2_rate",
+            "query:h2_resolution"
+          ],
+          "facts": [
+            "f3",
+            "f4"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h2_rate",
+            "h2_resolution"
+          ],
+          "verdict": "supported_association"
+        },
+        "h3": {
+          "evidence": [
+            "document:playbook"
+          ],
+          "facts": [],
+          "follow_ups": [],
+          "reasons": [
+            "required_data_absent"
+          ],
+          "tests": [],
+          "verdict": "untestable"
+        },
+        "h4": {
+          "evidence": [
+            "derived:h4_rate",
+            "document:memo",
+            "query:h4_rate"
+          ],
+          "facts": [
+            "f5"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "no_effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h4_rate"
+          ],
+          "verdict": "refuted"
+        }
+      },
+      "independent_check": {
+        "h1_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h1_rate_r1s0": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_resolution": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h4_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "trend": {
+          "independently_confirmed": false,
+          "rows_in_report": true
+        }
+      },
+      "limitations": [],
+      "report": {
+        "availability": "complete",
+        "fallback_reason": "narrative_invalid",
+        "label": "verified, association only",
+        "mode": "deterministic_fallback",
+        "verification": "verified"
+      },
+      "scripted_model_calls": {
+        "document": 4,
+        "draft": 2,
+        "narrative": 1,
+        "planning": 1,
+        "review": 2,
+        "sql": 6
+      },
+      "sql_waves": [
+        {
+          "sequence": 1,
+          "statements": [
+            {
+              "decision": "approve",
+              "task": "trend"
+            },
+            {
+              "decision": "approve",
+              "task": "h1_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_resolution"
+            },
+            {
+              "decision": "approve",
+              "task": "h4_rate"
+            }
+          ]
+        },
+        {
+          "sequence": 2,
+          "statements": [
+            {
+              "decision": "approve",
+              "task": "h1_rate_r1s0"
+            }
+          ]
+        }
+      ],
+      "status": "completed"
+    },
+    "forged_literal_counts": {
+      "citations": [
+        "subscription_churn_draft_board_memo.pdf p.1",
+        "subscription_churn_pricing_change_notice.pdf p.1",
+        "subscription_churn_retention_playbook.pdf p.1",
+        "subscription_churn_support_operations_update.pdf p.1"
+      ],
+      "critic": [
+        {
+          "findings": [
+            {
+              "code": "insufficient_evidence",
+              "disposition": "retain_limitation",
+              "hypothesis": "h4",
+              "severity": "medium"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h1",
+              "severity": "low"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h2",
+              "severity": "low"
+            },
+            {
+              "code": "missing_stratification",
+              "disposition": "follow_up",
+              "hypothesis": "h1",
+              "severity": "medium"
+            }
+          ],
+          "replan": "not_authorized",
+          "round": 0
+        }
+      ],
+      "export_states_verification_limit": true,
+      "facts": {
+        "f1": {
+          "baseline": "30/500 = 0.0600",
+          "comparison": "70/500 = 0.1400",
+          "difference": "+0.0800",
+          "evidence": [
+            "derived:h1_rate",
+            "query:h1_rate"
+          ],
+          "hypothesis": "h1",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h1_rate"
+        },
+        "f2": {
+          "baseline": "20/400 = 0.0500",
+          "comparison": "36/400 = 0.0900",
+          "difference": "+0.0400",
+          "evidence": [
+            "derived:h2_rate",
+            "query:h2_rate"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_rate"
+        },
+        "f3": {
+          "baseline": "7722/227 = 34.0176",
+          "comparison": "12675/260 = 48.7500",
+          "difference": "+14.7324",
+          "evidence": [
+            "derived:h2_resolution",
+            "query:h2_resolution"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_resolution"
+        }
+      },
+      "follow_up_rounds_delegated": 0,
+      "forged_statement_in_export": false,
+      "forged_statement_kept_for_review": true,
+      "forged_statement_returned": [
+        "2026-01-01: 1/100",
+        "2026-04-01: 50/100"
+      ],
+      "hypotheses": {
+        "h1": {
+          "evidence": [
+            "derived:h1_rate",
+            "document:pricing",
+            "query:h1_rate"
+          ],
+          "facts": [
+            "f1"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h1_rate"
+          ],
+          "verdict": "supported_association"
+        },
+        "h2": {
+          "evidence": [
+            "derived:h2_rate",
+            "derived:h2_resolution",
+            "document:support",
+            "query:h2_rate",
+            "query:h2_resolution"
+          ],
+          "facts": [
+            "f2",
+            "f3"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h2_rate",
+            "h2_resolution"
+          ],
+          "verdict": "supported_association"
+        },
+        "h3": {
+          "evidence": [
+            "document:playbook"
+          ],
+          "facts": [],
+          "follow_ups": [],
+          "reasons": [
+            "required_data_absent"
+          ],
+          "tests": [],
+          "verdict": "untestable"
+        },
+        "h4": {
+          "evidence": [
+            "document:memo"
+          ],
+          "facts": [],
+          "follow_ups": [],
+          "reasons": [
+            "independent_check_mismatch"
+          ],
+          "tests": [
+            "h4_rate"
+          ],
+          "verdict": "untestable"
+        }
+      },
+      "independent_check": {
+        "h1_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_resolution": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h4_rate": {
+          "independently_confirmed": false,
+          "rows_in_report": false
+        },
+        "trend": {
+          "independently_confirmed": false,
+          "rows_in_report": true
+        }
+      },
+      "limitations": [
+        "follow_up_not_authorized",
+        "independent_check_failed"
+      ],
+      "report": {
+        "availability": "complete",
+        "fallback_reason": "narrative_invalid",
+        "label": "verified, association only",
+        "mode": "deterministic_fallback",
+        "verification": "verified"
+      },
+      "scripted_model_calls": {
+        "document": 4,
+        "draft": 1,
+        "narrative": 1,
+        "planning": 1,
+        "review": 1,
+        "sql": 5
+      },
+      "sql_waves": [
+        {
+          "sequence": 1,
+          "statements": [
+            {
+              "decision": "approve",
+              "task": "trend"
+            },
+            {
+              "decision": "approve",
+              "task": "h1_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_resolution"
+            },
+            {
+              "decision": "approve",
+              "task": "h4_rate"
+            }
+          ]
+        }
+      ],
+      "status": "completed"
+    },
+    "forged_relabelled_population": {
+      "citations": [
+        "subscription_churn_draft_board_memo.pdf p.1",
+        "subscription_churn_pricing_change_notice.pdf p.1",
+        "subscription_churn_retention_playbook.pdf p.1",
+        "subscription_churn_support_operations_update.pdf p.1"
+      ],
+      "critic": [
+        {
+          "findings": [
+            {
+              "code": "insufficient_evidence",
+              "disposition": "retain_limitation",
+              "hypothesis": "h4",
+              "severity": "medium"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h1",
+              "severity": "low"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h2",
+              "severity": "low"
+            },
+            {
+              "code": "missing_stratification",
+              "disposition": "follow_up",
+              "hypothesis": "h1",
+              "severity": "medium"
+            }
+          ],
+          "replan": "not_authorized",
+          "round": 0
+        }
+      ],
+      "export_states_verification_limit": true,
+      "facts": {
+        "f1": {
+          "baseline": "30/500 = 0.0600",
+          "comparison": "70/500 = 0.1400",
+          "difference": "+0.0800",
+          "evidence": [
+            "derived:h1_rate",
+            "query:h1_rate"
+          ],
+          "hypothesis": "h1",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h1_rate"
+        },
+        "f2": {
+          "baseline": "20/400 = 0.0500",
+          "comparison": "36/400 = 0.0900",
+          "difference": "+0.0400",
+          "evidence": [
+            "derived:h2_rate",
+            "query:h2_rate"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_rate"
+        },
+        "f3": {
+          "baseline": "7722/227 = 34.0176",
+          "comparison": "12675/260 = 48.7500",
+          "difference": "+14.7324",
+          "evidence": [
+            "derived:h2_resolution",
+            "query:h2_resolution"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_resolution"
+        }
+      },
+      "follow_up_rounds_delegated": 0,
+      "forged_statement_in_export": false,
+      "forged_statement_kept_for_review": true,
+      "forged_statement_returned": [
+        "2026-01-01: 30/500",
+        "2026-04-01: 70/500"
+      ],
+      "hypotheses": {
+        "h1": {
+          "evidence": [
+            "derived:h1_rate",
+            "document:pricing",
+            "query:h1_rate"
+          ],
+          "facts": [
+            "f1"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h1_rate"
+          ],
+          "verdict": "supported_association"
+        },
+        "h2": {
+          "evidence": [
+            "derived:h2_rate",
+            "derived:h2_resolution",
+            "document:support",
+            "query:h2_rate",
+            "query:h2_resolution"
+          ],
+          "facts": [
+            "f2",
+            "f3"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h2_rate",
+            "h2_resolution"
+          ],
+          "verdict": "supported_association"
+        },
+        "h3": {
+          "evidence": [
+            "document:playbook"
+          ],
+          "facts": [],
+          "follow_ups": [],
+          "reasons": [
+            "required_data_absent"
+          ],
+          "tests": [],
+          "verdict": "untestable"
+        },
+        "h4": {
+          "evidence": [
+            "document:memo"
+          ],
+          "facts": [],
+          "follow_ups": [],
+          "reasons": [
+            "independent_check_mismatch"
+          ],
+          "tests": [
+            "h4_rate"
+          ],
+          "verdict": "untestable"
+        }
+      },
+      "independent_check": {
+        "h1_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_resolution": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h4_rate": {
+          "independently_confirmed": false,
+          "rows_in_report": false
+        },
+        "trend": {
+          "independently_confirmed": false,
+          "rows_in_report": true
+        }
+      },
+      "limitations": [
+        "follow_up_not_authorized",
+        "independent_check_failed"
+      ],
+      "report": {
+        "availability": "complete",
+        "fallback_reason": "narrative_invalid",
+        "label": "verified, association only",
+        "mode": "deterministic_fallback",
+        "verification": "verified"
+      },
+      "scripted_model_calls": {
+        "document": 4,
+        "draft": 1,
+        "narrative": 1,
+        "planning": 1,
+        "review": 1,
+        "sql": 5
+      },
+      "sql_waves": [
+        {
+          "sequence": 1,
+          "statements": [
+            {
+              "decision": "approve",
+              "task": "trend"
+            },
+            {
+              "decision": "approve",
+              "task": "h1_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_resolution"
+            },
+            {
+              "decision": "approve",
+              "task": "h4_rate"
+            }
+          ]
+        }
+      ],
+      "status": "completed"
+    },
+    "plan_rejected": {
+      "evidence_status_code": 404,
+      "execution_providers_built": 0,
+      "status": "plan_rejected"
+    },
+    "production_configuration": {
+      "explanation_code": "metering_unbounded",
+      "plan_produced": false,
+      "status": "failed"
+    },
+    "statement_rejected": {
+      "citations": [
+        "subscription_churn_draft_board_memo.pdf p.1",
+        "subscription_churn_pricing_change_notice.pdf p.1",
+        "subscription_churn_retention_playbook.pdf p.1",
+        "subscription_churn_support_operations_update.pdf p.1"
+      ],
+      "critic": [
+        {
+          "findings": [
+            {
+              "code": "insufficient_evidence",
+              "disposition": "retain_limitation",
+              "hypothesis": "h4",
+              "severity": "medium"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h4",
+              "severity": "low"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h1",
+              "severity": "low"
+            },
+            {
+              "code": "incomplete_coverage",
+              "disposition": "accept_limitation",
+              "hypothesis": "h2",
+              "severity": "low"
+            },
+            {
+              "code": "missing_stratification",
+              "disposition": "follow_up",
+              "hypothesis": "h1",
+              "severity": "medium"
+            }
+          ],
+          "replan": "not_authorized",
+          "round": 0
+        }
+      ],
+      "export_states_verification_limit": true,
+      "facts": {
+        "f1": {
+          "baseline": "30/500 = 0.0600",
+          "comparison": "70/500 = 0.1400",
+          "difference": "+0.0800",
+          "evidence": [
+            "derived:h1_rate",
+            "query:h1_rate"
+          ],
+          "hypothesis": "h1",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h1_rate"
+        },
+        "f2": {
+          "baseline": "20/400 = 0.0500",
+          "comparison": "36/400 = 0.0900",
+          "difference": "+0.0400",
+          "evidence": [
+            "derived:h2_rate",
+            "query:h2_rate"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_rate"
+        },
+        "f3": {
+          "baseline": "7722/227 = 34.0176",
+          "comparison": "12675/260 = 48.7500",
+          "difference": "+14.7324",
+          "evidence": [
+            "derived:h2_resolution",
+            "query:h2_resolution"
+          ],
+          "hypothesis": "h2",
+          "outcome": "supports",
+          "standardized_by": null,
+          "task": "h2_resolution"
+        }
+      },
+      "follow_up_rounds_delegated": 0,
+      "hypotheses": {
+        "h1": {
+          "evidence": [
+            "derived:h1_rate",
+            "document:pricing",
+            "query:h1_rate"
+          ],
+          "facts": [
+            "f1"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h1_rate"
+          ],
+          "verdict": "supported_association"
+        },
+        "h2": {
+          "evidence": [
+            "derived:h2_rate",
+            "derived:h2_resolution",
+            "document:support",
+            "query:h2_rate",
+            "query:h2_resolution"
+          ],
+          "facts": [
+            "f2",
+            "f3"
+          ],
+          "follow_ups": [],
+          "reasons": [
+            "effect_in_claimed_direction"
+          ],
+          "tests": [
+            "h2_rate",
+            "h2_resolution"
+          ],
+          "verdict": "supported_association"
+        },
+        "h3": {
+          "evidence": [
+            "document:playbook"
+          ],
+          "facts": [],
+          "follow_ups": [],
+          "reasons": [
+            "required_data_absent"
+          ],
+          "tests": [],
+          "verdict": "untestable"
+        },
+        "h4": {
+          "evidence": [
+            "document:memo"
+          ],
+          "facts": [],
+          "follow_ups": [],
+          "reasons": [
+            "test_not_completed"
+          ],
+          "tests": [
+            "h4_rate"
+          ],
+          "verdict": "untestable"
+        }
+      },
+      "independent_check": {
+        "h1_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_rate": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "h2_resolution": {
+          "independently_confirmed": true,
+          "rows_in_report": true
+        },
+        "trend": {
+          "independently_confirmed": false,
+          "rows_in_report": true
+        }
+      },
+      "limitations": [
+        "follow_up_not_authorized",
+        "task_refused"
+      ],
+      "report": {
+        "availability": "partial",
+        "fallback_reason": "narrative_invalid",
+        "label": "verified, association only",
+        "mode": "deterministic_fallback",
+        "verification": "verified"
+      },
+      "scripted_model_calls": {
+        "document": 4,
+        "draft": 1,
+        "narrative": 1,
+        "planning": 1,
+        "review": 1,
+        "sql": 5
+      },
+      "sql_waves": [
+        {
+          "sequence": 1,
+          "statements": [
+            {
+              "decision": "approve",
+              "task": "trend"
+            },
+            {
+              "decision": "approve",
+              "task": "h1_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_rate"
+            },
+            {
+              "decision": "approve",
+              "task": "h2_resolution"
+            },
+            {
+              "decision": "reject",
+              "task": "h4_rate"
+            }
+          ]
+        }
+      ],
+      "status": "completed_partial"
+    }
+  },
+  "safety": {
+    "non_loopback_network_attempts": 0,
+    "ordinary_model_calls": 0
+  },
+  "schema": "investigation-demo/v1"
+}

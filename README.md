@@ -84,22 +84,55 @@ The [system overview](docs/architecture/system-overview.md) has the full route l
 paths, trust boundaries, and local container topology. The diagrams were generated with Archify; their specifications, with
 per-node source-line citations, are under [`.archify/`](.archify/).
 
+## Multi-agent investigations
+
+Some questions need more than one query, such as "Why did customer churn increase last quarter?" An
+investigation has models propose hypotheses and SQL, a person approve the plan and each batch of SQL,
+and deterministic code run the work and decide the verdicts. Each hypothesis test's counts must match a
+computation compiled from the approved specification, so a read-only statement that invents or
+relabels numbers leaves that test `untestable`. That check shows agreement with the authorized source
+table. It does not show that the source data is accurate.
+
+**The workflow has run with scripted models only.** Routing is off by default, and no real provider is
+admitted, so a real-model run fails closed with `metering_unbounded`. The results below are scripted
+evidence, not real-model performance.
+
+Reproduce the churn investigation with no API key, Docker, network, or spend:
+
+```powershell
+python -m tests.e2e.investigation_demo
+```
+
+It runs through the production API with scripted model outputs, approves over HTTP, shows a forged
+count being rejected, and compares the result with a committed expected file. The
+[investigation guide](docs/investigation.md) explains the architecture, the expected output, the
+[evaluation evidence](docs/investigation.md#evaluation-what-the-numbers-mean), and
+[what is not production-ready](docs/investigation.md#what-is-not-production-ready).
+
 ## Evidence and engineering depth
 
-- **85 deterministic evaluation cases** cover routing, SQL, retrieval, hybrid policy checks,
-  injection handling, tenant isolation, privacy, recovery, and the read-only MCP surface using
-  scripted providers through the real guards.
-- **20 Chromium journeys** exercise the React client and real API, including upload, schema review,
-  PDF citations, approval and safe editing, restart recovery, export, and phone-width layout.
+- **85 deterministic evaluation cases** ([scripted](evals/v1/baseline.json); regenerate with
+  `python -m scripts.run_evaluations`) cover routing, SQL, retrieval, hybrid policy checks, injection
+  handling, tenant isolation, privacy, recovery, and the read-only MCP surface using scripted
+  providers through the real guards.
+- **43 investigation trajectory cases** ([scripted](evals/investigation/v1/trajectory-baseline.json);
+  regenerate with `python -m tests.e2e.investigation_trajectory_runner`) run the real investigation
+  graph. A pass means the application still handles those scripted outputs as recorded. It is not an
+  accuracy rate.
+- **37 Chromium journeys** ([scripted provider](apps/web/e2e/real/); list them with
+  `E2E_REAL_STACK=scripted npx playwright test --list`) exercise the React client and real API,
+  including upload, schema review, PDF citations, approval and safe editing, investigations, restart
+  recovery, export, and phone-width layout.
 - **Container CI** builds and scans digest-pinned non-root images, starts the Compose topology, checks
   hardening and recovery, and runs browser journeys. pgvector, OpenAPI compatibility, dependencies,
   licenses, and secrets have separate checks.
 - **Authentication and durability** are covered by deterministic tests for JWT/OIDC flows, PKCE,
   sessions, CSRF/Origin checks, capabilities, tenant isolation, migrations, backup/restore, and
   single-process workspace recovery.
-- **Live-model evidence is deliberately narrow:** one preserved Gemini hybrid run made four
-  successful model calls, extracted `fulfillment_days >= 10`, passed the structural policy check,
-  and returned 13. It is one controlled result, not a success rate.
+- **Live-model evidence is deliberately narrow:** one preserved Gemini hybrid run
+  ([measured](docs/operations/release-readiness.md)) made four successful model calls, extracted
+  `fulfillment_days >= 10`, passed the structural policy check, and returned 13. It is one controlled
+  result on the hybrid question path, not a success rate, and not an investigation.
 
 See [release readiness](docs/operations/release-readiness.md) for evidence classes and caveats, and
 the [portfolio walkthrough](docs/portfolio-walkthrough.md) for the deterministic/model boundary.
@@ -144,6 +177,7 @@ local-only mode is disabled, and the disclosure is accepted.
 
 ## Explore the engineering
 
+[Multi-agent investigations](docs/investigation.md) ·
 [Architecture and trust boundaries](docs/architecture/system-overview.md) ·
 [Policy-to-SQL verifier](docs/architecture/policy-sql-predicate-verification.md) ·
 [Evaluation methodology](docs/governance/evaluation.md) ·

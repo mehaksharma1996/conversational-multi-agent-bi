@@ -10,7 +10,8 @@ records; no additional provider request was made for this documentation update.
 | Capability | Status | Evidence |
 |---|---|---|
 | Deterministic evaluation gate | Verified | 85 versioned cases in `evals/v1/baseline.json`; scripted providers exercise the real guards |
-| Real-stack browser journeys with the **scripted** provider | Verified | `npm run test:e2e:real`, 28 Chromium journeys: 23 retail (including the mapper defaults) and 5 UI-6b investigation journeys |
+| Real-stack browser journeys with the **scripted** provider | Verified | `npm run test:e2e:real`, 37 Chromium journeys: 23 retail (including the mapper defaults), 7 consent, 5 UI-6b investigation journeys, and 2 UI-6c report journeys. A local command: CI runs the consent journeys |
+| Offline investigation demonstration (HIRE-1, #204) | Reproduced with **scripted** adapters only | `python -m tests.e2e.investigation_demo`, compared with `evals/investigation/v1/demo-expected.json`; see [the investigation guide](../investigation.md) |
 | Investigation workflow UI (UI-6b, #155) | Wiring verified with scripted adapters only | Creation, plan approval/rejection, a SQL wave, cancellation, restart interruption, and the production configuration's `metering_unbounded` fail-closed state. Production execution is **unavailable** until PROD-1 (#198); routing is off by default |
 | Controlled live Gemini hybrid case | Verified for one run | Four successful HTTP attempts; see the preserved report and evidence below |
 | Live Gemini answers to the full demo plan | **NOT RUN** | Only the controlled hybrid case was run; one result is not a rate |
