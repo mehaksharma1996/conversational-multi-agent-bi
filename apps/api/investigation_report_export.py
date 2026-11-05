@@ -25,15 +25,15 @@ _SCHEME = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{1,31}):")
 _WWW = re.compile(r"(?i)\bwww\.")
 _FORMULA_PREFIXES = ("=", "+", "-", "@")
 
-# What the verifier establishes, and the residual it cannot catch (see
-# docs/architecture/investigation-workflow.md). A read-only statement with invented counts passes
-# every deterministic control, so only the person reviewing the statement can stop it.
+# What the verifier establishes, and what it cannot (ADR 0024 Amendment 13). A measurement agrees
+# with an independent computation from the approved test over the source table; nothing here can
+# speak to the source data's accuracy or to whether the approved definitions were the right ones.
 VERIFICATION_SCOPE = (
-    "Verified means each number was recomputed from the rows its query returned, and each claim "
-    "cites evidence from this run. It does not show that a query measures what its hypothesis "
-    "says: an approved read-only statement can return counts that do not reflect the source data. "
-    "This file has no SQL, so review each statement in the evidence inspector before relying on "
-    "a result."
+    "Verified means each measurement equals an independent computation from the approved test "
+    "over the authorized source table, and each claim cites evidence from this run. It does not "
+    "show that the source data is accurate or that the approved definitions are the right ones. "
+    "Query rows marked as not independently confirmed had no such check, so review them in the "
+    "evidence inspector before relying on them."
 )
 _EVIDENCE_TEXT = {
     "available": "available in the evidence inspector",
@@ -156,6 +156,8 @@ def render_markdown(
         lines += ["", f"Rows shown: {len(table.rows)} of {table.source_row_count}."]
         if table.source_truncated:
             lines.append("The query reached its row limit; rows may be missing.")
+        if not table.independently_confirmed:
+            lines.append("These rows were not independently confirmed from the source table.")
         lines.append("")
     if report.citations:
         lines += ["## Document citations", ""]

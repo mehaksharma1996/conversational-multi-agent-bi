@@ -117,7 +117,11 @@ function QuerySql({ item }: { item: Item<"query"> }) {
       <div>
         <strong>Executed SQL</strong>
         <pre tabIndex={0} aria-label={`Executed SQL for task ${item.task_id}`}>{item.sql}</pre>
-        <p className="field-hint">Nothing checks these rows against the source data independently. Read the statement before relying on a result that rests on it.</p>
+        <p className="field-hint">
+          {item.independently_confirmed
+            ? "A server-built query from the approved test confirmed these rows against the source table. That does not show the source data is accurate."
+            : "Read this statement before relying on these rows."}
+        </p>
       </div>
     );
   }
@@ -152,6 +156,9 @@ function PreviewRows({ item }: { item: Item<"query"> }) {
       {item.source_truncated ? (
         <p className="field-hint">The query reached its row limit, so rows may be missing.</p>
       ) : null}
+      {item.independently_confirmed ? null : (
+        <p className="field-hint">These rows were not independently confirmed from the source table.</p>
+      )}
     </>
   );
 }

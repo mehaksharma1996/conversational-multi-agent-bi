@@ -1733,7 +1733,7 @@ export interface components {
              * Reasons
              * @default []
              */
-            reasons: ("effect_in_claimed_direction" | "no_effect_in_claimed_direction" | "required_data_absent" | "test_not_completed" | "evidence_missing" | "evidence_inconsistent" | "evidence_truncated" | "null_value" | "insufficient_denominator" | "effect_below_threshold" | "conflicting_evidence" | "context_unverified")[];
+            reasons: ("effect_in_claimed_direction" | "no_effect_in_claimed_direction" | "required_data_absent" | "test_not_completed" | "evidence_missing" | "evidence_inconsistent" | "evidence_truncated" | "null_value" | "insufficient_denominator" | "effect_below_threshold" | "conflicting_evidence" | "context_unverified" | "independent_check_mismatch" | "independent_check_unavailable" | "independent_check_undetermined" | "dataset_version_changed")[];
             /**
              * Status
              * @enum {string}
@@ -1987,7 +1987,7 @@ export interface components {
          * @description Fixed, content-free reasons a result is incomplete. Report wording is keyed by code (S5).
          * @enum {string}
          */
-        LimitationCode: "task_failed" | "task_timed_out" | "task_refused" | "task_cancelled" | "dependency_failed" | "resource_unavailable" | "budget_exhausted" | "investigation_cancelled" | "investigation_failed" | "evidence_missing" | "evidence_inconsistent" | "document_evidence_unverified" | "query_rows_truncated" | "report_rows_limited" | "verdicts_not_evaluated" | "critique_unavailable" | "follow_up_not_authorized" | "follow_up_invalid" | "replan_limit_reached" | "critique_rounds_exhausted";
+        LimitationCode: "task_failed" | "task_timed_out" | "task_refused" | "task_cancelled" | "dependency_failed" | "resource_unavailable" | "budget_exhausted" | "investigation_cancelled" | "investigation_failed" | "evidence_missing" | "evidence_inconsistent" | "document_evidence_unverified" | "query_rows_truncated" | "report_rows_limited" | "verdicts_not_evaluated" | "critique_unavailable" | "follow_up_not_authorized" | "follow_up_invalid" | "replan_limit_reached" | "critique_rounds_exhausted" | "independent_check_failed";
         /** MessageApprovalRequest */
         MessageApprovalRequest: {
             /**
@@ -2157,6 +2157,8 @@ export interface components {
             corrections_used: number | null;
             /** Evidence Id */
             evidence_id: string;
+            /** Independently Confirmed */
+            independently_confirmed: boolean;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2376,6 +2378,11 @@ export interface components {
             columns: string[];
             /** Evidence Id */
             evidence_id: string;
+            /**
+             * Independently Confirmed
+             * @default false
+             */
+            independently_confirmed: boolean;
             /**
              * Rows
              * @default []

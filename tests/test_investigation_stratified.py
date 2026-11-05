@@ -29,6 +29,7 @@ from packages.investigation.verdicts import (
 from src.agents.sql_agent import execute_sql
 from tests.investigation_critique_fakes import stratified_follow_up, tenure_sql
 from tests.investigation_hypothesis_fakes import churn_table
+from tests.investigation_independent_fakes import real_result
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = json.loads((ROOT / "evals" / "investigation" / "v1" / "oracle.json").read_text("utf-8"))
@@ -36,7 +37,9 @@ TOLERANCE = Fraction(1, 10_000)
 EV = "ev_" + "a" * 32
 
 
-def _payload(sql: str, *, task_id: str = "h1_tenure") -> QueryEvidencePayload:
+def _payload(sql: str, test: Any = None, *, task_id: str = "h1_tenure") -> QueryEvidencePayload:
+    """The model's rows, with the real independent check of ``test`` from the same table."""
+    test = test or resolve_follow_up(stratified_follow_up())
     frame = execute_sql(churn_table(), sql)
     rows = tuple(tuple(row) for row in frame.itertuples(index=False, name=None))
     return QueryEvidencePayload.model_validate(
@@ -47,6 +50,7 @@ def _payload(sql: str, *, task_id: str = "h1_tenure") -> QueryEvidencePayload:
             "columns": tuple(str(name) for name in frame.columns),
             "rows": [[int(c) if hasattr(c, "item") else c for c in row] for row in rows],
             "truncated": False,
+            "independent": real_result(test, churn_table(), EV),
         }
     )
 
@@ -54,7 +58,7 @@ def _payload(sql: str, *, task_id: str = "h1_tenure") -> QueryEvidencePayload:
 @pytest.fixture(scope="module")
 def tenure() -> Any:
     test = resolve_follow_up(stratified_follow_up())
-    return test, observe(test, EV, _payload(tenure_sql()))
+    return test, observe(test, EV, _payload(tenure_sql(), test))
 
 
 def test_band_counts_are_the_verified_rows(tenure: Any) -> None:
@@ -140,7 +144,7 @@ def test_unusable_stratified_evidence_is_never_a_measurement(sql: str, reason: s
     cut = 1 if reason == "insufficient_denominator" else 6
     strata = Stratification(field="tenure_months_start", cut_points=(cut,))
     test = resolve_follow_up(stratified_follow_up(stratification=strata))
-    observation = observe(test, EV, _payload(sql))
+    observation = observe(test, EV, _payload(sql, test))
     assert observation.outcome == "unusable"
     assert observation.reason == reason
     assert observation.strata == ()
@@ -152,7 +156,7 @@ def test_a_stated_rate_column_must_agree_with_the_counts() -> None:
         "COUNT(*) AS denominator, 0.5 AS churn_rate",
     )
     test = resolve_follow_up(stratified_follow_up())
-    observation = observe(test, EV, _payload(sql))
+    observation = observe(test, EV, _payload(sql, test))
     assert (observation.outcome, observation.reason) == ("unusable", "evidence_inconsistent")
 
 
@@ -171,6 +175,7 @@ def test_a_payload_record_pair_verifies() -> None:
             corrections_used=0,
             policy_sql_status="not_applicable",
             elapsed_ms=1,
+            independent_check=None if payload.independent is None else payload.independent.record,
         ),
     )
     from packages.investigation.evidence import verify_payload

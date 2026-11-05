@@ -2247,7 +2247,11 @@
                 "insufficient_denominator",
                 "effect_below_threshold",
                 "conflicting_evidence",
-                "context_unverified"
+                "context_unverified",
+                "independent_check_mismatch",
+                "independent_check_unavailable",
+                "independent_check_undetermined",
+                "dataset_version_changed"
               ],
               "type": "string"
             },
@@ -3009,7 +3013,8 @@
           "follow_up_not_authorized",
           "follow_up_invalid",
           "replan_limit_reached",
-          "critique_rounds_exhausted"
+          "critique_rounds_exhausted",
+          "independent_check_failed"
         ],
         "title": "LimitationCode",
         "type": "string"
@@ -3488,6 +3493,10 @@
             "title": "Evidence Id",
             "type": "string"
           },
+          "independently_confirmed": {
+            "title": "Independently Confirmed",
+            "type": "boolean"
+          },
           "kind": {
             "const": "query",
             "default": "query",
@@ -3572,6 +3581,7 @@
           "rows",
           "row_count",
           "source_truncated",
+          "independently_confirmed",
           "sql",
           "sql_state",
           "policy_sql_status",
@@ -4052,6 +4062,11 @@
             "pattern": "^ev_[0-9a-f]{32}$",
             "title": "Evidence Id",
             "type": "string"
+          },
+          "independently_confirmed": {
+            "default": false,
+            "title": "Independently Confirmed",
+            "type": "boolean"
           },
           "rows": {
             "default": [],

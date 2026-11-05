@@ -52,6 +52,7 @@ from packages.investigation.contracts import (
     MAX_PLAN_TASKS,
     OUTCOME_CATEGORIES,
     HypothesisId,
+    PlanTask,
     TaskId,
     TaskKind,
 )
@@ -74,7 +75,12 @@ from packages.investigation.evidence import (
     exact_rows,
     verify_payload,
 )
-from packages.investigation.hypotheses import MAX_HYPOTHESES, InvestigationPlanV2
+from packages.investigation.hypotheses import (
+    MAX_HYPOTHESES,
+    InvestigationPlanV2,
+    SpecIncomplete,
+    resolve_any,
+)
 from packages.investigation.lifecycle import InvestigationStatus
 from packages.investigation.state import (
     MAX_CRITIC_ROUNDS,
@@ -89,6 +95,7 @@ from packages.investigation.state import (
     VerdictCode,
     VerdictReason,
 )
+from packages.investigation.verdicts import INDEPENDENT_REASONS, check_bound, observe
 
 REPORT_SCHEMA_VERSION: Literal[1] = 1
 INTERIM_LABEL: Literal["interim, unverified, association only"] = (
@@ -155,6 +162,8 @@ class ReportQueryTable(_Report):
     rows: tuple[tuple[Cell, ...], ...] = Field(default=(), max_length=MAX_REPORT_QUERY_ROWS)
     source_row_count: Count
     source_truncated: Annotated[bool, Strict()]
+    # ADR 0024 Amendment 13: whether these rows equal an independent computation from the source.
+    independently_confirmed: Annotated[bool, Strict()] = False
 
     @field_validator("rows", mode="before")
     @classmethod
@@ -319,6 +328,9 @@ LIMITATION_TEMPLATES: dict[LimitationCode, str] = {
     LimitationCode.CRITIQUE_ROUNDS_EXHAUSTED: (
         "The last follow-up results were evaluated but not critiqued again."
     ),
+    LimitationCode.INDEPENDENT_CHECK_FAILED: (
+        "This test's query could not be confirmed from the source table, so its rows are not shown."
+    ),
 }
 
 _REPLAN_LIMITATIONS: dict[str, LimitationCode] = {
@@ -347,6 +359,25 @@ def _critique_limitations(view: InvestigationStateView) -> list[Limitation]:
 
 
 _Payload = QueryEvidencePayload | DocumentEvidencePayload | DerivedEvidencePayload
+
+
+def _independently_confirmed(
+    view: InvestigationStateView, task: PlanTask, payload: QueryEvidencePayload
+) -> bool | None:
+    """``True`` for a test confirmed from the source, ``False`` for rows nothing could check (a
+    test with another defect, or an analysis with no specification), ``None`` to withhold them."""
+    if not isinstance(view.plan, InvestigationPlanV2):
+        return False
+    try:
+        test = resolve_any(view.plan, task)
+    except SpecIncomplete:
+        return False
+    if not check_bound(test, view.evidence[payload.evidence_id], view.plan, view):
+        return None
+    observation = observe(test, payload.evidence_id, payload)
+    if observation.outcome == "unusable":
+        return None if observation.reason in INDEPENDENT_REASONS else False
+    return True
 
 
 def compose_interim_report(
@@ -392,6 +423,12 @@ def compose_interim_report(
                 )
                 continue
             if isinstance(payload, QueryEvidencePayload):
+                confirmed = _independently_confirmed(view, task, payload)
+                if confirmed is None:
+                    evidence_limits.append(
+                        Limitation(code=LimitationCode.INDEPENDENT_CHECK_FAILED, task_id=task.id)
+                    )
+                    continue
                 tables.append(
                     ReportQueryTable(
                         evidence_id=payload.evidence_id,
@@ -400,6 +437,7 @@ def compose_interim_report(
                         rows=payload.rows[:MAX_REPORT_QUERY_ROWS],
                         source_row_count=len(payload.rows),
                         source_truncated=payload.truncated,
+                        independently_confirmed=confirmed,
                     )
                 )
                 if len(payload.rows) > MAX_REPORT_QUERY_ROWS:

@@ -9,14 +9,17 @@ from typing import Any
 
 import pytest
 
-from packages.investigation.contracts import EvidenceRef, TaskOutcome
+from packages.investigation.contracts import EvidenceRef, TaskKind, TaskOutcome
 from packages.investigation.evidence import (
     DocumentEvidencePayload,
+    IndependentResult,
     QueryEvidencePayload,
 )
+from packages.investigation.hypotheses import resolve_test
 from packages.investigation.state import (
     DocumentProvenance,
     EvidenceRecord,
+    InvestigationScope,
     InvestigationStateView,
     QueryProvenance,
     TaskRecord,
@@ -30,7 +33,8 @@ from packages.investigation.verdicts import (
     validate_verdict,
 )
 from tests.investigation_churn_schema import churn_v2_plan
-from tests.investigation_fixtures import running_state
+from tests.investigation_fixtures import SCOPE, running_state
+from tests.investigation_independent_fakes import mirrored_groups, result_record
 
 PLAN = churn_v2_plan()
 Q1, Q2 = "2026-01-01", "2026-04-01"
@@ -56,6 +60,25 @@ MEAN_COLUMNS = ["quarter_start", "region", "value_sum", "value_count"]
 MEAN_ROWS = [[Q1, "APAC", 13607.04, 400], [Q2, "APAC", 19500.0, 400]]
 
 
+def _mirrored(
+    task_id: str, evidence_id: str, columns: list[str], rows: list[list[Any]]
+) -> IndependentResult | None:
+    """The check result of a source table holding exactly these counts (see the fakes module)."""
+    task = next(item for item in PLAN.tasks if item.id == task_id)
+    if task.kind is not TaskKind.HYPOTHESIS_TEST:
+        return None
+    test = resolve_test(PLAN, task)
+    return IndependentResult(
+        record=result_record(
+            test,
+            scope=InvestigationScope.model_validate(SCOPE),
+            plan=PLAN,
+            evidence_id=evidence_id,
+        ),
+        groups=mirrored_groups(test, columns, rows),
+    )
+
+
 class World:
     """A finished v2 churn run: task records, evidence records, and their typed payloads."""
 
@@ -74,6 +97,7 @@ class World:
         record_rows: int | None = None,
     ) -> str:
         evidence_id = new_id()
+        independent = _mirrored(task_id, evidence_id, columns, rows)
         payload = QueryEvidencePayload(
             evidence_id=evidence_id,
             task_id=task_id,
@@ -82,6 +106,7 @@ class World:
             rows=tuple(tuple(row) for row in rows),
             row_limit=len(rows) if truncated else 500,
             truncated=truncated,
+            independent=independent,
         )
         record = EvidenceRecord(
             id=evidence_id,
@@ -96,6 +121,7 @@ class World:
                 corrections_used=0,
                 policy_sql_status="not_applicable",
                 elapsed_ms=1,
+                independent_check=None if independent is None else independent.record,
             ),
         )
         self._succeed(task_id, [EvidenceRef(id=evidence_id, kind="query")])

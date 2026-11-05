@@ -128,6 +128,7 @@ describe("InvestigationPanel", () => {
     expect(screen.getByText("plan: required")).toBeInTheDocument();
     expect(document.querySelector("time")).toHaveAttribute("datetime", "2026-10-31T10:00:00Z");
 
+    expect(screen.getByText(/read-only query it builds from the test as written above/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve and run plan" }));
     fireEvent.click(screen.getByRole("button", { name: "Reject plan" }));
     expect(callbacks.onApprove).toHaveBeenCalledOnce();

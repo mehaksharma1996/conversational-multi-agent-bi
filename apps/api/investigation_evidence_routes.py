@@ -59,6 +59,7 @@ class QueryEvidenceItem(BaseModel):
     rows: list[list[str | int | float | bool | None]]
     row_count: int
     source_truncated: bool
+    independently_confirmed: bool
     sql: str | None
     sql_state: SqlState
     policy_sql_status: str | None
@@ -147,7 +148,7 @@ def _query_sql(details: QueryDetails | None, may_read_sql: bool) -> tuple[str | 
 
 
 def _item(
-    payload: Payload, details: QueryDetails | None, may_read_sql: bool
+    payload: Payload, details: QueryDetails | None, may_read_sql: bool, *, confirmed: bool
 ) -> QueryEvidenceItem | DocumentEvidenceItem | DerivedEvidenceItem:
     if isinstance(payload, DerivedEvidencePayload):
         return DerivedEvidenceItem(
@@ -192,6 +193,7 @@ def _item(
         rows=[list(row) for row in payload.rows[:MAX_REPORT_QUERY_ROWS]],
         row_count=len(payload.rows),
         source_truncated=payload.truncated,
+        independently_confirmed=confirmed,
         sql=sql,
         sql_state=sql_state,
         policy_sql_status=details.policy_sql_status if details is not None else None,
@@ -217,6 +219,9 @@ def get_investigation_evidence(
     content = _content(runtime, record)
     response.headers["Cache-Control"] = "no-store"
     may_read_sql = Capability.ANALYSIS_RUN in capabilities_for(identity)
+    confirmed = {
+        table.evidence_id for table in content.report.query_tables if table.independently_confirmed
+    }
     return InvestigationEvidenceResponse(
         investigation_id=record.id,
         status=record.status,
@@ -224,7 +229,12 @@ def get_investigation_evidence(
         report=content.report,
         evidence_state=content.evidence_state,
         evidence=[
-            _item(payload, content.query_details.get(payload.evidence_id), may_read_sql)
+            _item(
+                payload,
+                content.query_details.get(payload.evidence_id),
+                may_read_sql,
+                confirmed=payload.evidence_id in confirmed,
+            )
             for payload in content.payloads
         ],
     )

@@ -83,6 +83,17 @@ requirement. Such a handle executes only after a person approved exactly its sta
 ``execute_sql`` runs an approval-requiring handle only with a binding of its exact fingerprint;
 an unbound one is refused ``sql_approval_required``.
 
+**ADR 0024 Amendment 13: the independent check.** A person approves a hypothesis test's typed
+specification in the plan digest (or a follow-up round's digest), and a model writes the SQL. Once
+that approved SQL has run, ``execute_sql`` compiles the same specification, with no model text, into
+a parameterized aggregate and runs it through the same read-only boundary (``independent_check``).
+The result is bound to the scope, plan, epoch, task, attempt, table version, and evidence record,
+and is charged one SQL execution. It rests on the approval already given: its only inputs are inside
+the approved digest, live authority is re-checked first, and it runs only after the approved
+statement did. It never replaces a person's decision about model SQL, and it runs for no other
+statement. When it cannot run or the budget has no room for it, the evidence says so and the test
+stays ``untestable``.
+
 Refusals follow ``packages.investigation.refusals``: ``request`` refusals record a decision and
 leave the gateway open; ``task`` refusals end the task; ``investigation`` refusals close the gateway
 and the ledger permanently and name the lifecycle status the investigation must move to. An
@@ -227,6 +238,8 @@ from packages.investigation.evidence import (
     DerivedEvidencePayload,
     DocumentEvidencePayload,
     DocumentSource,
+    IndependentGroup,
+    IndependentResult,
     QueryEvidencePayload,
     UntrustedModelText,
     verify_payload,
@@ -276,6 +289,8 @@ from packages.investigation.state import (
     FollowUpApproval,
     GatewayDecision,
     GatewayTool,
+    IndependentCheckRecord,
+    IndependentCheckStatus,
     InvestigationScope,
     InvestigationStateView,
     PolicySQLStatusName,
@@ -285,7 +300,18 @@ from packages.investigation.state import (
     TaskRecord,
     restore_state,
 )
-from packages.investigation.verdicts import Verdict, derived_payload_for, evaluate_plan, observe
+from packages.investigation.verdicts import (
+    Verdict,
+    check_bound,
+    derived_payload_for,
+    evaluate_plan,
+    observe,
+)
+from packages.investigation.verification import (
+    binding_digest,
+    build_contract,
+    contract_digest,
+)
 from src.agents.rag_agent import RAGAgentError
 from src.agents.sql_agent import execute_sql
 from src.documents.retriever import RetrievalResult, Retriever
@@ -309,6 +335,13 @@ from src.orchestration.guarded_sql import (
     GuardedSQLService,
     SQLExecution,
     SQLExecutor,
+)
+from src.orchestration.independent_check import (
+    IndependentExecutor,
+    compile_check,
+    execute_check,
+    read_outcome,
+    table_digest,
 )
 from src.orchestration.policy_grounding import verify_policy_sql
 from src.orchestration.report_prompt import render_narrative_prompt
@@ -1016,6 +1049,7 @@ class InvestigationToolGateway:
         table_resolver: TableResolver | None = None,
         policy_criteria: PolicyCriteriaSource | None = None,
         sql_executor: SQLExecutor = execute_sql,
+        independent_executor: IndependentExecutor = execute_check,
         fingerprint_key: bytes | None = None,
         retry_categories: frozenset[str] | None = None,
         numeric_fields: frozenset[str] = frozenset(),
@@ -1076,6 +1110,8 @@ class InvestigationToolGateway:
         self._table_resolver = table_resolver
         self._policy_criteria = policy_criteria
         self._sql_executor = sql_executor
+        self._independent_executor = independent_executor
+        self._table_digest: str | None = None  # the table version this run's checks are bound to
         self._fingerprint_key = fingerprint_key or secrets.token_bytes(32)
         self._handles: dict[str, _PreparedSQL] = {}  # every handle issued, by id
         self._handle_state: dict[str, Literal["open", "spent", "revoked"]] = {}
@@ -1459,6 +1495,8 @@ class InvestigationToolGateway:
         ):
             raise _Refused(RefusalCode.INVALID_REQUEST)  # nothing usable, or already derived
         self._check_authority()
+        if not check_bound(test, source, plan, call.view):
+            raise _Refused(RefusalCode.INVALID_REQUEST)  # the verdict says why; nothing to derive
         observation = observe(test, source.id, payload)
         if observation.outcome == "unusable":
             raise _Refused(RefusalCode.INVALID_REQUEST)  # the verdict says why; nothing to derive
@@ -2105,7 +2143,17 @@ class InvestigationToolGateway:
         if outcome is None:
             return self._failed(call, task, record, "internal")
         if outcome.status == "succeeded" and outcome.dataframe is not None:
-            return self._query_evidence(call, record, scope, prepared, outcome, corrections_used)
+            evidence_id = "ev_" + self._nonce()
+            independent = self._independent_check(call, task, record, prepared, evidence_id)
+            if independent is not None:  # a read happened since the checks above
+                refusal = self._closure()
+                if refusal is None and self._cancel_requested():
+                    refusal = RefusalCode.CANCELLED
+                if refusal is not None:
+                    return self._refuse(call, refusal)
+            return self._query_evidence(
+                call, record, scope, prepared, outcome, corrections_used, evidence_id, independent
+            )
         if outcome.status == "refused":
             category = "timeout" if isinstance(outcome.error, QueryTimeoutError) else "unsafe_query"
             if not isinstance(outcome.error, QueryTimeoutError | UnsafeQueryError):
@@ -2119,6 +2167,89 @@ class InvestigationToolGateway:
             self._failures[call.task_id] = (record.attempts, "sql_generation")
             return self._result(call, "failed", category="sql_generation")
         return self._failed(call, task, record, "sql_generation")
+
+    def _independent_check(
+        self,
+        call: _Call,
+        task: PlanTask,
+        record: TaskRecord,
+        prepared: _PreparedSQL,
+        evidence_id: str,
+    ) -> IndependentResult | None:
+        """The independent computation for a hypothesis test; ``None`` for any other task.
+
+        A refusal of authority still propagates. Everything else that stops the check becomes its
+        status, which keeps the test ``untestable`` without ending the investigation.
+        """
+        plan = call.view.plan
+        scope = call.view.scope
+        if (
+            not isinstance(plan, InvestigationPlanV2)
+            or not isinstance(task.input, HypothesisTestSpec)
+            or scope is None
+        ):
+            return None
+        try:
+            test = resolve_any(plan, task)
+        except SpecIncomplete:
+            raise _Refused(RefusalCode.TOOL_NOT_PERMITTED) from None
+        self._check_authority()  # current authorization, immediately before the source is read
+        status, digest, groups = self._run_check(call, test, prepared)
+        contract = contract_digest(test)
+        record_out = IndependentCheckRecord(
+            status=status,
+            contract_digest=contract,
+            table_digest=digest,
+            authority_epoch=self._authority.epoch,
+            binding_digest=binding_digest(
+                scope=scope,
+                plan_digest=self._authority.approval.plan_digest,
+                authority_epoch=self._authority.epoch,
+                task_id=call.task_id,
+                attempt=record.attempts,
+                evidence_id=evidence_id,
+                contract=contract,
+                table_digest=digest,
+                status=status,
+            ),
+        )
+        return IndependentResult(record=record_out, groups=groups)
+
+    def _run_check(
+        self, call: _Call, test: ResolvedTest, prepared: _PreparedSQL
+    ) -> tuple[IndependentCheckStatus, str | None, tuple[IndependentGroup, ...]]:
+        try:
+            _, table = self._resolve_table(call)
+        except _Refused:
+            return "unavailable", None, ()
+        digest = table_digest(table)
+        pinned = self._table_digest
+        if _table_identity(table) != prepared.table_identity or pinned not in (None, digest):
+            return "dataset_changed", digest, ()
+        self._table_digest = digest
+        try:
+            compiled = compile_check(build_contract(test), table)
+        except ValueError:  # ``ContractUndetermined``, or a shape the contract cannot hold
+            return "undetermined", digest, ()
+        request = BudgetRequest(sql_executions=1)
+        if not self._ledger.can_authorize(request):
+            return "unavailable", digest, ()  # no headroom: the test cannot be confirmed
+        reservation = self._reserve(request)
+        try:
+            frame = self._independent_executor(table, compiled)
+            outcome = read_outcome(compiled, frame, rate=isinstance(test.metric, RateMetric))
+        except Exception:  # a timeout, a database error, or a bad shape: never a measurement
+            return "unavailable", digest, ()
+        finally:
+            try:
+                self._ledger.settle(reservation)
+            except InvalidChargeError:
+                self._close(RefusalCode.BUDGET_CLOSED)
+        if outcome.table_rows != table.row_count:
+            return "dataset_changed", digest, ()
+        if outcome.unclassified:
+            return "undetermined", digest, ()
+        return "computed", digest, outcome.groups
 
     def _decided_item(
         self, call: _Call, request: BindSQLApproval | RejectSQL
@@ -2233,10 +2364,11 @@ class InvestigationToolGateway:
         prepared: _PreparedSQL,
         outcome: SQLExecution,
         corrections_used: int,
+        evidence_id: str,
+        independent: IndependentResult | None,
     ) -> GatewayResult:
         dataframe = outcome.dataframe
         assert dataframe is not None
-        evidence_id = "ev_" + self._nonce()
         try:
             evidence = EvidenceRecord(
                 id=evidence_id,
@@ -2251,6 +2383,7 @@ class InvestigationToolGateway:
                     corrections_used=corrections_used,
                     policy_sql_status=prepared.policy_status,
                     elapsed_ms=max(0, round(outcome.elapsed_seconds * 1000)),
+                    independent_check=None if independent is None else independent.record,
                 ),
             )
             done = TaskOutcome(
@@ -2262,7 +2395,7 @@ class InvestigationToolGateway:
             succeeded = TaskRecord(
                 task_id=call.task_id, status="succeeded", attempts=record.attempts, outcome=done
             )
-            typed = _query_payload(evidence, dataframe)
+            typed = _query_payload(evidence, dataframe, independent)
             if verify_payload(evidence, typed) is not None:
                 raise ValueError("payload")
         except (ValidationError, TypeError, ValueError, AttributeError, OverflowError):
@@ -2777,7 +2910,9 @@ def _cell(value: object) -> object:
     raise TypeError("unsupported cell type")  # bytes or any other object fails the task
 
 
-def _query_payload(record: EvidenceRecord, dataframe: pd.DataFrame) -> QueryEvidencePayload:
+def _query_payload(
+    record: EvidenceRecord, dataframe: pd.DataFrame, independent: IndependentResult | None = None
+) -> QueryEvidencePayload:
     rows = tuple(
         tuple(_cell(value) for value in row) for row in dataframe.itertuples(index=False, name=None)
     )
@@ -2790,6 +2925,7 @@ def _query_payload(record: EvidenceRecord, dataframe: pd.DataFrame) -> QueryEvid
             "rows": rows,
             "row_limit": MAX_QUERY_ROWS,
             "truncated": len(rows) == MAX_QUERY_ROWS,
+            "independent": independent,
         }
     )
 

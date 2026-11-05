@@ -14,8 +14,8 @@ export type CritiqueRound = Report["critiques"][number];
 export type CritiqueFinding = CritiqueRound["findings"][number];
 
 /**
- * - `verified`: every reference resolves to evidence the server returned. This traces a claim to the
- *   rows behind it; it does not show those rows reflect the source data, see `VERIFICATION_SCOPE`.
+ * - `verified`: every reference resolves to evidence the server returned. This traces a claim to its
+ *   evidence; `VERIFICATION_SCOPE` states what the server's own check of that evidence covers.
  * - `unsupported`: a reference does not resolve, or a claim that needs evidence cites none.
  * - `conflicted`: the references resolve, but the critic recorded evidence in tension with the claim.
  * - `incomplete`: the report itself says this could not be tested, finished, or evaluated.
@@ -33,10 +33,10 @@ export const CLAIM_STATE_LABEL: Record<ClaimState, string> = {
 
 /** Keep in step with `VERIFICATION_SCOPE` in `apps/api/investigation_report_export.py`. */
 export const VERIFICATION_SCOPE =
-  "Verified means each number was recomputed from the rows its query returned, and each claim cites " +
-  "evidence from this run. It does not show that a query measures what its hypothesis says: an approved " +
-  "read-only statement can return counts that do not reflect the source data. Review each statement " +
-  "below before relying on a result.";
+  "Verified means each measurement equals an independent computation from the approved test over the " +
+  "authorized source table, and each claim cites evidence from this run. It does not show that the " +
+  "source data is accurate or that the approved definitions are the right ones. Query rows marked as not " +
+  "independently confirmed had no such check, so review them below before relying on them.";
 
 /** One evidence reference. `resolved` false means there is nothing to link to. */
 export interface EvidenceRef {

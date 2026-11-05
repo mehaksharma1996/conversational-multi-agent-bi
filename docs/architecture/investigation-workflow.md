@@ -580,9 +580,13 @@ unchanged. Planning output is 2,000 tokens per stage and 4,000 in total.
 | A failed, skipped, or missing test | `untestable` (`test_not_completed`, `evidence_missing`) |
 | Truncated, NULL, too-small, wrongly shaped, inconsistent, or conflicting evidence | `untestable` (matching reason) |
 | An effect between zero and `min_effect` | `untestable` (`effect_below_threshold`) |
+| Counts that differ from the independent computation (Amendment 13) | `untestable` (`independent_check_mismatch`) |
+| An ambiguous specification, or a value the definitions cannot classify | `untestable` (`independent_check_undetermined`) |
+| The table's identity, schema, or row count changed | `untestable` (`dataset_version_changed`) |
+| The check failed, had no budget, or is absent or bound elsewhere | `untestable` (`independent_check_unavailable`) |
 
-Numbers come only from typed payload counts, never from a model, the plan, or document prose; NULL
-is never zero. No verdict is written after a stop or a defect (the report states
+Numbers come only from typed payload counts that agree with the independent computation, never from a
+model, the plan, or document prose; NULL is never zero. No verdict is written after a stop or a defect (the report states
 `verdicts_not_evaluated`), and verdicts never change the final status. Checkpoints hold verdict codes,
 derived-evidence metadata, and IDs only.
 
@@ -814,11 +818,11 @@ Design E1 to E9: `docs/agents/briefs/144-inv11-investigation-api.md`; ADR 0024 A
 | `GET /api/v1/investigations/{id}/evidence` | `workspace:read` (SQL text also needs `analysis:run`) | typed verified report and evidence; digest-checked, `no-store`, read-only; 404 until terminal or without a report; 409 `investigation_content_unverifiable` (UI-6c, Amendment 12) |
 | `GET /api/v1/investigations/{id}/report/export?format=markdown\|json` | `report:export` | attachment; same availability; no SQL; audited `report.downloaded` (UI-6c) |
 
-**What "verified" covers.** Report verification recomputes every number from the rows its query
-returned and checks that each claim cites evidence from this run. It does not check those rows
-against the source data, so an approved read-only statement with invented counts still verifies and
-can change a verdict; only the person reviewing the statement can stop it. The evidence view and both
-exports state this limit on every report (UI-6c, E10).
+**What "verified" covers.** Each reported measurement equals an independent computation from the
+approved test over the authorized source table (ADR 0024 Amendment 13), and each claim cites evidence
+from this run. It does not show that the source data is accurate or that the approved definitions are
+the right ones. Rows of an analysis task have no specification to check, and are marked unconfirmed.
+The evidence view and both exports state this limit on every report (UI-6c, E10).
 
 Refusals use fixed codes: `investigations_disabled`, `source_message_invalid`,
 `conversation_busy`, `idempotency_key_reused`, `question_too_long`, `job_queue_full`,

@@ -8,6 +8,8 @@ a provider object:
 
 - ``QueryEvidencePayload``: column names and rows of JSON scalars, bounded by the executor's row
   limit, with an explicit ``truncated`` flag. It never carries SQL: the SQL stays in the gateway.
+  A hypothesis test's payload also holds ``independent``: the counts a trusted computation from the
+  approved test specification found in the source table, or why there are none (Amendment 13).
 - ``DocumentEvidencePayload``: source locations, citations, evidence statuses, and the answer text
   wrapped as ``UntrustedModelText``. The answer is model output: it is data to show, never an
   instruction, a task, or a finding on its own.
@@ -53,6 +55,7 @@ from packages.investigation.state import (
     EvidenceRecord,
     EvidenceStatusName,
     GatewayEvidenceId,
+    IndependentCheckRecord,
     QueryProvenance,
     Score,
     SourceLocation,
@@ -98,6 +101,7 @@ PayloadMismatch = Literal[
     "source_mismatch",
     "citation_mismatch",
     "status_mismatch",
+    "independent_check_mismatch",
 ]
 
 
@@ -125,6 +129,42 @@ def exact_rows(value: object) -> object:
     return value
 
 
+MAX_INDEPENDENT_GROUPS = 8
+GroupKey = tuple[tuple[str, str], ...]
+
+
+def group_key(key: dict[str, str]) -> GroupKey:
+    """One compared group's identity: its case-folded key fields and values, in a fixed order."""
+    return tuple(sorted((field.casefold(), value) for field, value in key.items()))
+
+
+class IndependentGroup(_Payload):
+    """What the trusted computation found for one group the test compares."""
+
+    key: tuple[tuple[str, str], ...] = Field(min_length=1, max_length=8)
+    numerator: Annotated[float, Strict(), Field(allow_inf_nan=False)]  # events, or a value sum
+    denominator: Annotated[int, Strict(), Field(ge=0)]  # population, or non-null values
+
+
+class IndependentResult(_Payload):
+    """The independent computation behind a hypothesis test (ADR 0024 Amendment 13).
+
+    ``record`` is exactly what state keeps; ``groups`` is present only when it ``computed``.
+    """
+
+    record: IndependentCheckRecord
+    groups: tuple[IndependentGroup, ...] = Field(default=(), max_length=MAX_INDEPENDENT_GROUPS)
+
+    @model_validator(mode="after")
+    def _groups(self) -> IndependentResult:
+        if (self.record.status == "computed") != bool(self.groups):
+            raise ValueError("only a computed check has groups, and it has at least one")
+        keys = [item.key for item in self.groups]
+        if len(set(keys)) != len(keys):
+            raise ValueError("one result per group")
+        return self
+
+
 class QueryEvidencePayload(_Payload):
     """Rows behind query evidence: JSON scalars only, never the SQL that produced them.
 
@@ -141,6 +181,7 @@ class QueryEvidencePayload(_Payload):
     rows: tuple[Row, ...] = Field(default=(), max_length=MAX_QUERY_ROWS)
     row_limit: Annotated[int, Strict(), Field(ge=1, le=MAX_QUERY_ROWS)] = MAX_QUERY_ROWS
     truncated: Annotated[bool, Strict()]
+    independent: IndependentResult | None = None
 
     @field_validator("rows", mode="before")
     @classmethod
@@ -400,6 +441,9 @@ def verify_payload(record: EvidenceRecord, payload: object) -> PayloadMismatch |
             provenance.column_count,
         ):
             return "shape_mismatch"
+        stated = None if payload.independent is None else payload.independent.record
+        if stated != provenance.independent_check:
+            return "independent_check_mismatch"
         return None
     if type(payload) is DocumentEvidencePayload and type(provenance) is DocumentProvenance:
         if tuple(source.location() for source in payload.sources) != provenance.sources:

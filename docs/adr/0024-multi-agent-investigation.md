@@ -836,6 +836,119 @@ model-written document answer is not returned. A `failed` run's stored evidence 
 SQL. This narrows Amendment 10's "SQL remains available only from the pending-wave endpoint": that
 remains the only source of statements that have **not** run.
 
+## Amendment 13: independent verification of hypothesis tests ([#214](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/214), 2026-11-04)
+
+- Status: **Proposed**, for the project owner's review in its pull request. It takes effect with that
+  merge. It changes an approval rule (item 3), which is the decision to review.
+
+**The defect.** A model writes the SQL behind every hypothesis test. Verdicts were recomputed exactly
+from that SQL's rows, so they were only as honest as the statement. An approved read-only statement
+could invent literal counts, or compute real aggregates over another population and label them as
+the approved one. Either one flipped a refuted hypothesis to `supported_association` in a report
+labelled verified. Six properties were conflated, and only the first two and the last held:
+
+| Property | Question | Before | Now |
+|---|---|---|---|
+| Execution authorization | May this person run it? | Held | Held, unchanged |
+| Read-only query safety | Could it write or read outside the table? | Held | Held, unchanged |
+| Dataset and population provenance | Do these rows describe the approved population? | **Unchecked** | Checked |
+| Independently computed result | Does another computation agree? | **None** | Required |
+| Verdict correctness | Does the decision follow from dependable numbers? | **Only from the rows** | From confirmed numbers |
+| Claim and evidence consistency | Does the report agree with its evidence? | Held | Held, over confirmed numbers |
+
+A form rule cannot close this: the relabelled-population statement holds no literal count, and every
+count in it is a bare aggregate. Re-running the same statement proves only that it is deterministic.
+
+**1. The contract.** `packages/investigation/verification.py` defines `AnalyticalContract`: the metric
+definition, filters, comparison windows, grouping dimensions, fixed strata, and exactly which groups
+are compared. It is built from the approved, resolved test specification alone, never from SQL or
+rows. `contract_digest` covers that specification and the verifier version (`inv-independent-check-v1`).
+Thresholds are not part of it, because they decide a verdict, not a measurement.
+
+**2. The computation.** `src/orchestration/independent_check.py` compiles a contract and the trusted
+table metadata into one aggregate statement. It contains no model text: identifiers are this table's
+own columns, resolved case-insensitively and uniquely, and every approved value is a bound parameter.
+It returns one row with one count pair per group, so an empty group is a real zero. Boolean fields
+accept a fixed set of true and false spellings, and numeric fields must be numeric. Any other value
+among the compared rows is counted, which makes the check `undetermined`.
+
+**3. Execution and approval.** Once a person-approved statement has run, `execute_sql` runs the
+compiled statement in the same operation, through `execute_read_query`: the read-only guard, table and
+column authorizer, row limit, and time limit are unchanged.
+- *Why it needs no wave item of its own.* A person approves model SQL because they are the only check
+  on what a model wrote. Nothing here is written by a model, and every input is already bound by the
+  plan digest they approved (or the follow-up round's digest). The plan approval control says so. This
+  **narrows Amendment 8 item 4** ("nothing executes without a bound approval of its exact
+  fingerprint"): that rule now governs model-written and person-edited statements. No other statement
+  can run this way, and no request or model can name it.
+- *What it does not relax.* Nothing executes before the approved statement does. A rejected, replayed,
+  unbound, stale, or expired handle runs no check. Live authority and consent are re-checked first,
+  and a refusal ends the call. The tenant's table still comes only from the trusted resolver.
+- *Budget.* One `sql_executions` unit per check, reserved and settled on the same ledger. No limit
+  changed. With no headroom the check records `unavailable` and the test stays nondecisive, rather
+  than ending the investigation.
+- *Record.* `QueryProvenance.independent_check` holds the status and digests, content-free.
+  `binding_digest` ties it to the tenant, workspace, investigation, dataset, plan digest, epoch, task,
+  attempt, evidence record, contract, and table version. `agent.task_executed` carries the fixed status
+  as `independent_check`. Counts stay in the typed payload.
+
+**4. Enforcement.** `observe` is the one path to any number: verdicts, derived evidence, the Critic's
+checks, and the report verifier all use it. It compares every compared group's counts with the
+independent result on each call. No stored label says "matched", so a forged label has nothing to
+forge. `evaluate_hypothesis` also recomputes the binding against the current scope and plan.
+
+**5. Failure behaviour.** None of these can yield `supported_association` or `refuted`. There is no
+new verdict: `untestable` already means "the evidence cannot decide", and it gains fixed reasons.
+
+| Case | Outcome | Reason |
+|---|---|---|
+| Counts differ from the independent result (form A or B) | `untestable` | `independent_check_mismatch` |
+| Syntactically safe but irrelevant SQL | `untestable` | `evidence_inconsistent` (shape) or `independent_check_mismatch` |
+| Ambiguous specification, unresolved field, or a value the definitions cannot classify | `untestable` | `independent_check_undetermined` |
+| Table identity, schema, or row count changed, or differs from this run's first check | `untestable` | `dataset_version_changed` |
+| Check failed, timed out, had no budget, or returned a bad shape; check absent or bound elsewhere | `untestable` | `independent_check_unavailable` |
+
+The run keeps its status: this is a finding about one test, not a run failure. A failed check's rows
+are withheld from the report (limitation `independent_check_failed`) and flagged in the evidence
+inspector, where the statement stays reviewable. `ReportQueryTable.independently_confirmed` marks
+the rest. An analysis task has no specification, so its rows are marked unconfirmed, and no verdict
+or fact rests on them.
+
+**6. Compatibility.** The additions are optional, so `STATE_VERSION` stays 1: earlier checkpoints
+restore, and an older reader refuses the new vocabulary. Evidence from before this amendment has no
+check, so a recomputed verdict on it would be `untestable`; stored reports are returned as they were
+written, under their digests. The evidence response and report table gain additive fields.
+
+**Alternatives rejected.**
+- *Refusing SQL by form (aggregates only, no literals).* It leaves the relabelled population.
+- *Re-running the model's statement.* It would agree with itself.
+- *Computing only the compiled statement and dropping model SQL.* It would be simpler and remove the
+  model's hypothesis-test SQL from the workflow. That is a larger product and evaluation change, and
+  the comparison is itself useful: disagreement is a visible finding that a person can review.
+- *A new `unverified` verdict.* Every typed consumer would change for no extra meaning.
+- *A wave item for the compiled statement.* It would ask a person to approve what they already
+  approved, in a form they cannot judge better than the specification.
+- *An independent check of untyped analysis tasks.* They have no specification to compile.
+
+**Limits. Do not read past these.**
+- This establishes agreement with the authorized source table under the approved definitions. It is
+  not ground truth: a wrong source table, or a misguided but approved metric, passes.
+- A person approves definitions they may misjudge, and a model proposes them. A plan can still ask a
+  well-defined, misleading question.
+- Field semantics are by name and fixed spellings. A column named `churned` that holds something else
+  is measured as approved.
+- Row count and schema detect a replaced table, not an in-place edit that keeps both. Stored tables
+  are not edited in place by the application, but there is no content digest.
+- A sum is compared within a relative tolerance of 1e-9, because correct sums can differ by rounding.
+  The verdict then uses the independent sum, so the tolerance cannot move a number toward a claim.
+- The check is in-process and shares the model SQL's executor boundary, not a separate trust domain.
+  The digests are unkeyed: they detect a mismatch, and they do not stop code already in this process.
+- Each check spends one of the 15 SQL executions, and no limit was raised. The churn plan uses 12, or
+  13 with two follow-up rounds. A plan with about eight or more SQL hypothesis tests can now end
+  `budget_exhausted` where it previously finished. Raising the limit is a separate owner decision.
+- Analysis-task rows stay unconfirmed, and are labelled so.
+- No real provider has run this path. It is exercised with scripted models only.
+
 ## Alternatives rejected
 
 - **Native tool calling.** It would bypass the single gateway, depend on provider-specific features,
