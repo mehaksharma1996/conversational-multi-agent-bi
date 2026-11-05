@@ -24,6 +24,10 @@ EVAL-1 grades the multi-step cases on scripted runs of the real investigation gr
 real-model performance. The oracle is read by the harness only after a run returns. See
 `docs/governance/evaluation.md`.
 
+`demo-expected.json` is the committed result of the offline demonstration
+(`python -m tests.e2e.investigation_demo`, documented in `docs/investigation.md`). It is also scripted.
+`tests/test_investigation_demo.py` compares it with a fresh run, and with the oracle after the run.
+
 Regenerate or check the assets from the repository root:
 
 ```powershell

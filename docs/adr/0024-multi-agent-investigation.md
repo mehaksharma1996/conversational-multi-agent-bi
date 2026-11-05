@@ -838,8 +838,9 @@ remains the only source of statements that have **not** run.
 
 ## Amendment 13: independent verification of hypothesis tests ([#214](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/214), 2026-11-04)
 
-- Status: **Proposed**, for the project owner's review in its pull request. It takes effect with that
-  merge. It changes an approval rule (item 3), which is the decision to review.
+- Status: **Accepted.** It took effect when
+  [#215](https://github.com/mehaksharma1996/conversational-multi-agent-bi/pull/215) merged (`5118bcf`).
+  It changes an approval rule (item 3).
 
 **The defect.** A model writes the SQL behind every hypothesis test. Verdicts were recomputed exactly
 from that SQL's rows, so they were only as honest as the statement. An approved read-only statement
