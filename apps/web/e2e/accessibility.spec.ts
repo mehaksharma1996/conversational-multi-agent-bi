@@ -54,6 +54,15 @@ async function routeTabularJourney(page: Page, includeChart = false) {
     }
     if (request.method() === "GET" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 200, json: { items: [] } });
+    } else if (request.method() === "GET" && path === "/api/v1/tabular-capabilities") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          supported_extensions: [".csv", ".xls", ".xlsx"],
+          max_upload_bytes: 50 * 1024 * 1024,
+          max_rows: 1_000_000,
+        },
+      });
     } else if (request.method() === "POST" && path === "/api/v1/workspaces") {
       await route.fulfill({ status: 201, json: workspaceFixture });
     } else if (request.method() === "POST" && path.endsWith("/tabular-uploads")) {
@@ -154,6 +163,7 @@ test("axe baseline: dashboard with charts", async ({ page }) => {
   await routeTabularJourney(page, true);
   await reachSchemaReview(page);
   await page.getByRole("button", { name: "Confirm schema" }).click();
+  await page.getByRole("button", { name: "Open analysis" }).click();
   await page.getByRole("button", { name: "Run deterministic analysis" }).click();
   await expect(page.getByRole("heading", { name: "Amount trend" })).toBeVisible();
   await expectNoAxeViolations(page, true);

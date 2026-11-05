@@ -111,6 +111,25 @@ def test_workspace_creation_is_idempotent_for_tenant_and_key(client: TestClient)
     assert first.json()["authentication_mode"] == "local"
 
 
+def test_tabular_capabilities_report_active_server_limits() -> None:
+    application = create_app(
+        settings=_settings(
+            isolated_directory_path("api_tabular_capabilities"),
+            max_tabular_upload_bytes=1_234,
+            max_tabular_rows=567,
+        ),
+    )
+
+    response = TestClient(application).get("/api/v1/tabular-capabilities")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supported_extensions": [".csv", ".xls", ".xlsx"],
+        "max_upload_bytes": 1_234,
+        "max_rows": 567,
+    }
+
+
 def test_tabular_vertical_slice_requires_review_before_analysis(client: TestClient) -> None:
     workspace_id = _create_workspace(client)
     upload_id = _upload_csv(client, workspace_id)

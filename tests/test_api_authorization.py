@@ -172,6 +172,9 @@ def test_viewer_can_read_but_not_write_or_administer(signing_key: RSAKey) -> Non
     client = TestClient(_app(signing_key, "authz_viewer"))
     headers = _headers(signing_key, roles=["viewer"])
 
+    capabilities = client.get("/api/v1/tabular-capabilities", headers=headers)
+    assert capabilities.status_code == 200
+    assert capabilities.json()["supported_extensions"] == [".csv", ".xls", ".xlsx"]
     assert client.get("/api/v1/workspaces/missing", headers=headers).status_code == 404
     for method, path in [
         ("POST", "/api/v1/workspaces"),

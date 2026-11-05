@@ -18,6 +18,7 @@ import {
   downloadWorkspaceExport,
   getDataset,
   getDocumentCollection,
+  getTabularCapabilities,
   getWorkspaceOverview,
   listMessages,
   listWorkbookSheets,
@@ -30,6 +31,7 @@ import {
   type DocumentCollection,
   type Message,
   type SchemaMappingUpdate,
+  type TabularCapabilities,
   type Workspace,
   type Consent,
   type ConsentNotice,
@@ -42,9 +44,7 @@ import { DemoGuide } from "./components/DemoGuide";
 import { DocumentUpload } from "./components/DocumentUpload";
 import { OperationAnnouncer, type Announcement } from "./components/OperationAnnouncer";
 import { ProductOverview } from "./components/ProductOverview";
-import { SchemaReview } from "./components/SchemaReview";
 import { StatusBanner } from "./components/StatusBanner";
-import { UploadStep } from "./components/UploadStep";
 import { WorkbenchShell } from "./components/WorkbenchShell";
 import { WorkspaceOverview } from "./components/WorkspaceOverview";
 import { conversationLabel, countConversation } from "./components/conversationStatus";
@@ -64,7 +64,13 @@ import {
   fetchDemoFile,
 } from "./demo/retailDemo";
 import { announcementFor } from "./operations/announcements";
-import { discardStale, useOperations, type OperationEvent } from "./operations/useOperations";
+import { activeOperation } from "./operations/model";
+import {
+  discardStale,
+  useOperations,
+  type OperationEvent,
+  type OperationHandle,
+} from "./operations/useOperations";
 import { consentGateReason, investigationGate, questionGate, useConsent } from "./workspace/useConsent";
 import { INVESTIGATION_STATUS_LABEL } from "./investigations/model";
 import { useInvestigation } from "./investigations/useInvestigation";
@@ -92,6 +98,11 @@ type Recovery =
 /** A failed replacement whose outcome the server has not yet confirmed. */
 type Unconfirmed = { kind: "dataset" | "documents" } | null;
 
+type DataRequest = {
+  controller: AbortController;
+  operation: OperationHandle;
+};
+
 function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
 }
@@ -105,6 +116,14 @@ function normalizeError(error: unknown): ApiClientError {
 // load on demand instead of growing the entry chunk.
 const InvestigationPanel = lazy(() =>
   import("./components/InvestigationPanel").then((module) => ({ default: module.InvestigationPanel })),
+);
+
+const SchemaReview = lazy(() =>
+  import("./components/SchemaReview").then((module) => ({ default: module.SchemaReview })),
+);
+
+const UploadStep = lazy(() =>
+  import("./components/UploadStep").then((module) => ({ default: module.UploadStep })),
 );
 
 function latestInvestigationProposal(messages: Message[]): Message | null {
@@ -136,8 +155,14 @@ export default function App() {
     // Mark a workspace-changing request while it runs, so a reload can say it was interrupted.
     recordOperationEvent(event, workspaceId.current);
   }, []);
-  const { begin, mutationBusy, readBusy, isActive } = useOperations({ onEvent: onOperationEvent });
+  const { operations, begin, mutationBusy, readBusy, isActive } = useOperations({
+    onEvent: onOperationEvent,
+  });
   const [error, setError] = useState<ApiClientError | null>(null);
+  const [tabularCapabilities, setTabularCapabilities] = useState<TabularCapabilities | null>(null);
+  const [capabilitiesUnavailable, setCapabilitiesUnavailable] = useState(false);
+  const [schemaFocusId, setSchemaFocusId] = useState<string | null>(null);
+  const dataRequest = useRef<DataRequest | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   const [startFailed, setStartFailed] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -176,6 +201,36 @@ export default function App() {
   const consentState = consent.view.consent;
   const { refresh: refreshConsent } = consent;
 
+  const loadTabularCapabilities = useCallback(async () => {
+    try {
+      setTabularCapabilities(await getTabularCapabilities());
+      setCapabilitiesUnavailable(false);
+    } catch {
+      setTabularCapabilities(null);
+      setCapabilitiesUnavailable(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection !== "data" || tabularCapabilities || capabilitiesUnavailable) return;
+    let current = true;
+    void getTabularCapabilities().then(
+      (capabilities) => {
+        if (!current) return;
+        setTabularCapabilities(capabilities);
+        setCapabilitiesUnavailable(false);
+      },
+      () => {
+        if (!current) return;
+        setTabularCapabilities(null);
+        setCapabilitiesUnavailable(true);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [activeSection, capabilitiesUnavailable, tabularCapabilities]);
+
   // Another tab or person may have changed consent: read it again on opening Ask, and whenever an
   // investigation moves or is refused, so a stale "accepted" is never what the person acts on.
   const investigationStatusNow = investigation.investigation?.status ?? null;
@@ -200,6 +255,12 @@ export default function App() {
   useEffect(() => {
     workspaceId.current = workspace?.id ?? null;
   }, [workspace]);
+
+  useEffect(() => {
+    if (error) {
+      focusOnNextFrame(() => document.querySelector<HTMLElement>("[data-error-focus='true']"));
+    }
+  }, [error]);
 
   // An intentional section change moves focus to the section heading, including a reselection of
   // the current section (for example from the phone drawer, whose links are about to go inert).
@@ -399,12 +460,17 @@ export default function App() {
       if (kind === "dataset") {
         if (overview.dataset_id === previous.datasetId) {
           setUnconfirmed(null);
-          setNotice(`Nothing was replaced: ${previous.datasetName ?? "the current data"} is still in use.`);
+          setNotice(
+            previous.datasetId
+              ? `Nothing was replaced: ${previous.datasetName ?? "the current data"} is still in use.`
+              : "The server confirmed that no dataset was created. You can safely try the upload again.",
+          );
           return;
         }
         const replaced = overview.dataset_id ? await getDataset(overview.dataset_id) : null;
         if (from !== epoch.current) return;
         setUnconfirmed(null);
+        if (replaced?.status === "review_required") setSchemaFocusId(replaced.id);
         setDataset(replaced);
         setUploadId(replaced?.upload_id ?? null);
         setSelectedFeatures(replaced?.recommended_anomaly_features ?? []);
@@ -412,7 +478,9 @@ export default function App() {
         clearConversation();
         setSheets([]);
         setNotice(
-          "The server finished the upload despite the error, so the new data is now in use and earlier results were cleared.",
+          replaced?.status === "review_required"
+            ? "The server finished profiling despite the error. Review the schema before analysis; earlier results were cleared."
+            : "The server finished the upload despite the error, so the new data is now in use and earlier results were cleared.",
         );
         return;
       }
@@ -447,6 +515,29 @@ export default function App() {
     });
   };
 
+  const beginDataRequest = (kind: "upload" | "dataset"): DataRequest | null => {
+    const operation = begin(kind);
+    if (!operation) return null;
+    const request = { controller: new AbortController(), operation };
+    dataRequest.current = request;
+    return request;
+  };
+
+  const clearDataRequest = (request: DataRequest) => {
+    if (dataRequest.current === request) dataRequest.current = null;
+  };
+
+  const stopWaitingForData = () => {
+    const request = dataRequest.current;
+    if (!request || request.controller.signal.aborted) return;
+    request.operation.advance("cancelling");
+    request.controller.abort();
+  };
+
+  const showDataError = (caught: unknown) => {
+    setError(normalizeError(caught));
+  };
+
   const handleUpload = async (file: File, confirmed = false): Promise<boolean> => {
     if (!workspace || busy) return false;
     // Moving focus to the section heading would pull it out of a confirmation dialog.
@@ -460,8 +551,9 @@ export default function App() {
       });
       if (!accepted) return false;
     }
-    const operation = begin("upload");
-    if (!operation) return false;
+    const request = beginDataRequest("upload");
+    if (!request) return false;
+    const { operation, controller } = request;
     const from = epoch.current;
     const previous = {
       datasetId: dataset?.id ?? null,
@@ -470,9 +562,11 @@ export default function App() {
     };
     setError(null);
     setNotice(null);
+    operation.progress({ stage: "Uploading file", completed: 0, total: 3 });
     try {
-      const upload = await uploadTabular(workspace.id, file);
-      const workbookSheets = await listWorkbookSheets(upload.id);
+      const upload = await uploadTabular(workspace.id, file, controller.signal);
+      operation.progress({ stage: "Inspecting workbook", completed: 1, total: 3 });
+      const workbookSheets = await listWorkbookSheets(upload.id, controller.signal);
       if (discardStale(operation, from, epoch.current)) return false;
       setUploadId(upload.id);
       if (workbookSheets.length > 0) {
@@ -480,8 +574,10 @@ export default function App() {
         setSheets(workbookSheets);
         updateDraft("sheet", "");
       } else {
-        const profiled = await createDataset(upload.id);
+        operation.progress({ stage: "Profiling columns", completed: 2, total: 3 });
+        const profiled = await createDataset(upload.id, 0, controller.signal);
         if (discardStale(operation, from, epoch.current)) return false;
+        setSchemaFocusId(profiled.id);
         setDataset(profiled);
         setSelectedFeatures(profiled.recommended_anomaly_features);
         setAnalysis(null);
@@ -489,36 +585,55 @@ export default function App() {
         setSheets([]);
         updateDraft("sheet", "");
       }
+      operation.progress({ stage: "Profile ready", completed: 3, total: 3 });
       operation.finish("succeeded");
       return true;
     } catch (caught) {
-      operation.finish("failed");
+      const failure = normalizeError(caught);
+      operation.finish(failure.code === "request_cancelled" ? "interrupted" : "failed");
       if (from !== epoch.current) return false;
-      setError(normalizeError(caught));
-      if (previous.datasetId) await reconcileReplacement("dataset", workspace, from, previous);
+      showDataError(failure);
+      setUnconfirmed({ kind: "dataset" });
+      await reconcileReplacement("dataset", workspace, from, previous);
       return false;
+    } finally {
+      clearDataRequest(request);
     }
   };
 
   const handleSheet = async (sheet: string) => {
     if (!uploadId) return;
-    const operation = begin("dataset");
-    if (!operation) return;
+    const request = beginDataRequest("dataset");
+    if (!request) return;
+    const { operation, controller } = request;
     const from = epoch.current;
+    const previous = {
+      datasetId: dataset?.id ?? null,
+      documentsId: documents?.id ?? null,
+      datasetName: dataset?.filename ?? null,
+    };
     setError(null);
+    operation.progress({ stage: `Profiling sheet ${sheet}`, completed: 0, total: 1 });
     try {
-      const profiled = await createDataset(uploadId, sheet);
+      const profiled = await createDataset(uploadId, sheet, controller.signal);
       if (discardStale(operation, from, epoch.current)) return;
+      setSchemaFocusId(profiled.id);
       setDataset(profiled);
       setAnalysis(null);
       setSelectedFeatures(profiled.recommended_anomaly_features);
       setSheets([]);
       updateDraft("sheet", "");
       clearConversation();
+      operation.progress({ stage: "Profile ready", completed: 1, total: 1 });
       operation.finish("succeeded");
     } catch (caught) {
-      operation.finish("failed");
-      setError(normalizeError(caught));
+      const failure = normalizeError(caught);
+      operation.finish(failure.code === "request_cancelled" ? "interrupted" : "failed");
+      showDataError(failure);
+      setUnconfirmed({ kind: "dataset" });
+      if (workspace) await reconcileReplacement("dataset", workspace, from, previous);
+    } finally {
+      clearDataRequest(request);
     }
   };
 
@@ -534,15 +649,18 @@ export default function App() {
     const operation = begin("schema");
     if (!operation) return;
     setError(null);
+    operation.progress({ stage: "Saving confirmed schema", completed: 0, total: 1 });
     try {
-      setDataset(await confirmSchema(dataset.id, mapping));
+      const confirmed = await confirmSchema(dataset.id, mapping);
+      setDataset(confirmed);
       updateDraft("schema", null);
       clearConversation();
-      navigate("analysis");
+      operation.progress({ stage: "Schema confirmed", completed: 1, total: 1 });
       operation.finish("succeeded");
+      focusOnNextFrame(() => document.querySelector<HTMLElement>("#data-ready-heading"));
     } catch (caught) {
       operation.finish("failed");
-      setError(normalizeError(caught));
+      showDataError(caught);
     }
   };
 
@@ -1032,6 +1150,18 @@ export default function App() {
     : "Not added";
   const analysisLabel = analysis ? "Complete" : dataset?.status === "ready" ? "Available" : "Not available";
   const conversationCounts = countConversation(messages);
+  const currentDataOperation =
+    activeOperation(operations, "upload") ??
+    activeOperation(operations, "dataset") ??
+    activeOperation(operations, "schema");
+  const dataOperationView = currentDataOperation
+    ? {
+        phase: currentDataOperation.phase,
+        progress: currentDataOperation.progress,
+        cancellable:
+          currentDataOperation.kind === "upload" || currentDataOperation.kind === "dataset",
+      }
+    : null;
 
   const globalNotices = (
     <>
@@ -1064,7 +1194,7 @@ export default function App() {
         </StatusBanner>
       ) : null}
       {error ? (
-        <StatusBanner kind="error" requestId={error.requestId}>
+        <StatusBanner kind="error" requestId={error.requestId} focusTarget>
           <strong>{error.message}</strong>
           {startFailed ? (
             <button
@@ -1189,32 +1319,42 @@ export default function App() {
 
       {activeSection === "data" ? (
         <div className="section-stack" id="data-workspace" aria-busy={mutationBusy || undefined}>
-          <UploadStep
-            disabled={!workspace || busy}
-            busy={isActive("upload") || isActive("dataset")}
-            sheets={sheets}
-            file={drafts.datasetFile}
-            sheet={drafts.sheet}
-            onFileChange={(file) => updateDraft("datasetFile", file)}
-            onSheetChange={(sheet) => updateDraft("sheet", sheet)}
-            onUpload={handleUpload}
-            onSelectSheet={handleSheet}
-          />
+          <Suspense fallback={<div className="panel" role="status">Loading upload controls…</div>}>
+            <UploadStep
+              disabled={!workspace || busy}
+              capabilities={tabularCapabilities}
+              capabilitiesUnavailable={capabilitiesUnavailable}
+              operation={dataOperationView}
+              sheets={sheets}
+              file={drafts.datasetFile}
+              sheet={drafts.sheet}
+              onFileChange={(file) => updateDraft("datasetFile", file)}
+              onSheetChange={(sheet) => updateDraft("sheet", sheet)}
+              onUpload={handleUpload}
+              onSelectSheet={handleSheet}
+              onCancel={stopWaitingForData}
+              onRetryCapabilities={() => void loadTabularCapabilities()}
+            />
+          </Suspense>
 
           {dataset?.status === "review_required" ? (
-            <SchemaReview
-              dataset={dataset}
-              busy={busy}
-              draft={drafts.schema?.datasetId === dataset.id ? drafts.schema.mapping : null}
-              onDraftChange={(mapping) => updateDraft("schema", { datasetId: dataset.id, mapping })}
-              onConfirm={handleSchema}
-            />
+            <Suspense fallback={<div className="panel" role="status">Loading schema review…</div>}>
+              <SchemaReview
+                dataset={dataset}
+                busy={busy}
+                draft={drafts.schema?.datasetId === dataset.id ? drafts.schema.mapping : null}
+                onDraftChange={(mapping) => updateDraft("schema", { datasetId: dataset.id, mapping })}
+                onConfirm={handleSchema}
+                focusOnMount={schemaFocusId === dataset.id}
+                onFocused={() => setSchemaFocusId(null)}
+              />
+            </Suspense>
           ) : null}
           {dataset?.status === "ready" ? (
             <section className="panel compact-completion" aria-labelledby="data-ready-heading">
               <div>
                 <p className="eyebrow">Setup complete</p>
-                <h2 id="data-ready-heading">{dataset.filename} is ready for analysis</h2>
+                <h2 id="data-ready-heading" tabIndex={-1}>{dataset.filename} is ready for analysis</h2>
                 <p className="section-copy">{dataset.row_count.toLocaleString()} rows and {dataset.column_count.toLocaleString()} columns are available in this workspace.</p>
               </div>
               <button className="button button--primary" type="button" onClick={() => navigate("analysis")}>Open analysis</button>

@@ -134,7 +134,7 @@ describe("tabular analysis journey", () => {
     await screen.findByText("Local workspace ready");
     await user.click(screen.getByRole("link", { name: /Data/ }));
     await user.upload(
-      screen.getByLabelText("CSV or Excel file"),
+      await screen.findByLabelText("CSV or Excel file"),
       new File(["amount,merchant\n25,North"], "transactions.csv", { type: "text/csv" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload and profile" }));
@@ -143,6 +143,8 @@ describe("tabular analysis journey", () => {
     expect(screen.getByLabelText("amount")).toHaveValue("amount");
     await user.click(screen.getByRole("button", { name: "Confirm schema" }));
 
+    expect(await screen.findByRole("heading", { name: "transactions.csv is ready for analysis" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Open analysis" }));
     expect(await screen.findByRole("heading", { name: "Configure anomaly review" })).toBeVisible();
     expect(screen.getByRole("checkbox", { name: "amount" })).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Run deterministic analysis" }));

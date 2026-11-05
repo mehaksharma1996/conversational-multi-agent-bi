@@ -119,7 +119,7 @@ test("a failed replacement keeps the data and says the server confirmed nothing 
   await page.getByRole("button", { name: "Upload and profile" }).click();
   await page.getByRole("dialog", { name: /^Replace / }).getByRole("button", { name: "Upload and replace" }).click();
 
-  await expect(page.getByRole("alert")).toContainText("temporarily unavailable");
+  await expect(page.getByRole("alert").filter({ hasText: "temporarily unavailable" })).toBeVisible();
   await expect(page.getByText(/Nothing was replaced: .* is still in use\./)).toBeVisible();
   await expect(page.getByRole("heading", { name: /is ready for analysis/ })).toBeVisible();
   await expect(page.getByTestId("operation-announcer")).toContainText("Data upload failed.");

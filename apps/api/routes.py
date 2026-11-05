@@ -31,6 +31,7 @@ from apps.api.models import (
     DatasetCreateRequest,
     DatasetResponse,
     SchemaMappingUpdateRequest,
+    TabularCapabilitiesResponse,
     TabularUploadResponse,
     WorkbookSheetsResponse,
     WorkspaceListResponse,
@@ -160,6 +161,25 @@ def get_workspace(
 ) -> WorkspaceResponse:
     return workspace_response(
         repository.get_workspace(workspace_id, identity.tenant_id), repository.retention_hours
+    )
+
+
+@router.get(
+    "/tabular-capabilities",
+    dependencies=[requires(Capability.WORKSPACE_READ)],
+    response_model=TabularCapabilitiesResponse,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["tabular uploads"],
+    description=(
+        "Returns the active server-side tabular upload limits and extension allowlist. "
+        "Clients may use these values for guidance, but the server still enforces every limit."
+    ),
+)
+def get_tabular_capabilities(settings: SettingsDependency) -> TabularCapabilitiesResponse:
+    return TabularCapabilitiesResponse(
+        supported_extensions=sorted(SUPPORTED_TABULAR_EXTENSIONS),
+        max_upload_bytes=settings.max_tabular_upload_bytes,
+        max_rows=settings.max_tabular_rows,
     )
 
 

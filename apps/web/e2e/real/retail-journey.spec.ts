@@ -162,6 +162,8 @@ test("demo ingestion goes through schema review; data questions wait for confirm
 
   await goTo(page, "Data");
   await page.getByRole("button", { name: "Confirm schema" }).click();
+  await expect(page.getByRole("heading", { name: /is ready for analysis/ })).toBeVisible();
+  await page.getByRole("button", { name: "Open analysis" }).click();
   await expect(page.getByRole("heading", { name: "Configure anomaly review" })).toBeVisible();
   await goTo(page, "Ask");
   await expect(samples.getByRole("button", { name: REGION })).toBeEnabled();
@@ -454,11 +456,16 @@ test("an unsupported upload fails with a clear message and the page stays usable
     mimeType: "text/plain",
     buffer: Buffer.from("not a table"),
   });
-  await page.getByRole("button", { name: "Upload and profile" }).click();
-  // The demo table is already in use, so replacing it asks first; a refused upload replaces nothing.
-  await page.getByRole("dialog", { name: /^Replace / }).getByRole("button", { name: "Upload and replace" }).click();
-  await expect(page.getByRole("alert")).toContainText("Supported tabular file types");
-  await expect(page.getByText(/Nothing was replaced: .* is still in use\./)).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "Choose .csv, .xls, .xlsx file" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upload and profile" })).toBeDisabled();
+  await expect(page.getByRole("dialog", { name: /^Replace / })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /is ready for analysis/ })).toBeVisible();
+
+  await page.getByLabel("CSV or Excel file").setInputFiles({
+    name: "replacement.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("amount,merchant\n25,North"),
+  });
   await expect(page.getByRole("button", { name: "Upload and profile" })).toBeEnabled();
 });
 

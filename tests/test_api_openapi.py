@@ -31,6 +31,10 @@ def test_openapi_contract_is_versioned_and_never_accepts_tenant_authority() -> N
     assert "/api/v1/jobs" in paths
     assert "/api/v1/jobs/{job_id}" in paths
     assert "/api/v1/jobs/{job_id}/retry" in paths
+    capabilities = paths["/api/v1/tabular-capabilities"]["get"]
+    assert capabilities["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/TabularCapabilitiesResponse"
+    }
 
 
 def test_job_openapi_contract_declares_pagination_and_cancellation_responses() -> None:

@@ -4,6 +4,23 @@ Applies to the React client in `apps/web/`. Design of the reload behavior is in
 [workspace recovery](../architecture/workspace-recovery.md); a guided tour is in the
 [demo walkthrough](demo-walkthrough.md).
 
+## Preparing tabular data
+
+Open **Data** to see the file formats, upload-size limit, and row limit reported by the running API.
+The browser rejects an obviously unsupported extension or oversized file before sending it, but the
+API remains authoritative. Excel uploads add a sheet-selection step; CSV uploads proceed directly to
+profiling.
+
+The schema review summarizes rows, columns, missing cells, duplicate rows, and type warnings. Its
+column profile shows stored and inferred types, completeness, uniqueness, and sample values. Mapping
+suggestions include their reason and confidence; low-confidence suggestions stay unselected. Confirm
+only mappings supported by the profile. The explicit ready screen appears after the API accepts the
+mapping, and **Open analysis** advances to deterministic analysis.
+
+During upload or profiling, **Stop waiting and check** cancels only the browser's wait. It does not
+claim to stop server work. The client checks the workspace state and reports whether the change
+finished, failed, or remains uncertain; it does not automatically repeat a possibly completed upload.
+
 ## How an answer is presented
 
 | Part | Source | What it means |
@@ -41,6 +58,8 @@ query whose edit no longer applies the policy's values falls back to the documen
 | Error with *Retry workspace* on load | The API was unreachable or unhealthy. Check `/health/ready`, then retry. No new workspace is created while this error shows. |
 | Sample questions are greyed out | The demo table must be confirmed (schema step) and, for model-backed questions, the data-sharing notice accepted. Policy and hybrid questions also need the policy PDF. |
 | "Could not reach the server" / "took too long" | Network failure or the 120 s client timeout. Your question is put back in the box; send it again. |
+| A data upload says its outcome is unconfirmed | The connection ended after the request began, so the server may still have finished. Use **Check server state**; do not upload again until reconciliation completes. |
+| A selected file is rejected before upload | Its extension or size conflicts with the limits shown by the API. Choose a listed CSV/Excel format within the displayed size; server validation may still reject malformed content or excess rows. |
 | A pending approval became "Not executed" | The API restarted (or an edit was refused). Ask again. |
 | `Load demo data` says the files could not be loaded | The static server did not serve `/demo/*`. Rebuild the web bundle (`apps/web/public/demo` is copied into it). |
 | Real-stack run fails to start | Ensure `.venv` exists, port 8010 and 4180 are free, and `npm run build` succeeded. Logs: `work/e2e-stack/api.log`, `web.log`. |

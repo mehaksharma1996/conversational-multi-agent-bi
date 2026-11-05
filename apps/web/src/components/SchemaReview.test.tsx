@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Dataset } from "../api/client";
@@ -60,5 +61,46 @@ describe("SchemaReview", () => {
 
     expect(screen.getByLabelText("label")).toHaveValue("merchant");
     expect(screen.queryByText("label is left unmapped for the demo:")).toBeNull();
+  });
+
+  it("summarizes data quality and exposes detailed accessible profile semantics", () => {
+    render(<SchemaReview dataset={reviewDatasetFixture} busy={false} draft={null} onDraftChange={vi.fn()} onConfirm={vi.fn()} />);
+
+    expect(screen.getByLabelText("Dataset profile summary")).toHaveTextContent("Missing cells");
+    expect(screen.getByRole("table")).toHaveAccessibleName(
+      "Inferred types, completeness, uniqueness, and sample values",
+    );
+    expect(screen.getByRole("columnheader", { name: "Stored type" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Inferred meaning" })).toBeVisible();
+  });
+
+  it("associates duplicate source mappings with the affected controls", () => {
+    const duplicateDraft = {
+      amount: "amount",
+      date: "",
+      customer_id: "customer",
+      merchant: "merchant",
+      location: "merchant",
+      label: "",
+    };
+
+    render(
+      <SchemaReview dataset={reviewDatasetFixture} busy={false} draft={duplicateDraft} onDraftChange={vi.fn()} onConfirm={vi.fn()} />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Each source column");
+    expect(screen.getByLabelText("merchant")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("location")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Confirm schema" })).toBeDisabled();
+  });
+
+  it("filters a large profile without removing the table structure", async () => {
+    render(<SchemaReview dataset={reviewDatasetFixture} busy={false} draft={null} onDraftChange={vi.fn()} onConfirm={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText("Filter columns"), "amount");
+
+    expect(screen.getByRole("rowheader", { name: "amount" })).toBeVisible();
+    expect(screen.queryByRole("rowheader", { name: "merchant" })).toBeNull();
+    expect(screen.getByRole("table")).toBeVisible();
   });
 });
