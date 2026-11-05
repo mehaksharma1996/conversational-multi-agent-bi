@@ -573,8 +573,8 @@ def test_a_measurement_label_cannot_start_a_spreadsheet_formula(
 def test_every_export_states_what_verification_covers(
     finished: tuple[TestClient, FastAPI, str],
 ) -> None:
-    """The residual behind RT-ROW-05: approved read-only SQL can invent counts and still verify. An
-    export has no SQL to review, so the label "verified" never travels without its limit."""
+    """An export has no SQL to review, so the label "verified" never travels without its limit:
+    agreement with the source table under the approved definitions, not their truth."""
     client, _, investigation_id = finished
     url = f"/api/v1/investigations/{investigation_id}/report/export"
     markdown = client.get(url).text

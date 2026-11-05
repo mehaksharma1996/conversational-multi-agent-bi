@@ -199,7 +199,7 @@
     },
     "budget_compliance": {
      "model_calls": 16,
-     "sql_executions": 7,
+     "sql_executions": 12,
      "retrievals": 4,
      "task_attempts": 11,
      "replan_rounds": 1,
@@ -440,7 +440,7 @@
     },
     "budget_compliance": {
      "model_calls": 5,
-     "sql_executions": 1,
+     "sql_executions": 2,
      "retrievals": 1,
      "task_attempts": 2,
      "replan_rounds": 0,
@@ -614,7 +614,7 @@
     },
     "budget_compliance": {
      "model_calls": 5,
-     "sql_executions": 1,
+     "sql_executions": 2,
      "retrievals": 1,
      "task_attempts": 2,
      "replan_rounds": 0,
@@ -3474,7 +3474,7 @@
     },
     "budget_compliance": {
      "model_calls": 5,
-     "sql_executions": 1,
+     "sql_executions": 2,
      "retrievals": 1,
      "task_attempts": 2,
      "replan_rounds": 0,
@@ -3633,7 +3633,7 @@
     },
     "budget_compliance": {
      "model_calls": 5,
-     "sql_executions": 1,
+     "sql_executions": 2,
      "retrievals": 1,
      "task_attempts": 2,
      "replan_rounds": 0,
@@ -3792,7 +3792,7 @@
     },
     "budget_compliance": {
      "model_calls": 5,
-     "sql_executions": 1,
+     "sql_executions": 2,
      "retrievals": 1,
      "task_attempts": 2,
      "replan_rounds": 0,
@@ -4380,7 +4380,7 @@
     },
     "budget_compliance": {
      "model_calls": 12,
-     "sql_executions": 5,
+     "sql_executions": 9,
      "retrievals": 4,
      "task_attempts": 9,
      "replan_rounds": 0,
@@ -4674,7 +4674,7 @@
     },
     "budget_compliance": {
      "model_calls": 15,
-     "sql_executions": 6,
+     "sql_executions": 11,
      "retrievals": 4,
      "task_attempts": 10,
      "replan_rounds": 1,
@@ -4967,7 +4967,7 @@
     },
     "budget_compliance": {
      "model_calls": 12,
-     "sql_executions": 5,
+     "sql_executions": 9,
      "retrievals": 4,
      "task_attempts": 9,
      "replan_rounds": 0,
@@ -5247,7 +5247,7 @@
     },
     "budget_compliance": {
      "model_calls": 12,
-     "sql_executions": 5,
+     "sql_executions": 9,
      "retrievals": 4,
      "task_attempts": 9,
      "replan_rounds": 0,
@@ -5554,7 +5554,7 @@
     },
     "budget_compliance": {
      "model_calls": 16,
-     "sql_executions": 7,
+     "sql_executions": 13,
      "retrievals": 4,
      "task_attempts": 11,
      "replan_rounds": 2,
@@ -5850,7 +5850,7 @@
     },
     "budget_compliance": {
      "model_calls": 12,
-     "sql_executions": 5,
+     "sql_executions": 9,
      "retrievals": 4,
      "task_attempts": 9,
      "replan_rounds": 0,
@@ -6044,7 +6044,7 @@
     },
     "budget_compliance": {
      "model_calls": 5,
-     "sql_executions": 1,
+     "sql_executions": 2,
      "retrievals": 1,
      "task_attempts": 2,
      "replan_rounds": 0,
@@ -6199,7 +6199,7 @@
     },
     "budget_compliance": {
      "model_calls": 5,
-     "sql_executions": 1,
+     "sql_executions": 2,
      "retrievals": 1,
      "task_attempts": 2,
      "replan_rounds": 0,

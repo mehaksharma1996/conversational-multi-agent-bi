@@ -425,6 +425,10 @@ export function InvestigationPanel({
               Proposal review details are unavailable. This plan cannot be approved from the browser.
             </Notice>
           )}
+          <p className="field-hint">
+            Approving also lets the server check each hypothesis test against the source table, with a
+            read-only query it builds from the test as written above. No model writes that query.
+          </p>
           <div className="button-row investigation-actions">
             <button className="button button--primary" type="button" disabled={actionBusy || !decisionReady || plan.tasks.length === 0} onClick={onApprove}>
               Approve and run plan

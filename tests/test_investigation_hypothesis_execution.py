@@ -75,7 +75,9 @@ def test_each_usable_test_gets_exactly_one_derived_evidence_bound_to_it(finished
 def test_derivation_charges_nothing_and_verdicts_precede_the_close(finished: Any) -> None:
     e, result = finished
     usage = e.run.ledger.usage()
-    assert usage.task_attempts == 8 and usage.sql_executions == 5 and usage.retrievals == 3
+    # Five model statements, and one independent check for each of the four SQL hypothesis tests
+    # (ADR 0024 Amendment 13). Deriving evidence still charges nothing.
+    assert usage.task_attempts == 8 and usage.sql_executions == 9 and usage.retrievals == 3
     assert usage.closed_reason == "completed"
     history = list(e.run.graph.get_state_history(e.run.config))
     with_verdicts = [s for s in history if dict(s.values).get("verdicts")]

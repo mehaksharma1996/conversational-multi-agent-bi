@@ -131,6 +131,7 @@ AUDIT_ATTRIBUTES: dict[str, str] = {
     "task_count": "int",
     "task_kind": "token",
     "attempts": "int",
+    "independent_check": "token",
     "wave_size": "int",
     "approved_count": "int",
     "rejected_count": "int",

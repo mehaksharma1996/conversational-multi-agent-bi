@@ -421,6 +421,8 @@ class LimitationCode(StrEnum):
     FOLLOW_UP_INVALID = "follow_up_invalid"
     REPLAN_LIMIT_REACHED = "replan_limit_reached"
     CRITIQUE_ROUNDS_EXHAUSTED = "critique_rounds_exhausted"
+    # ADR 0024 Amendment 13: a test's rows were not confirmed from the source table, so not shown.
+    INDEPENDENT_CHECK_FAILED = "independent_check_failed"
 
 
 # A run that ended this way always states it.

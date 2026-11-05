@@ -1357,7 +1357,7 @@
     "passed": 43
   },
   "provenance": {
-    "cases_sha256": "d918da3a59064790101770508c6b5dba290ab24c938bb7bba31db3ca16264671",
+    "cases_sha256": "809c2311cea9cc09ba57cd875ef02373f0a53b204e1a922fcd0979c5a30dfa8a",
     "mode": "scripted-trajectory",
     "oracle_sha256": "520dc795e0d0df8db6ec5874c2ae9a3cdf8fcf9b0ed93c5257d2c4a4d4a956bf",
     "public_cases_sha256": "025ab70b0c5e537d9ec7979d1700a1601d6db119086510d42cbf7325f2ff15d5",
@@ -1365,9 +1365,9 @@
   },
   "review": {
     "accepted_changes": [
-      "initial baseline"
+      "provenance.cases_sha256: \"d918da3a59064790101770508c6b5dba290ab24c938bb7bba31db3ca16264671\" -> \"809c2311cea9cc09ba57cd875ef02373f0a53b204e1a922fcd0979c5a30dfa8a\""
     ],
-    "justification": "EVAL-1 (#145): first baseline of scripted trajectories through the real investigation graph."
+    "justification": "ADR 0024 Amendment 13 charges one sql_executions unit per independent check on a hypothesis test. Fourteen cases' expected counts rise by exactly the number of checks run; every verdict, report, security, and call dimension is unchanged."
   },
   "safety": {
     "dataset_unchanged": {

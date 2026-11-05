@@ -90,6 +90,7 @@ executed SQL is now retained in the encrypted workspace store.
   UI-6c does not change it. It only stops overstating it: the report view and both exports always
   state what verification covers, and the claim chip reads "Traced to evidence". Until the engine
   gains a control, no release may claim that a verified report proves its numbers are correct.
+  (Superseded: ADR 0024 Amendment 13 added that control. Its own limits are stated there.)
 - **E11. Claim states fail towards doubt (final review).** A claim naming a fact or hypothesis the
   report does not hold is `unsupported` whatever else it cites. Recorded conflict is `conflicted`, an
   open follow-up is `incomplete`, and a report with no evidence behind it does not show its

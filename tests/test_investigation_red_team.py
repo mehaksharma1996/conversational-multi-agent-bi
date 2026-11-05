@@ -446,7 +446,7 @@ FABRICATED_COUNTS = (
 @attack(
     "RT-ROW-05",
     "rows",
-    "SQL approval: fabricated counts pass the guard, so only a person seeing the SQL stops them",
+    "SQL approval holds the statement for a person; if approved, the independent check rejects it",
 )
 def _fabricated_counts_wait_for_a_person(_: Context) -> None:
     plan = plan_of(sql_task("trend", fields=("quarter", "churned")))
@@ -488,25 +488,23 @@ SCALED_AGGREGATE = (
     [FABRICATED_COUNTS, RELABELLED_POPULATION, SCALED_AGGREGATE],
     ids=["literal_counts", "relabelled_population", "scaled_aggregate"],
 )
-def test_residual_fabricated_counts_a_person_approves_change_the_verdict(
+def test_fabricated_counts_a_person_approves_do_not_change_the_verdict(
     ctx: Context, forged_sql: str
 ) -> None:
-    """NOT a pass: this pins the limit behind RT-ROW-05. See the threat model, section 8.
+    """RT-ROW-05 past the approval gate. Forged SQL is read-only, so the SQL guards accept it, and a
+    person may approve it (this fixture's authority needs no wave, the same position).
 
-    The verdict is deterministic over the counts, but a model writes the SQL that produces them.
-    Forged SQL is read-only, so every deterministic control accepts it. Once approved (this
-    fixture's authority needs no wave, the same position), a refuted hypothesis reads as supported.
-
-    The shapes are why no syntax rule closes this: refusing literal counts leaves the relabelled
-    population, which holds no literal count, and requiring bare aggregates still leaves it. Closing
-    the gap means comparing counts with an independent computation from the approved specification.
-    If this test starts failing because a control now catches it, delete it and update section 8.
+    These three shapes used to flip this refuted hypothesis to ``supported_association`` (threat
+    model, section 8, history). No syntax rule closes that: the relabelled population holds no
+    literal count, and every count in it is a bare aggregate. What stops them now is the comparison
+    with an independent computation from the approved specification (ADR 0024 Amendment 13).
     """
     llm = churn_adapter()
     llm.sql["hypothesis h4 ("] = forged_sql
     _, result = _attacked_run(ctx, llm)
     assert _verdicts(ctx.baseline)["h4"] == "refuted"
-    assert _verdicts(result)["h4"] == "supported_association"
+    assert _verdicts(result)["h4"] == "untestable"
+    assert result.state.verdicts["h4"].reasons == ("independent_check_mismatch",)
 
 
 class _ForgedCountAdapters(investigation_app.ScriptedChurnReportAdapters):
@@ -520,15 +518,14 @@ class _ForgedCountAdapters(investigation_app.ScriptedChurnReportAdapters):
         return provider
 
 
-def test_residual_fabricated_counts_reach_a_verified_report_through_the_real_approval_route(
+def test_fabricated_counts_do_not_reach_a_report_through_the_real_approval_route(
     ctx: Context,
 ) -> None:
-    """NOT a pass: the same limit end to end, with a person approving each wave over HTTP.
+    """The same attack end to end, with a person approving each wave over HTTP.
 
     Each assertion names a different control, because these are not one guarantee. Permission and
-    SQL safety hold, and they are not evidence that the numbers are true. Data provenance and
-    analytical correctness are what fail: nothing compares the rows with the source table, and the
-    claim verifier checks a report against those rows only. What stays true is the disclosure.
+    SQL safety let the statement run; they are not evidence that its numbers are true. The
+    independent check is what decides that, so the approval no longer carries the verdict.
     """
     root = isolated_directory_path("sec1_forged_counts")
     app = create_app(
@@ -554,18 +551,24 @@ def test_residual_fabricated_counts_reach_a_verified_report_through_the_real_app
     forged = [sql for sql in statements if "THEN 1 ELSE 50" in sql]
     assert len(forged) == 1, "the statement is on record for the person who reviews the evidence"
 
-    # Provenance and analytical correctness did not: the source data refutes h4 (see the baseline).
+    # Analytical correctness held: the source refutes h4, and nothing claims it is supported.
     assert _verdicts(ctx.baseline)["h4"] == "refuted"
     row = next(row for row in evidence["report"]["hypotheses"] if row["hypothesis_id"] == "h4")
-    assert row["verdict"] == "supported_association"
+    assert row["verdict"] == "untestable"
+    assert row["reasons"] == ["independent_check_mismatch"]
+    assert row["fact_ids"] == []
 
-    # Claim verification held for what it checks, the rows returned, so the report is complete.
+    # The forged rows are not presented as a result: not in the report, and flagged for review.
+    assert "h4_rate" not in {table["task_id"] for table in evidence["report"]["query_tables"]}
+    stored = next(item for item in evidence["evidence"] if item.get("sql") == forged[0])
+    assert stored["independently_confirmed"] is False
+
+    # The run still finishes, and the rest of the investigation is unaffected.
     assert body["status"] in {"completed", "completed_partial"}, body
-
-    # The disclosure is what stays accurate. It does not resolve the defect.
     assert export.status_code == 200
     assert VERIFICATION_SCOPE in export.text
     assert "THEN 1 ELSE 50" not in export.text
+    assert "independent\\_check\\_mismatch" in export.text  # Markdown-escaped, like every code
 
 
 # --- agent to agent: plans ------------------------------------------------------------------------

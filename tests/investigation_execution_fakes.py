@@ -22,6 +22,7 @@ from packages.investigation.approval import (
 from src.agents.sql_agent import execute_sql
 from src.llm.base import LLMResponse
 from src.orchestration import investigation_execution
+from src.orchestration.independent_check import execute_check
 from src.orchestration.investigation_approval import InvestigationApprovalService
 from src.orchestration.investigation_execution import InvestigationExecutionRun
 from src.orchestration.investigation_proposal import InvestigationProposalRun
@@ -255,6 +256,7 @@ def execution(
     approvals: Approvals | None = None,
     follow_up_rounds: int = 0,
     telemetry: Any = None,
+    independent_executor: Any = None,
 ) -> Execution:
     plan = plan or churn_plan()
     proposal = proposal or proposed(plan)
@@ -286,6 +288,7 @@ def execution(
         scripted_admission=SCRIPTED_EXECUTION_ADMISSION,
         table_resolver=tables,
         sql_executor=executor,
+        independent_executor=independent_executor or execute_check,
         limits=limits,
         ledger_clock=ledger_clock or (lambda: 0.0),
         follow_up_authorizer=authorizer,

@@ -181,10 +181,11 @@ describe("the report and its states", () => {
     expect(screen.queryByText("verified, association only")).not.toBeInTheDocument();
   });
 
-  it("always states that verification does not prove a query reflects the source data", async () => {
+  it("always states what verification covers and what it cannot show", async () => {
     await show();
-    expect(screen.getByText(/can return counts that do not reflect the source data/)).toBeInTheDocument();
-    expect(screen.getByText(/Nothing checks these rows against the source data/)).toBeInTheDocument();
+    expect(screen.getByText(/equals an independent computation from the approved test/)).toBeInTheDocument();
+    expect(screen.getByText(/does not show that the source data is accurate or that the approved definitions/)).toBeInTheDocument();
+    expect(screen.getByText(/does not show the source data is accurate/)).toBeInTheDocument();
   });
 
   it("marks a verdict with conflicting evidence, in text, rather than as traced", async () => {
@@ -200,6 +201,19 @@ describe("the report and its states", () => {
 });
 
 describe("the evidence inspector", () => {
+  it("says when rows were not independently confirmed, and only then", async () => {
+    const base = evidenceFixture();
+    const notice = /not independently confirmed from the source table/;
+    const confirmed = await show(base);
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
+    confirmed.unmount();
+    const evidence = base.evidence.map((item) =>
+      item.kind === "query" ? { ...item, independently_confirmed: false } : item,
+    );
+    await show({ ...base, evidence });
+    expect(screen.getByText(notice)).toBeInTheDocument();
+  });
+
   it("covers SQL, preview rows, the hypothesis board, derived values, citations, and findings", async () => {
     await show();
     expect(screen.getByRole("heading", { name: "Evidence inspector" })).toBeInTheDocument();

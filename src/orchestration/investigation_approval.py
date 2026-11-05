@@ -93,6 +93,7 @@ from packages.investigation.state import (
     InvestigationScope,
     InvestigationStateView,
     PlanApprovalRecord,
+    QueryProvenance,
     follow_up_digest,
     plan_digest,
 )
@@ -146,6 +147,19 @@ class _Record:
     wave: _Wave | None = None
     waves_requested: int = 0
     rounds_issued: dict[int, str] = field(default_factory=dict)
+
+
+def _independent_check_status(view: InvestigationStateView, task_id: str) -> str | None:
+    """The fixed status of the independent check a task's evidence records, if one ran."""
+    for record in view.evidence.values():
+        provenance = record.provenance
+        if (
+            record.task_id == task_id
+            and type(provenance) is QueryProvenance
+            and provenance.independent_check is not None
+        ):
+            return provenance.independent_check.status
+    return None
 
 
 class InvestigationApprovalService:
@@ -545,6 +559,7 @@ class InvestigationApprovalService:
                         error_category=None
                         if task.outcome is None
                         else task.outcome.error_category,
+                        independent_check=_independent_check_status(view, task_id),
                     )
             self._finish(record, InvestigationStatus(status), reason=None)
 

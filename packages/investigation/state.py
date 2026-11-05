@@ -251,6 +251,24 @@ EvidenceStatusName = Literal[
 ]
 
 
+IndependentCheckStatus = Literal["computed", "undetermined", "unavailable", "dataset_changed"]
+INDEPENDENT_VERIFIER_VERSION: Literal["inv-independent-check-v1"] = "inv-independent-check-v1"
+
+
+class IndependentCheckRecord(_State):
+    """That an independent computation ran for a hypothesis test, and what it is bound to (ADR 0024
+    Amendment 13). Digests and a fixed status only: counts stay in the process-local payload, and
+    ``computed`` says that it ran, never that it agreed. Agreement is recomputed by ``observe``.
+    """
+
+    verifier_version: Literal["inv-independent-check-v1"] = INDEPENDENT_VERIFIER_VERSION
+    status: IndependentCheckStatus
+    contract_digest: Digest
+    binding_digest: Digest
+    table_digest: Digest | None = None
+    authority_epoch: StrictCount = Field(ge=0)
+
+
 class QueryProvenance(_State):
     """How query evidence was produced. ``sql_fingerprint`` is a keyed digest, never the SQL."""
 
@@ -262,6 +280,7 @@ class QueryProvenance(_State):
     corrections_used: StrictCount = Field(ge=0, le=1)
     policy_sql_status: PolicySQLStatusName
     elapsed_ms: StrictCount = Field(ge=0)
+    independent_check: IndependentCheckRecord | None = None
 
 
 class SourceLocation(_State):
@@ -419,6 +438,11 @@ VerdictReason = Literal[
     "effect_below_threshold",
     "conflicting_evidence",
     "context_unverified",
+    # ADR 0024 Amendment 13: the counts could not be confirmed from the source table.
+    "independent_check_mismatch",
+    "independent_check_unavailable",
+    "independent_check_undetermined",
+    "dataset_version_changed",
 ]
 MAX_VERDICT_REASONS = 8
 MAX_VERDICT_EVIDENCE = 16

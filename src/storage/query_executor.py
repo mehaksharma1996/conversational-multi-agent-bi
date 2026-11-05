@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import warnings
+from collections.abc import Sequence
 from contextlib import closing
 from pathlib import Path
 from time import monotonic
@@ -87,8 +88,9 @@ def execute_read_query(
     allowed_columns: dict[str, set[str]] | None = None,
     timeout_seconds: float = 5.0,
     encryption_key: bytes | None = None,
+    parameters: Sequence[str | int] | None = None,
 ) -> pd.DataFrame:
-    """Validate and execute a read-only SQLite query."""
+    """Validate and execute a read-only SQLite query, with optional bound ``?`` parameters."""
     if max_rows < 1:
         raise ValueError("max_rows must be at least 1.")
     if timeout_seconds <= 0:
@@ -115,7 +117,11 @@ def execute_read_query(
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=_PANDAS_DBAPI2_WARNING)
-                return pd.read_sql_query(limited_query, connection)
+                return pd.read_sql_query(
+                    limited_query,
+                    connection,
+                    params=None if parameters is None else tuple(parameters),
+                )
         except Exception as exc:
             message = str(exc).lower()
             if "interrupted" in message:

@@ -96,7 +96,7 @@ admitted, so **no real model has run this path**.
 |---|---|---|
 | Instructions in a PDF steer a role | The gateway builds each prompt from the approved task, and one tool call does one thing. Answer text reaches only the findings prompt, fenced and only when its citations verify. The Critic and narrative prompts hold no document text. Verdicts ignore answer text | A filename sits outside the fence in the findings prompt, flattened and cut to 60 characters (RT-DOC-07). It can influence only the draft, and every claim in the draft is re-verified |
 | Instructions in table cells steer a role | Result rows stay in typed in-process payloads. No later prompt or checkpoint holds a cell. A report shows a cell only as a table value | Redacted **sample values do reach the SQL prompt**, unfenced, so a hostile cell can steer SQL generation (RT-ROW-02). The read-only guard, the SQLite authorizer, and SQL approval still apply |
-| A model writes SQL that is read-only but dishonest | SQL approval is mandatory in the API: nothing executes until a person approves that exact statement (RT-ROW-05) | **The largest residual risk, and open.** Forged counts pass every deterministic control. Once approved, a refuted hypothesis reads as supported in a report labelled verified. Nothing but the approver stops this. See "Forged analytical counts" below |
+| A model writes SQL that is read-only but dishonest | SQL approval is mandatory in the API: nothing executes until a person approves that exact statement (RT-ROW-05). Each hypothesis test's counts must then equal an independent computation from the approved specification, or the test is `untestable` | Agreement is with the authorized source table under the approved definitions, not with the truth. Untyped analysis rows have no specification, so they are labelled unconfirmed. See "Forged analytical counts" below |
 | A plan claims authority or widens scope | Strict plan validation: unknown fields, wrong assignees, and fields outside the schema never reach a person. Approval binds the exact plan digest, and the gateway compares state with the trusted approval | An approved objective or hypothesis statement is still model text in later prompts. It is flattened and cut, and the guards apply to whatever it provokes |
 | Forged or replayed evidence between roles | Payloads exist only in the gateway that issued them and are re-verified against their records and scope. The Critic checks every citation and recomputes every number | A draft can be wrong; it is transient and never reaches a report |
 | The Critic overrides a control | The Critic model may only propose coverage gaps, parsed strictly. Each state channel has one writer (`CHANNEL_OWNERS`). Findings are recomputed and cannot be withdrawn or downgraded. A confirmed gap is only a request: without a granted round and an exact-digest approval, nothing is admitted | None known in the deterministic path |
@@ -111,36 +111,43 @@ admitted, so **no real model has run this path**.
 
 ### Forged analytical counts
 
-An approved read-only statement can return counts that do not reflect the source data. The verifier
-then trusts those rows. These are separate properties, and a pass on one says nothing about another:
+An approved read-only statement can return counts that do not reflect the source data, so its rows
+never decide anything alone ([ADR 0024 Amendment 13](../adr/0024-multi-agent-investigation.md)). These
+are separate properties, and a pass on one says nothing about another:
 
 | Property | Question it answers | State |
 |---|---|---|
 | Permission safety | Was this person allowed to approve and run it? | Holds: tenant, capability, and exact-statement approval |
 | SQL execution safety | Could the statement change data or read outside the table? | Holds: read-only guard, SQLite authorizer, single statement |
-| Data provenance | Do the returned rows reflect the source table? | **Not checked by any control** |
-| Analytical correctness | Does the statement measure what the hypothesis says? | **Not checked by any control** |
-| Claim verification | Does the report agree with the rows returned? | Holds, and only for those rows |
+| Data provenance | Do the returned rows reflect the approved population? | Holds for hypothesis tests: compared with a trusted computation over the source table. Not checked for untyped analysis rows, which are labelled |
+| Analytical correctness | Does the statement measure what the approved test says? | Holds to the approved definitions. It cannot show that those definitions, or the source data, are right |
+| Claim verification | Does the report agree with its evidence? | Holds, over confirmed numbers |
 
-The regressions are `test_residual_fabricated_counts_a_person_approves_change_the_verdict` and
-`test_residual_fabricated_counts_reach_a_verified_report_through_the_real_approval_route`. They use
-three shapes: literal counts, real aggregates of another population relabelled, and a scaled
-aggregate. The relabelled shape holds no literal count and every count is a bare aggregate, so no
-rule about the form of the statement closes this. A sound fix compares returned counts with an
-independent computation from the approved test specification. That runs SQL outside today's
-exact-statement approval and adds a verdict outcome, so it needs an amendment to ADR 0024. It is not
-part of SEC-1.
+The regressions are `tests/test_investigation_independent_check.py`,
+`test_fabricated_counts_a_person_approves_do_not_change_the_verdict`, and
+`test_fabricated_counts_do_not_reach_a_report_through_the_real_approval_route`. A difference, or no
+dependable computation, leaves a test `untestable` with a fixed reason, and a failed check's rows are
+withheld from the report and flagged in the evidence inspector.
 
-The report and export state this limit (`VERIFICATION_SCOPE`). That wording keeps the label honest;
-it does not remove the defect. Today this cannot occur without a model that writes SQL, and no real
-model is admitted. The defect must be fixed, or explicitly accepted by the owner, before any provider
-is admitted.
+**What still gets through.** A wrong source table, a misguided definition a person approved, and a
+column whose name misdescribes it all pass, because each agrees with what was approved. An in-place
+edit that preserves row count and schema is not detected. This has run with scripted models only, and
+the compiled statement shares the SQL executor's boundary, not a separate trust domain.
+
+**History.** Until Amendment 13, three shapes (literal counts, real aggregates of another population
+relabelled, and a scaled aggregate) turned a refuted hypothesis into `supported_association` in a
+report labelled verified, once a person approved them. Every deterministic control accepted them,
+and the report disclosed the limit. The tests that pinned this were
+`test_residual_fabricated_counts_a_person_approves_change_the_verdict` and
+`test_residual_fabricated_counts_reach_a_verified_report_through_the_real_approval_route`. No report
+produced before this change was rechecked.
 
 **What the red-team suite proves.** `tests/test_investigation_red_team.py` runs each attack (case IDs
 `RT-*`) through the real gateways, graph, Critic, and verifier, with scripted models playing the worst
 case: a model that has already obeyed the injection. Each case asserts the control that stopped it. So
 the suite shows that the deterministic controls hold whatever a model outputs, for these attacks. The
-exception is the forged-count path above: RT-ROW-05 fails closed only up to the approval gate.
+approval gate in RT-ROW-05 is one control; the independent check behind it is another, pinned by the
+regressions above.
 
 **What it does not prove.** It says nothing about how often a real model would be misled, or how much
 harm a misled model could do inside these limits, such as a wrong but guard-passing query or a poor

@@ -27,6 +27,14 @@ filter keys; every band's baseline and comparison rows must exist exactly once a
 ``min_denominator``. The comparison period is directly standardized to the baseline's band
 composition, exactly, and compared with the crude baseline rate (``standardized_rate``).
 
+ADR 0024 Amendment 13: a model writes the SQL behind these rows, so they are never enough. Every
+SQL test's payload must carry the result of an independent computation from the approved
+specification, bound to this scope, plan, dataset, and evidence record, and every compared group's
+counts must equal it. ``observe`` makes that comparison itself, so every path to a number (verdicts,
+derived evidence, the Critic's checks, and the report verifier) goes through it. A disagreement, or
+no dependable computation, makes the test ``untestable`` for a fixed reason. No stored label says
+"matched".
+
 Unusable evidence (absent, failed, truncated, NULL, too-small denominators, inconsistent shape or
 counts, conflicting values) makes the test, and therefore the hypothesis, ``untestable``: absence of
 evidence is never evidence of no effect. A hypothesis is ``supported_association`` only when every
@@ -49,10 +57,13 @@ from packages.investigation.evidence import (
     DerivedRatio,
     DerivedStratum,
     DocumentEvidencePayload,
+    GroupKey,
+    IndependentGroup,
     QueryEvidencePayload,
     crude_baseline,
     document_citations_valid,
     exact_ratio,
+    group_key,
     standardized_rate,
     verify_payload,
 )
@@ -68,15 +79,30 @@ from packages.investigation.hypotheses import (
     resolve_any,
 )
 from packages.investigation.state import (
+    EvidenceRecord,
     GatewayEvidenceId,
     InvestigationStateView,
+    QueryProvenance,
     VerdictCode,
     VerdictReason,
+    plan_digest,
 )
+from packages.investigation.verification import binding_digest, comparison_keys, contract_digest
 
 # A model-written rate column, when the result also has one, must agree with the recomputed rate.
 RATE_COLUMN_TOLERANCE = Fraction(1, 10_000)
 RATE_COLUMNS = ("rate", "churn_rate")
+# Two correct sums over the same rows can differ by float rounding, depending on the row order. The
+# verdict then uses the independent sum, so this tolerance can never move a number toward a claim.
+SUM_RELATIVE_TOLERANCE = Fraction(1, 1_000_000_000)
+INDEPENDENT_REASONS: frozenset[VerdictReason] = frozenset(
+    {
+        "independent_check_mismatch",
+        "independent_check_unavailable",
+        "independent_check_undetermined",
+        "dataset_version_changed",
+    }
+)
 TestOutcome = Literal["supports", "refutes", "below_threshold", "unusable"]
 Count = Annotated[int, Strict(), Field(ge=0)]
 Finite = Annotated[float, Strict(), Field(allow_inf_nan=False)]
@@ -213,20 +239,45 @@ def _measure(
     return Measure(numerator=float(numerator), denominator=bottom, value=float(exact))
 
 
-def _keys(test: ResolvedTest) -> tuple[dict[str, str], dict[str, str]]:
-    """(measure key, reference key) for the test's comparison."""
-    group = {item.field: item.value for item in test.filters}
-    period = test.period
-    if test.claim.direction == "higher_than":
-        other = test.comparison_group
-        assert other is not None  # the contract requires it for ``higher_than``
-        reference = {**group, other.field: other.value, period.field: period.comparison}
-        return {**group, period.field: period.comparison}, reference
-    comparison = {**group, period.field: period.comparison}
-    baseline = {**group, period.field: period.baseline}
-    if test.claim.direction == "decrease":
-        return baseline, comparison
-    return comparison, baseline
+def _independent_groups(
+    test: ResolvedTest, payload: QueryEvidencePayload
+) -> dict[GroupKey, IndependentGroup] | VerdictReason:
+    """The independent counts for exactly this approved test, or why there are none."""
+    result = payload.independent
+    if result is None or result.record.contract_digest != contract_digest(test):
+        return "independent_check_unavailable"
+    status = result.record.status
+    if status == "undetermined":
+        return "independent_check_undetermined"
+    if status == "dataset_changed":
+        return "dataset_version_changed"
+    if status != "computed":
+        return "independent_check_unavailable"
+    return {item.key: item for item in result.groups}
+
+
+def _confirmed(
+    test: ResolvedTest,
+    key: dict[str, str],
+    measured: Measure,
+    groups: dict[GroupKey, IndependentGroup],
+) -> Measure | VerdictReason:
+    """The measure, once it equals what the source table holds for this exact group."""
+    found = groups.get(group_key(key))
+    if found is None or found.denominator != measured.denominator:
+        return "independent_check_mismatch"
+    if isinstance(test.metric, RateMetric):
+        return (
+            measured
+            if Fraction(found.numerator) == Fraction(measured.numerator)
+            else "independent_check_mismatch"
+        )
+    independent = Fraction(found.numerator)
+    largest = max(abs(independent), abs(Fraction(measured.numerator)), Fraction(1))
+    if abs(independent - Fraction(measured.numerator)) > SUM_RELATIVE_TOLERANCE * largest:
+        return "independent_check_mismatch"
+    exact = independent / found.denominator
+    return Measure(numerator=found.numerator, denominator=found.denominator, value=float(exact))
 
 
 def _outcome(effect: Fraction, test: ResolvedTest) -> TestOutcome:
@@ -243,20 +294,27 @@ def _observe_stratified(
     """Direct standardization of a stratified follow-up, exactly, from the band counts (C4)."""
     stratification = test.stratification
     assert stratification is not None
+    groups = _independent_groups(test, payload)
+    if isinstance(groups, str):
+        return _unusable(test.task_id, groups)
     folded = {name.casefold(): index for index, name in enumerate(payload.columns)}
-    group = {item.field.casefold(): item.value for item in test.filters}
+    fixed = {item.field.casefold(): item.value for item in test.filters}
     period = test.period.field.casefold()
-    needed = {period, *group, STRATUM_COLUMN, "numerator", "denominator"}
+    needed = {period, *fixed, STRATUM_COLUMN, "numerator", "denominator"}
     if any(name not in folded for name in needed):
         return _unusable(test.task_id, "evidence_inconsistent")
     strata: list[DerivedStratum] = []
     for label in stratification.bands:
         ratios: list[DerivedRatio] = []
         for value in (test.period.baseline, test.period.comparison):
-            row = _row_for(payload, folded, {**group, period: value, STRATUM_COLUMN: label})
+            key = {**fixed, period: value, STRATUM_COLUMN: label}
+            row = _row_for(payload, folded, key)
             if isinstance(row, str):
                 return _unusable(test.task_id, row)
             measured = _measure(test, row, folded)
+            if isinstance(measured, str):
+                return _unusable(test.task_id, measured)
+            measured = _confirmed(test, key, measured, groups)
             if isinstance(measured, str):
                 return _unusable(test.task_id, measured)
             ratios.append(
@@ -293,6 +351,9 @@ def observe(test: ResolvedTest, evidence_id: str, payload: QueryEvidencePayload)
         return _unusable(test.task_id, "evidence_truncated")
     if test.stratification is not None:
         return _observe_stratified(test, evidence_id, payload)
+    groups = _independent_groups(test, payload)
+    if isinstance(groups, str):
+        return _unusable(test.task_id, groups)
     folded = {name.casefold(): index for index, name in enumerate(payload.columns)}
     counts = (
         ("numerator", "denominator")
@@ -302,7 +363,7 @@ def observe(test: ResolvedTest, evidence_id: str, payload: QueryEvidencePayload)
             "value_count",
         )
     )
-    measure_key, reference_key = _keys(test)
+    measure_key, reference_key = comparison_keys(test)
     needed = {*measure_key, *reference_key, *counts}
     if any(name.casefold() not in folded for name in needed):
         return _unusable(test.task_id, "evidence_inconsistent")
@@ -314,6 +375,9 @@ def observe(test: ResolvedTest, evidence_id: str, payload: QueryEvidencePayload)
         if isinstance(row, str):
             return _unusable(test.task_id, row)
         measured = _measure(test, row, folded)
+        if isinstance(measured, str):
+            return _unusable(test.task_id, measured)
+        measured = _confirmed(test, key, measured, groups)
         if isinstance(measured, str):
             return _unusable(test.task_id, measured)
         measures.append(measured)
@@ -403,6 +467,30 @@ def _context(
     return tuple(verified), len(verified) == len(hypothesis.context_tasks)
 
 
+def check_bound(
+    test: ResolvedTest,
+    evidence: EvidenceRecord,
+    plan: InvestigationPlanV2,
+    view: InvestigationStateView,
+) -> bool:
+    """Whether this evidence's independent check is bound to this scope, plan, and record."""
+    provenance = evidence.provenance
+    if type(provenance) is not QueryProvenance or view.scope is None:
+        return False
+    record = provenance.independent_check
+    return record is not None and record.binding_digest == binding_digest(
+        scope=view.scope,
+        plan_digest=plan_digest(plan),
+        authority_epoch=record.authority_epoch,
+        task_id=test.task_id,
+        attempt=evidence.attempt,
+        evidence_id=evidence.id,
+        contract=contract_digest(test),
+        table_digest=record.table_digest,
+        status=record.status,
+    )
+
+
 def hypothesis_tests(hypothesis: Hypothesis, view: InvestigationStateView) -> tuple[str, ...]:
     """A hypothesis's required tests: its approved tests, then its admitted follow-ups (C6)."""
     follow_ups = tuple(
@@ -445,6 +533,9 @@ def evaluate_hypothesis(
         found = _test_evidence(view, task_id, payloads)
         if isinstance(found, str):
             observations.append(_unusable(task_id, found))
+            continue
+        if not check_bound(test, view.evidence[found[0]], plan, view):
+            observations.append(_unusable(task_id, "independent_check_unavailable"))
             continue
         observation = observe(test, *found)
         observations.append(observation)

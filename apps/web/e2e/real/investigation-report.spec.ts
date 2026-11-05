@@ -147,7 +147,7 @@ test("a scripted churn run reaches a verified report whose claims and evidence l
   const workflow = page.locator(".investigation-workflow");
   await expect(workflow).toContainText("verified, association only");
   await expect(workflow).toContainText("No model wrote this narrative");
-  await expect(workflow).toContainText("can return counts that do not reflect the source data");
+  await expect(workflow).toContainText("does not show that the source data is accurate");
   await expect(page.locator(".report-claim").first()).toBeVisible();
   await expect(page.getByRole("article", { name: /^Measurement f1/ })).toBeVisible();
 
@@ -181,7 +181,7 @@ test("a scripted churn run reaches a verified report whose claims and evidence l
   const text = readFileSync(await download.path(), "utf-8");
   expect(text).toContain("verified, association only");
   expect(text).toContain("Evidence: available");
-  expect(text).toContain("can return counts that do not reflect the source data");
+  expect(text).toContain("does not show that the source data is accurate");
   expect(text).toContain("Measurements");
   expect(text).not.toContain("SELECT");
   await expect(exportMarkdown).toBeFocused();
@@ -192,7 +192,7 @@ test("a scripted churn run reaches a verified report whose claims and evidence l
   expect(jsonDownload.suggestedFilename()).toMatch(/^investigation-report-inv_[0-9a-f]+\.json$/);
   const exported = JSON.parse(readFileSync(await jsonDownload.path(), "utf-8")) as Record<string, unknown>;
   expect(exported.evidence_state).toBe("available");
-  expect(String(exported.verification_scope)).toContain("do not reflect the source data");
+  expect(String(exported.verification_scope)).toContain("does not show that the source data is accurate");
   expect(JSON.stringify(exported)).not.toContain("SELECT");
 
   // A reload re-reads the durable report; nothing is kept in browser storage.

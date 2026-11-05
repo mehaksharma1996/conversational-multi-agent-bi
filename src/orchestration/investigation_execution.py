@@ -239,6 +239,7 @@ from src.investigation.document_researcher import DocumentResearcher
 from src.investigation.sql_analyst import SQLAnalyst
 from src.investigation.supervisor import FollowUpPlanner
 from src.orchestration.guarded_sql import SQLExecutor
+from src.orchestration.independent_check import IndependentExecutor, execute_check
 from src.orchestration.investigation_approval import InvestigationApprovalService
 from src.orchestration.investigation_checkpoint import load_investigation_state
 from src.orchestration.investigation_graph import InvestigationGraphBuilder
@@ -499,6 +500,7 @@ class InvestigationExecutionRun:
         table_resolver: TableResolver | None = None,
         policy_criteria: PolicyCriteriaSource | None = None,
         sql_executor: SQLExecutor = execute_sql,
+        independent_executor: IndependentExecutor = execute_check,
         limits: BudgetLimits = EXECUTION_LIMITS,
         ledger_clock: Clock = time.monotonic,
         new_id: IdSource = _random_hex,
@@ -553,6 +555,7 @@ class InvestigationExecutionRun:
             table_resolver=table_resolver,
             policy_criteria=policy_criteria,
             sql_executor=sql_executor,
+            independent_executor=independent_executor,
             fingerprint_key=fingerprint_key,
             retry_categories=RETRYABLE_CATEGORIES,
             numeric_fields=self._numeric_fields,
