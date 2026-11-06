@@ -225,7 +225,11 @@ def test_api_dependencies_install_reproducibly_from_the_lock_file() -> None:
 @pytest.mark.parametrize(
     "dockerfile", [DOCKERFILE_API, DOCKERFILE_STREAMLIT], ids=["api", "streamlit"]
 )
-def test_python_images_pin_the_patched_openssl_packages(dockerfile: str) -> None:
+def test_python_images_pin_the_patched_debian_packages(dockerfile: str) -> None:
+    assert "apt=2.6.2" in dockerfile
+    assert "libapt-pkg6.0=2.6.2" in dockerfile
+    assert "apt-get upgrade" not in dockerfile
+    assert "dist-upgrade" not in dockerfile
     assert "libssl3=3.0.22-1~deb12u2" in dockerfile
     assert "openssl=3.0.22-1~deb12u2" in dockerfile
     assert "apt-get install --no-install-recommends --yes" in dockerfile
