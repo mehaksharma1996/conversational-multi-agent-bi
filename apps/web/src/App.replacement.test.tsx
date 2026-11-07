@@ -12,6 +12,7 @@ import {
   getConversation,
   getDataset,
   getDocumentCollection,
+  getTabularCapabilities,
   getWorkspaceOverview,
   listMessages,
   listWorkbookSheets,
@@ -42,6 +43,7 @@ vi.mock("./api/client", async (importOriginal) => {
     getDataset: vi.fn(),
     getAnalysis: vi.fn(),
     getDocumentCollection: vi.fn(),
+    getTabularCapabilities: vi.fn(),
     getConversation: vi.fn(),
     listMessages: vi.fn(),
     uploadTabular: vi.fn(),
@@ -105,6 +107,11 @@ beforeEach(() => {
   mockOwnedWorkspace();
   vi.mocked(uploadTabular).mockResolvedValue(uploadFixture);
   vi.mocked(listWorkbookSheets).mockResolvedValue([]);
+  vi.mocked(getTabularCapabilities).mockResolvedValue({
+    supported_extensions: [".csv", ".xls", ".xlsx"],
+    max_upload_bytes: 50 * 1024 * 1024,
+    max_rows: 1_000_000,
+  });
 });
 
 afterEach(() => {
@@ -166,6 +173,33 @@ describe("replacement confirmation", () => {
 });
 
 describe("failed replacement", () => {
+  it("stops waiting, marks the operation interrupted, and reconciles instead of retrying", async () => {
+    vi.mocked(uploadTabular).mockImplementation(
+      (_workspaceId, _file, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(
+              new ApiClientError(
+                "Stopped waiting for the server. The request may still finish.",
+                "request_cancelled",
+              ),
+            ),
+          );
+        }),
+    );
+    const user = await openApp("#data");
+    const { dialog } = await startUpload(user);
+    await user.click(within(dialog).getByRole("button", { name: "Upload and replace" }));
+
+    await user.click(await screen.findByRole("button", { name: "Stop waiting and check" }));
+
+    expect(await screen.findByText(/Nothing was replaced/)).toBeVisible();
+    expect(screen.getByTestId("operation-announcer")).toHaveTextContent(
+      "Data upload was interrupted; its outcome is unknown.",
+    );
+    expect(uploadTabular).toHaveBeenCalledOnce();
+  });
+
   it("reads the outcome back from the server and keeps results it confirms are unchanged", async () => {
     vi.mocked(uploadTabular).mockRejectedValue(new ApiClientError("The request timed out.", "timeout"));
     const user = await openApp("#data");

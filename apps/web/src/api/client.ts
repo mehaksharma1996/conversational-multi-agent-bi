@@ -8,12 +8,20 @@ import { newTraceparent } from "./traceparent";
 const REQUEST_TIMEOUT_MS = 120_000;
 
 async function timedFetch(request: Request): Promise<Response> {
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = AbortSignal.any([request.signal, timeoutSignal]);
   try {
-    return await fetch(request, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    return await fetch(request, { signal });
   } catch (caught) {
+    if (request.signal.aborted) {
+      throw new ApiClientError(
+        "Stopped waiting for the server. The request may still finish; checking the workspace is required before trying again.",
+        "request_cancelled",
+      );
+    }
     if (caught instanceof DOMException && caught.name === "TimeoutError") {
       throw new ApiClientError(
-        "The server took too long to respond. Your data is unchanged; try again.",
+        "The server took too long to respond. Check the current state before trying again.",
         "timeout",
       );
     }
@@ -64,6 +72,7 @@ api.use({
 
 export type Workspace = components["schemas"]["WorkspaceResponse"];
 export type TabularUpload = components["schemas"]["TabularUploadResponse"];
+export type TabularCapabilities = components["schemas"]["TabularCapabilitiesResponse"];
 export type Dataset = components["schemas"]["DatasetResponse"];
 export type SchemaMappingUpdate = components["schemas"]["SchemaMappingUpdateRequest"];
 export type Analysis = components["schemas"]["AnalysisResponse"];
@@ -151,6 +160,11 @@ export async function getWorkspaceOverview(workspaceId: string): Promise<Workspa
   const { data, error, response } = await api.GET("/api/v1/workspaces/{workspace_id}/overview", {
     params: { path: { workspace_id: workspaceId } },
   });
+  return unwrap(data, error, response);
+}
+
+export async function getTabularCapabilities(): Promise<TabularCapabilities> {
+  const { data, error, response } = await api.GET("/api/v1/tabular-capabilities");
   return unwrap(data, error, response);
 }
 
@@ -328,6 +342,7 @@ export async function downloadInvestigationReport(
 export async function uploadTabular(
   workspaceId: string,
   file: File,
+  signal?: AbortSignal,
 ): Promise<TabularUpload> {
   const { data, error, response } = await api.POST(
     "/api/v1/workspaces/{workspace_id}/tabular-uploads",
@@ -339,15 +354,16 @@ export async function uploadTabular(
         form.append("file", file);
         return form;
       },
+      ...(signal ? { signal } : {}),
     },
   );
   return unwrap(data, error, response);
 }
 
-export async function listWorkbookSheets(uploadId: string): Promise<string[]> {
+export async function listWorkbookSheets(uploadId: string, signal?: AbortSignal): Promise<string[]> {
   const { data, error, response } = await api.GET(
     "/api/v1/tabular-uploads/{upload_id}/sheets",
-    { params: { path: { upload_id: uploadId } } },
+    { params: { path: { upload_id: uploadId } }, ...(signal ? { signal } : {}) },
   );
   return unwrap(data, error, response).sheets;
 }
@@ -355,12 +371,14 @@ export async function listWorkbookSheets(uploadId: string): Promise<string[]> {
 export async function createDataset(
   uploadId: string,
   sheetName: string | number = 0,
+  signal?: AbortSignal,
 ): Promise<Dataset> {
   const { data, error, response } = await api.POST(
     "/api/v1/tabular-uploads/{upload_id}/dataset",
     {
       params: { path: { upload_id: uploadId } },
       body: { sheet_name: sheetName },
+      ...(signal ? { signal } : {}),
     },
   );
   return unwrap(data, error, response);

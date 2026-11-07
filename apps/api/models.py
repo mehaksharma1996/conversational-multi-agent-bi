@@ -161,6 +161,12 @@ class TabularUploadResponse(StrictModel):
     created_at: datetime
 
 
+class TabularCapabilitiesResponse(StrictModel):
+    supported_extensions: list[str]
+    max_upload_bytes: int
+    max_rows: int
+
+
 class WorkbookSheetsResponse(StrictModel):
     upload_id: str
     sheets: list[str]

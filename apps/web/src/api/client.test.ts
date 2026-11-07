@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 type Client = typeof import("./client");
 
@@ -11,7 +11,7 @@ function jsonResponse(status: number, body: unknown = {}): Response {
 
 describe("API client session transport", () => {
   let client: Client;
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: Mock<(input: Request, init?: RequestInit) => Promise<Response>>;
 
   beforeEach(async () => {
     fetchMock = vi.fn(() => Promise.resolve(jsonResponse(200, { items: [] })));
@@ -67,6 +67,40 @@ describe("API client session transport", () => {
     await client.createWorkspace("key-1").catch(() => undefined);
 
     expect(sentHeaders().get("X-CSRF-Token")).toBeNull();
+  });
+
+  it("reads the server tabular capabilities contract", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        supported_extensions: [".csv", ".xlsx"],
+        max_upload_bytes: 1_024,
+        max_rows: 50,
+      }),
+    );
+
+    await expect(client.getTabularCapabilities()).resolves.toEqual({
+      supported_extensions: [".csv", ".xlsx"],
+      max_upload_bytes: 1_024,
+      max_rows: 50,
+    });
+  });
+
+  it("distinguishes stopping a request from a network failure", async () => {
+    fetchMock.mockImplementation((_request: Request, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        const abort = () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+        if (init?.signal?.aborted) abort();
+        else init?.signal?.addEventListener("abort", abort);
+      }),
+    );
+    const controller = new AbortController();
+
+    const request = client.listWorkbookSheets("upload-1", controller.signal);
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ code: "request_cancelled" });
   });
 
   it("reports a 401 from a protected route to the unauthorized handler", async () => {

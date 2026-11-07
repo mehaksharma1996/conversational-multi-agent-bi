@@ -69,6 +69,8 @@ async function uploadConfirmAndAnalyze(
   await page.getByRole("button", { name: "Upload and profile" }).click();
   await expect(page.getByRole("heading", { name: "Confirm the canonical schema" })).toBeVisible();
   await page.getByRole("button", { name: "Confirm schema" }).click();
+  await expect(page.getByRole("heading", { name: /is ready for analysis/ })).toBeVisible();
+  await page.getByRole("button", { name: "Open analysis" }).click();
   await expect(page.getByRole("heading", { name: "Configure anomaly review" })).toBeVisible();
   await page.getByLabel("Expected review proportion", { exact: false }).fill("0.1");
   await page.getByRole("button", { name: "Run deterministic analysis" }).click();

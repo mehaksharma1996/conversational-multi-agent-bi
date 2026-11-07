@@ -110,13 +110,13 @@ describe("unsaved workflow drafts across section navigation", () => {
     await screen.findByText("Local workspace ready");
 
     await goTo(user, /Data/);
-    await user.upload(screen.getByLabelText("CSV or Excel file"), file);
+    await user.upload(await screen.findByLabelText("CSV or Excel file"), file);
     await goTo(user, /Overview/);
     await goTo(user, /Data/);
 
     expect(screen.getByText("Selected file:", { exact: false })).toHaveTextContent("transactions.csv");
     await user.click(screen.getByRole("button", { name: "Upload and profile" }));
-    expect(uploadTabular).toHaveBeenCalledWith("workspace-1", file);
+    expect(uploadTabular).toHaveBeenCalledWith("workspace-1", file, expect.any(AbortSignal));
   });
 
   it("lets the kept dataset selection be cleared", async () => {
