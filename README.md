@@ -52,6 +52,24 @@ The sequence matters: policy evidence is retrieved before criteria are extracted
 is approved before it can execute. A rejected or policy-inconsistent query does not run. The
 [eight-minute walkthrough](docs/operations/demo-walkthrough.md) reproduces the full scenario.
 
+## How to inspect an answer
+
+Answers take different routes, so check only the evidence that applies to the answer shown:
+
+1. **Sources (document and hybrid).** Open each cited excerpt and page. A verified citation points
+   at retrieved text; it does not prove the source is correct.
+2. **Criteria (hybrid).** Compare each extracted condition, such as `fulfillment_days >= 10`, with
+   the policy wording; *What was checked* reports how many were compared with the SQL.
+3. **SQL (table and hybrid).** Read the query. Safety checks confirm it is read-only and within
+   allowed tables, columns, and limits, not that it answers the right question.
+4. **Approval (when required).** Review the query before it runs; an edited query repeats the safety
+   and policy checks and may fall back to a document-only answer.
+5. **Rows and calculations.** Check the returned rows and the deterministically calculated result
+   rather than relying on the model's explanation alone.
+
+Scripted runs demonstrate these checks, not live-model accuracy; the
+[demo walkthrough](docs/operations/demo-walkthrough.md) steps through each one.
+
 ## What makes the system useful
 
 - **Bounded agent orchestration.** LangGraph routes table, document, memory, hybrid, and unsupported
