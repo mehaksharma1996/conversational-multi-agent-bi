@@ -28,7 +28,7 @@ provider, so it demonstrates the product workflow and guardrails, not live-model
 
 | To... | Read |
 | --- | --- |
-| Understand what it does | [A business question, traced end to end](#a-business-question-traced-end-to-end) · [Portfolio walkthrough](docs/portfolio-walkthrough.md) |
+| Understand what it does | [A business question, traced end to end](#a-business-question-traced-end-to-end) · [Portfolio walkthrough](docs/portfolio-walkthrough.md) · [How to inspect an answer](#how-to-inspect-an-answer) |
 | Run it locally | [Run it locally](#run-it-locally) · [Local container operations](docs/operations/local-containers.md) |
 | Reproduce the offline investigation demo | [Multi-agent investigations](#multi-agent-investigations) · [Investigation guide](docs/investigation.md) |
 | Explore architecture and decisions | [System overview](docs/architecture/system-overview.md) · [ADR index](docs/adr/README.md) |
