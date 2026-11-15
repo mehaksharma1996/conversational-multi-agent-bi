@@ -2,7 +2,7 @@
 # requirements-streamlit.lock and Pillow raised to 13.0.0 on 2026-10-20. Security
 # fixes for filelock, OpenTelemetry, pypdf, and setuptools applied on 2026-10-26, and for
 # Authlib and langgraph-sdk on 2026-10-28, for joserfc, pyasn1, and pypdf on 2026-10-30,
-# and for oauthlib on 2026-11-06.
+# for oauthlib on 2026-11-06, and for OpenTelemetry (CVE-2026-126360) on 2026-11-14.
 # Regenerate after intentional dependency upgrades.
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.4
@@ -81,13 +81,13 @@ numpy==2.5.3
 oauthlib==4.0.1
 onnxruntime==1.30.0
 openpyxl==3.1.5
-opentelemetry-api==1.45.1
-opentelemetry-exporter-otlp-common==0.66b1
-opentelemetry-exporter-otlp-proto-common==1.45.1
-opentelemetry-exporter-otlp-proto-grpc==1.45.1
-opentelemetry-proto==1.45.1
-opentelemetry-sdk==1.45.1
-opentelemetry-semantic-conventions==0.66b1
+opentelemetry-api==1.45.2
+opentelemetry-exporter-otlp-common==0.66b2
+opentelemetry-exporter-otlp-proto-common==1.45.2
+opentelemetry-exporter-otlp-proto-grpc==1.45.2
+opentelemetry-proto==1.45.2
+opentelemetry-sdk==1.45.2
+opentelemetry-semantic-conventions==0.66b2
 orjson==3.12.0
 ormsgpack==1.12.2
 overrides==7.7.0
