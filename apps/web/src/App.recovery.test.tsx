@@ -109,7 +109,7 @@ describe("workspace continuity", () => {
     await user.click(screen.getByRole("link", { name: /Analysis/ }));
     expect(screen.getByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
     await user.click(screen.getByRole("link", { name: /Documents/ }));
-    expect(screen.getByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
+    expect(await screen.findByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
     await user.click(screen.getByRole("link", { name: /Ask/ }));
     expect(screen.getByText(messageFixture.answer)).toBeVisible();
     expect(createWorkspace).not.toHaveBeenCalled();

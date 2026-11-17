@@ -167,7 +167,7 @@ describe("tabular analysis journey", () => {
     await screen.findByText("Local workspace ready");
     await user.click(screen.getByRole("link", { name: /Documents/ }));
     await user.upload(
-      screen.getByLabelText("PDF documents"),
+      await screen.findByLabelText("PDF documents"),
       new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
@@ -207,7 +207,7 @@ describe("tabular analysis journey", () => {
     await screen.findByText("Local workspace ready");
     await user.click(screen.getByRole("link", { name: /Documents/ }));
     await user.upload(
-      screen.getByLabelText("PDF documents"),
+      await screen.findByLabelText("PDF documents"),
       new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -510,6 +510,41 @@ def get_document_collection(
     return document_collection_response(
         repository.get_document_collection(collection_id, identity.tenant_id)
     )
+
+
+@router.delete(
+    "/document-collections/{collection_id}",
+    dependencies=[requires(Capability.DATA_WRITE)],
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["documents"],
+    description=(
+        "Remove the workspace's indexed documents: the collection record, every indexed chunk, and "
+        "the workspace's cached embeddings. Original PDFs are never stored, so this cannot be "
+        "undone. A foreign, unknown, or already removed collection is 404. Conversations that were "
+        "bound to the collection can no longer ask questions (404)."
+    ),
+)
+def delete_document_collection(
+    collection_id: str,
+    request: Request,
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+    observability: ObservabilityDependency,
+) -> Response:
+    record = repository.delete_document_collection(collection_id, identity.tenant_id)
+    cache = getattr(request.app.state, "embedding_cache", None)
+    if cache is not None:
+        cache.delete_workspace(identity.tenant_id, record.workspace_id)
+    observability.audit(
+        "documents.deleted",
+        identity,
+        resource_id=record.id,
+        document_count=len(record.filenames),
+        page_count=record.page_count,
+        chunk_count=record.chunk_count,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
