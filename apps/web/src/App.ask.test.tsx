@@ -34,6 +34,13 @@ import {
 import { readyComposer } from "./test/composer";
 
 vi.mock("./components/PlotlyChart", () => ({ default: () => <div data-testid="plotly-chart" /> }));
+// #227: InvestigationPanel is lazy-loaded, and the first test to render it pays the chunk import.
+// Under full-suite load that exceeded findBy's 1 s default, so the chunk is slowed beyond it here
+// (once per file) and waits for the panel use LAZY_PANEL.
+vi.mock("./components/InvestigationPanel", async (importOriginal) => {
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  return importOriginal();
+});
 vi.mock("./api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api/client")>();
   return {
@@ -91,6 +98,9 @@ const stored: Message = {
   question: QUESTION,
   created_at: new Date(Date.now() + 60_000).toISOString(),
 };
+
+/** Waiting for the lazily loaded investigation panel allows for its chunk load (#227). */
+const LAZY_PANEL = { timeout: 5_000 };
 
 function pendingInvestigation(overrides: Partial<Investigation> = {}): Investigation {
   return {
@@ -287,7 +297,7 @@ describe("investigation plan confirmation", () => {
     );
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve and run plan" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve and run plan" }, LAZY_PANEL));
     const dialog = screen.getByRole("dialog", { name: "Approve this investigation plan?" });
     expect(within(dialog).getByText(/planning-phase estimate/i)).toBeInTheDocument();
     expect(decideInvestigationPlan).not.toHaveBeenCalled();
@@ -311,7 +321,7 @@ describe("investigation plan confirmation", () => {
     vi.mocked(cancelInvestigation).mockResolvedValue(running);
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel investigation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel investigation" }, LAZY_PANEL));
     const dialog = screen.getByRole("dialog", { name: "Cancel this investigation?" });
     expect(within(dialog).getByText(/already in flight may finish/i)).toBeInTheDocument();
     expect(cancelInvestigation).not.toHaveBeenCalled();
