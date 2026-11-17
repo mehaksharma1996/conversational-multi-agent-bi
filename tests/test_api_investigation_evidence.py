@@ -29,6 +29,7 @@ from apps.api.investigation_store import (
     report_content_digest,
 )
 from packages.investigation.report import FactValue, ReportFact, VerifiedReport
+from tests.consent_helpers import accept_current_notice
 from tests.e2e import investigation_app
 from tests.test_api_investigations import (
     OTHER_TENANT,
@@ -617,10 +618,7 @@ def _churn_conversation(client: TestClient) -> tuple[str, str]:
     ).json()["id"]
     mapped = client.put(f"/api/v1/datasets/{dataset_id}/schema-mapping", json=CHURN_MAPPING)
     assert mapped.is_success, mapped.text
-    consent = client.put(
-        f"/api/v1/workspaces/{workspace_id}/consent",
-        json={"accepted": True, "notice_version": "2026-09"},
-    )
+    consent = accept_current_notice(client, workspace_id)
     assert consent.is_success, consent.text
     files = [
         ("files", (name, (ROOT / "sample_data" / name).read_bytes(), "application/pdf"))

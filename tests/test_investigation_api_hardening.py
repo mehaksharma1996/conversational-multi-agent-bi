@@ -805,13 +805,13 @@ def test_a_wave_decision_that_differs_from_the_shown_wave_runs_nothing(tamper: s
 # --- characterisation of open PROD-1 findings: not endorsed behaviour -----------------------------
 
 
-def test_finding_1_digest_free_legacy_acceptance_records_recipients_never_shown() -> None:
-    """OPEN (Medium). ``apps/api/feature_routes.py``: a digest-free ``2026-09`` acceptance skips the
-    notice comparison, then records every non-OpenAI recipient configured now.
+def test_finding_1_digest_free_legacy_acceptance_records_only_the_legacy_recipient() -> None:
+    """FIXED (Medium, 2026-11-17). A digest-free ``2026-09`` acceptance used to record every
+    non-OpenAI recipient configured now, so a client that read the notice when only Gemini was
+    configured authorised Anthropic by re-sending that acceptance after the operator added it.
 
-    A client that read the notice when only Gemini was configured therefore authorises Anthropic by
-    re-sending that acceptance after the operator adds it. The re-acceptance rule was agreed, so
-    this pins it until a decision changes it. OpenAI stays out, and a digest closes the gap.
+    Without a digest nothing proves which recipients were shown, so it now records Gemini only and
+    the consent reads ``stale``; Anthropic needs the digest of the notice that names it.
     """
     settings = replace(
         _settings(isolated_directory_path("sec1_finding_1")),
@@ -836,14 +836,24 @@ def test_finding_1_digest_free_legacy_acceptance_records_recipients_never_shown(
         url = f"/api/v1/workspaces/{workspace_id}/consent"
         digest_free = client.put(url, json={"accepted": True, "notice_version": "2026-09"})
         assert digest_free.status_code == 200
-        assert digest_free.json()["data_recipients"] == ["Gemini", "Anthropic"]  # the finding
-        assert "OpenAI" not in digest_free.json()["data_recipients"]  # the part that holds
+        assert digest_free.json()["data_recipients"] == ["Gemini"]  # never the unshown Anthropic
+        assert digest_free.json()["status"] == "stale"
         stale = client.put(
             url,
             json={"accepted": True, "notice_version": "2026-09", "notice_digest": "0" * 64},
         )
         assert stale.status_code == 409  # a client that sends a digest is protected
         assert stale.json()["error"]["code"] == "consent_notice_changed"
+        notice = client.get(url).json()["notice"]
+        current = client.put(
+            url,
+            json={
+                "accepted": True,
+                "notice_version": notice["version"],
+                "notice_digest": notice["digest"],
+            },
+        )
+        assert "Anthropic" in current.json()["data_recipients"]  # shown, then recorded
 
 
 def test_finding_2_cancel_after_claim_release_leaves_a_stopped_pause_until_a_second_cancel(

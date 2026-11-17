@@ -16,11 +16,11 @@ from apps.api.approvals import ApprovalCheckpoints
 from apps.api.authorization import Capability, capabilities_for, requires
 from apps.api.consent_notices import (
     NOTICES,
+    acceptable_recipients,
     audit_recipients,
     consent_in_force,
     consent_status,
     digest_required,
-    disclosed_recipients,
     effective_recipients,
     served_notice,
 )
@@ -161,7 +161,8 @@ def accept_gemini_consent(
             "consent_notice_unknown",
             "This notice version is not recognized. Read the current notice and accept that.",
         )
-    if command.notice_digest is not None or digest_required(command.notice_version):
+    digest_verified = command.notice_digest is not None or digest_required(command.notice_version)
+    if digest_verified:
         current = served_notice(settings.consent_recipients())
         if (
             current is None
@@ -173,13 +174,18 @@ def accept_gemini_consent(
                 "The notice changed after it was displayed. Read the current notice and accept "
                 "that.",
             )
-    # The recipients are read from server configuration, never from the request, and a recipient
-    # is recorded only when the accepted notice version discloses it (PROD-1 S4).
+    # The recipients are read from server configuration, never from the request. A recipient is
+    # recorded only when the accepted notice version discloses it (PROD-1 S4) and, without a
+    # verified digest, only the legacy Gemini recipient (the PR #208 review finding).
     workspace = repository.set_consent(
         workspace_id,
         identity.tenant_id,
         command.notice_version,
-        recipients=disclosed_recipients(command.notice_version, settings.consent_recipients()),
+        recipients=acceptable_recipients(
+            command.notice_version,
+            settings.consent_recipients(),
+            digest_verified=digest_verified,
+        ),
     )
     observability.audit(
         "consent.accepted",
