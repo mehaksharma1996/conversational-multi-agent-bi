@@ -3,8 +3,9 @@
 Issue: https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/147
 Tier: strongest. Check mode: `--full` once code changes (it touches the API test harness).
 
-**Status (2026-11-17):** brief only, awaiting decisions E1 to E4. No harness code yet. The live run
-(S4) is blocked on PROD-1 S6 (#198) and a separate spend approval; external spend is $0.
+**Status (2026-11-17):** decisions E1 to E4 approved as recommended (E2: the confound is accepted
+and labelled). No harness code yet. The live run (S4) is blocked on PROD-1 S6 (#198) and a separate
+spend approval; external spend is $0.
 
 ## Outcome
 
@@ -32,23 +33,23 @@ against scripted adapters, so every grader and report path is tested before any 
   (`LIVE_ADMISSION_RELEASED`, PROD-1 S6). Arm A runs on the bounded workflow's provider chain
   (Gemini by default).
 
-## Decisions needed
+## Decisions (approved 2026-11-17)
 
-- **E1 Case set (recommended: the issue's four).** `churn-full-investigation` plus the three retail
+- **E1 Case set (approved: the issue's four).** `churn-full-investigation` plus the three retail
   investigation cases, which EVAL-1 already measures, so the scripted baseline is directly
   comparable. The other churn cases (contradiction, unsupported causation, insufficient evidence,
   injection) are added as **safety probes** that are reported, not compared.
-- **E2 Model confound (recommended: accept and label it).** Arm A runs on Gemini; arm B can only use
+- **E2 Model confound (approved: accept and label it).** Arm A runs on Gemini; arm B can only use
   the reviewed OpenAI snapshot. A difference then measures *workflow and model together*, and the
   report says so in its headline. Alternatives: (b) a bounded-workflow OpenAI client: new
   production code, a new hosted recipient, and re-consent; out of scope here. (c) Run arm A twice,
   on Gemini and on OpenAI once (b) exists. Either way, no claim attributes a difference to the
   workflow alone.
-- **E3 Sample size (recommended: 5 repetitions).** Five runs per case per arm: 20 runs per arm, so
+- **E3 Sample size (approved: 5 repetitions).** Five runs per case per arm: 20 runs per arm, so
   each dimension's Wilson interval rests on n = 20 (or fewer where a dimension does not apply,
   stated). That is enough to report rates with honest intervals, not to claim significance; the
   report makes no significance claim without a test. The judge runs once per answer.
-- **E4 Approvals inside arm B (recommended: an evaluation approver).** Plan approval and SQL waves
+- **E4 Approvals inside arm B (approved: an evaluation approver).** Plan approval and SQL waves
   need a person. The harness approves exactly the plan and waves it is shown, through the real
   approval endpoints, as a declared evaluation-only operator, and records every decision. It never
   edits SQL. A run whose plan is invalid or rejected is a graded outcome, not a retry.
