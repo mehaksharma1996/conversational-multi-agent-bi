@@ -1,7 +1,11 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useId, useRef } from "react";
 import type { Config, Data, Layout } from "plotly.js";
 
 import type { Analysis } from "../api/client";
+
+type Chart = Analysis["charts"][number];
+type ChartAlternative = NonNullable<Chart["alternative"]>;
+import { focusOnNextFrame, type FocusIntent } from "../workspace/focus";
 import { StatusBanner } from "./StatusBanner";
 
 const Plot = lazy(() => import("./PlotlyChart"));
@@ -10,12 +14,23 @@ interface AnalysisDashboardProps {
   analysis: Analysis;
   downloadBusy: boolean;
   onDownloadReport: (format: "markdown" | "pdf") => Promise<void>;
+  /** A finished run's focus request; the move happens once this lazily loaded view has mounted. */
+  focusRequest?: FocusIntent | null;
+  /** Called once the request is scheduled, so a later remount never replays a stale move. */
+  onFocusRequestHandled?: () => void;
 }
 
 interface PlotlyFigure {
   data?: Data[];
   layout?: Partial<Layout>;
   config?: Partial<Config>;
+}
+
+/** Chart text uses the theme's secondary text token rather than a fixed colour (UI-4, #152). */
+function chartTextColour(): string {
+  if (typeof window === "undefined") return "#b5c0cf";
+  const token = window.getComputedStyle(document.documentElement).getPropertyValue("--text-secondary").trim();
+  return token || "#b5c0cf";
 }
 
 function displayValue(value: unknown): string {
@@ -63,11 +78,96 @@ function RecordsTable({ caption, records }: { caption: string; records: Record<s
   );
 }
 
+function AlternativeTable({ title, alternative }: { title: string; alternative: ChartAlternative }) {
+  const shown = alternative.rows.length;
+  return (
+    <details className="chart-data">
+      <summary>Show the data as a table</summary>
+      <div className="table-scroll" role="region" tabIndex={0} aria-label={`${title} data`}>
+        <table>
+          <caption>
+            {title}
+            {alternative.truncated
+              ? ` (first ${shown.toLocaleString()} of ${alternative.total_rows.toLocaleString()} rows)`
+              : ""}
+          </caption>
+          <thead>
+            <tr>
+              {alternative.columns.map((column, index) => (
+                <th scope="col" key={`${index}-${column}`}>{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {alternative.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => <td key={cellIndex}>{displayValue(cell)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
+function ChartCard({ chart }: { chart: Chart }) {
+  const id = useId();
+  const figure = chart.figure as PlotlyFigure;
+  const alternative = chart.alternative ?? null;
+  return (
+    <figure
+      className="chart-card"
+      aria-labelledby={`${id}-title`}
+      aria-describedby={alternative ? `${id}-summary` : undefined}
+    >
+      <figcaption>
+        <h3 id={`${id}-title`}>{chart.title}</h3>
+        <p>{chart.description}</p>
+        {alternative ? (
+          <p className="chart-summary" id={`${id}-summary`}>{alternative.summary}</p>
+        ) : (
+          <p className="chart-summary">No text alternative is available for this chart.</p>
+        )}
+      </figcaption>
+      {/* The drawing repeats the summary and table below for sighted readers; assistive technology
+          gets the text instead of Plotly's unlabelled SVG. */}
+      <div aria-hidden="true">
+        <Suspense fallback={<p className="chart-loading">Loading chart…</p>}>
+          <Plot
+            data={figure.data ?? []}
+            layout={{
+              ...figure.layout,
+              autosize: true,
+              paper_bgcolor: "transparent",
+              plot_bgcolor: "transparent",
+              font: { ...(figure.layout?.font ?? {}), color: chartTextColour() },
+            }}
+            config={{ ...figure.config, displaylogo: false, responsive: true, displayModeBar: false }}
+            useResizeHandler
+            style={{ height: "360px", width: "100%" }}
+          />
+        </Suspense>
+      </div>
+      {alternative ? <AlternativeTable title={chart.title} alternative={alternative} /> : null}
+    </figure>
+  );
+}
+
 export function AnalysisDashboard({
   analysis,
   downloadBusy,
   onDownloadReport,
+  focusRequest = null,
+  onFocusRequestHandled,
 }: AnalysisDashboardProps) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    // The user's intent at completion still decides: typing or pointer use since then cancels it.
+    if (!focusRequest) return;
+    focusOnNextFrame(() => heading.current, focusRequest);
+    onFocusRequestHandled?.();
+  }, [focusRequest, onFocusRequestHandled]);
   // The listed rows are a ranked shortlist capped by the API; the total counts every flagged row.
   const shortlist = `${analysis.anomaly.flagged_count.toLocaleString()} of ${analysis.anomaly.total_flagged_count.toLocaleString()}`;
   return (
@@ -75,7 +175,7 @@ export function AnalysisDashboard({
       <div className="section-heading">
         <div>
           <p className="eyebrow">Deterministic results</p>
-          <h2 id="analysis-results-heading">Analysis dashboard</h2>
+          <h2 id="analysis-results-heading" ref={heading} tabIndex={-1}>Analysis dashboard</h2>
         </div>
       </div>
 
@@ -133,32 +233,13 @@ export function AnalysisDashboard({
 
       {analysis.charts.length > 0 ? (
         <div className="chart-grid">
-          {analysis.charts.map((chart) => {
-            const figure = chart.figure as PlotlyFigure;
-            return (
-              <article className="chart-card" key={`${chart.title}-${chart.chart_type}`}>
-                <h3>{chart.title}</h3>
-                <p>{chart.description}</p>
-                <Suspense fallback={<p className="chart-loading">Loading chart…</p>}>
-                  <Plot
-                    data={figure.data ?? []}
-                    layout={{
-                      ...figure.layout,
-                      autosize: true,
-                      paper_bgcolor: "transparent",
-                      plot_bgcolor: "transparent",
-                      font: { ...(figure.layout?.font ?? {}), color: "#cbd8ea" },
-                    }}
-                    config={{ ...figure.config, displaylogo: false, responsive: true }}
-                    useResizeHandler
-                    style={{ height: "360px", width: "100%" }}
-                  />
-                </Suspense>
-              </article>
-            );
-          })}
+          {analysis.charts.map((chart) => (
+            <ChartCard chart={chart} key={`${chart.title}-${chart.chart_type}`} />
+          ))}
         </div>
-      ) : null}
+      ) : (
+        <p className="fine-print">No charts apply to this dataset's confirmed schema.</p>
+      )}
 
       <div className="results-grid">
         <article className="result-card">
@@ -176,10 +257,14 @@ export function AnalysisDashboard({
           <p className="fine-print">
             A row can be flagged by both the model and the rules; it is counted once.
           </p>
-          <RecordsTable
-            caption={`Review shortlist: top ${shortlist} flagged rows by anomaly score`}
-            records={analysis.anomaly.flagged_rows}
-          />
+          {analysis.anomaly.total_flagged_count === 0 ? (
+            <p>No rows were flagged for review with the selected features and contamination.</p>
+          ) : (
+            <RecordsTable
+              caption={`Review shortlist: top ${shortlist} flagged rows by anomaly score`}
+              records={analysis.anomaly.flagged_rows}
+            />
+          )}
         </article>
 
         <article className="result-card">

@@ -13,6 +13,7 @@ from apps.api.models import (
     AnomalyResponse,
     BusinessReportResponse,
     CapabilityResponse,
+    ChartAlternativeResponse,
     ChartResponse,
     ClassificationMetricsResponse,
     ClassificationResponse,
@@ -241,6 +242,17 @@ def analysis_response(record: AnalysisRecord) -> AnalysisResponse:
                 description=chart.description,
                 metadata=chart.metadata,
                 figure=json.loads(chart.figure.to_json()),
+                alternative=(
+                    ChartAlternativeResponse(
+                        summary=chart.alternative.summary,
+                        columns=list(chart.alternative.columns),
+                        rows=[list(row) for row in chart.alternative.rows],
+                        total_rows=chart.alternative.total_rows,
+                        truncated=chart.alternative.truncated,
+                    )
+                    if chart.alternative is not None
+                    else None
+                ),
             )
             for chart in bundle.chart_specs
         ],

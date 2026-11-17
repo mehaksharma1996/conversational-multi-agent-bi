@@ -209,7 +209,7 @@ describe("failed replacement", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The request timed out.");
     expect(await screen.findByText(`Nothing was replaced: ${readyDatasetFixture.filename} is still in use.`)).toBeVisible();
     await goTo(user, /Analysis/);
-    expect(screen.getByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
   });
 
   it("adopts a replacement the server finished after the client gave up", async () => {
