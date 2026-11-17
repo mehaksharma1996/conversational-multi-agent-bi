@@ -11,7 +11,6 @@ import ast
 import copy
 import inspect
 import json
-import re
 import sqlite3
 from collections.abc import Sequence
 from contextlib import closing
@@ -887,20 +886,12 @@ def test_a_first_baseline_needs_a_justification(committed: dict[str, Any]) -> No
 
 def test_the_committed_review_explains_the_baseline(committed: dict[str, Any]) -> None:
     review = committed["review"]
-    # EVAL-1 (#145): the accepted change is the three investigation cases becoming measured. No
-    # other case's coverage, outcome, or dimensions changed.
-    assert "EVAL-1 (#145)" in review["justification"]
-    graded = (
-        "investigation-top-region-fulfillment",
-        "investigation-review-category-rate",
-        "investigation-october-peak-explanation",
-    )
-    changed = {
-        match.group(1)
-        for change in review["accepted_changes"]
-        if (match := re.match(r"cases\.([\w-]+)\.(?:coverage|outcome|dimensions)", change))
-    }
-    assert changed == set(graded)
+    # #185: registering the planning prompt changed the prompt registry file, whose digest is
+    # baseline provenance. That digest is the only accepted change: no case, outcome, metric, or
+    # safety result changed. (The previous record, EVAL-1 #145, is in git history.)
+    assert "#185" in review["justification"]
+    assert len(review["accepted_changes"]) == 1
+    assert review["accepted_changes"][0].startswith("provenance.prompt_registry_sha256: ")
     assert not any(change.startswith("REGRESSION") for change in review["accepted_changes"])
 
 
