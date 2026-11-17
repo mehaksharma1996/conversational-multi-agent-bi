@@ -294,12 +294,23 @@ class ClassificationResponse(StrictModel):
     limitations: list[str]
 
 
+class ChartAlternativeResponse(StrictModel):
+    """The same numbers as a chart: a one-sentence summary and a table of at most 50 rows (UI-4)."""
+
+    summary: str
+    columns: list[str]
+    rows: list[list[str | int | float | None]]
+    total_rows: int
+    truncated: bool
+
+
 class ChartResponse(StrictModel):
     title: str
     chart_type: str
     description: str
     metadata: dict[str, str | list[str]]
     figure: dict[str, Any]
+    alternative: ChartAlternativeResponse | None = None
 
 
 class ReportSectionResponse(StrictModel):

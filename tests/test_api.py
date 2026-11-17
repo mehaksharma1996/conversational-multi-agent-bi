@@ -168,6 +168,10 @@ def test_tabular_vertical_slice_requires_review_before_analysis(client: TestClie
     assert body["classification"]["enabled"] is False
     assert body["classification"]["metrics"] is None
     assert body["charts"]
+    for chart in body["charts"]:  # UI-4 (#152): every chart states its numbers in text
+        alternative = chart["alternative"]
+        assert alternative["summary"] and alternative["columns"] and alternative["rows"]
+        assert all(len(row) == len(alternative["columns"]) for row in alternative["rows"])
     assert body["report"]["sections"]
 
     fetched = client.get(f"/api/v1/analyses/{body['id']}")
