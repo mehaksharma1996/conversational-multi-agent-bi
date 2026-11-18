@@ -58,6 +58,7 @@ an earlier state of the code: [modernization baseline](architecture/modernizatio
 | [Incident and debugging guide](operations/incident-debugging.md) | Diagnosing failures |
 | [Investigation tracing](operations/investigation-tracing.md) | Inspecting an investigation trace locally |
 | [Rate limits and embedding cache](operations/rate-limits-and-embedding-cache.md) | API limits and the vector cache |
+| [Concurrency, rate limits, and backoff](operations/concurrency-and-rate-limits.md) | Scripted provider rate-limit, backoff, and shared-state concurrency evidence |
 | [Request budgets](operations/request-budgets.md) | Long-running operation measurements |
 | [SLOs](operations/slos.md) | Service level indicators and objectives |
 | [Benchmarks](operations/benchmarks.md) | Indicative benchmarks (never a gate) |
