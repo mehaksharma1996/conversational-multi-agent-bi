@@ -31,6 +31,7 @@ React/FastAPI runtime became the primary local product.
 | [0022](0022-durable-workspace-metadata.md) | Durable workspace metadata with versioned migrations and recovery (slice 12a) | Accepted |
 | [0023](0023-optional-local-reranker.md) | Optional local cross-encoder reranker | Accepted |
 | [0024](0024-multi-agent-investigation.md) | Multi-agent investigation workflow on LangGraph | Accepted |
+| [0025](0025-durable-encrypted-investigation-checkpoints.md) | Durable, encrypted investigation checkpoints at approval pauses | Proposed |
 
 ## ADR lifecycle
 
