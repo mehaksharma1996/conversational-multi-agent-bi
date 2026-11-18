@@ -64,9 +64,14 @@ async function churnWorkspace(request: APIRequestContext): Promise<string> {
     await request.post(`${API}/api/v1/tabular-uploads/${upload.id}/dataset`, { data: {} }),
   );
   await json(await request.put(`${API}/api/v1/datasets/${dataset.id}/schema-mapping`, { data: MAPPING }));
+  // Accept the served notice with its digest, as the web client does: a digest-free 2026-09
+  // acceptance records only Gemini, never the scripted investigation recipient.
+  const { notice } = await json<{ notice: { version: string; digest: string } }>(
+    await request.get(`${API}/api/v1/workspaces/${workspace.id}/consent`),
+  );
   await json(
     await request.put(`${API}/api/v1/workspaces/${workspace.id}/consent`, {
-      data: { accepted: true, notice_version: "2026-09" },
+      data: { accepted: true, notice_version: notice.version, notice_digest: notice.digest },
     }),
   );
   const files = new FormData();

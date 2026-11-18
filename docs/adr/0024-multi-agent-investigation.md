@@ -553,7 +553,8 @@ deterministic fallback. Details are in `docs/architecture/investigation-workflow
      (`src.orchestration.report_prompt`) are registered so, and their fingerprints cover their
      complete construction.
    - The INV-6 planning prompt stays unregistered, explicitly listed with its reason. Its rendered
-     prompts remain pinned by tests; registering it is a separate reviewed change.
+     prompts remain pinned by tests; registering it is a separate reviewed change (done in
+     Amendment 14, #185).
    - The registry file's digest is critical provenance of the v2 workflow baseline. It was
      updated through the documented `--update --justification` procedure: only that digest and
      the review record changed. Every case, outcome, metric, and safety result is identical
@@ -949,6 +950,33 @@ written, under their digests. The evidence response and report table gain additi
   `budget_exhausted` where it previously finished. Raising the limit is a separate owner decision.
 - Analysis-task rows stay unconfirmed, and are labelled so.
 - No real provider has run this path. It is exercised with scripted models only.
+
+## Amendment 14: the planning prompt's provenance fingerprint ([#185](https://github.com/mehaksharma1996/conversational-multi-agent-bi/issues/185), 2026-11-16)
+
+- Status: **Proposed.** It takes effect when the pull request that closes #185 merges. It completes
+  Amendment 6 item 9 (V10) and changes no prompt text, budget, or behaviour.
+
+1. **Registration.** The INV-6 planning prompt (`inv6-planning-prompt-v2`) is now in
+   `evals/v1/prompt-registry.json` as the whole-module target `src.orchestration.planning_prompt`.
+   `UNREGISTERED_PROMPT_MODULES` is empty, so every module that renders a model prompt must be
+   registered.
+2. **Why a source hash was not enough.** `_BASE_INSTRUCTIONS` is an f-string evaluated at import. It
+   interpolates task kinds, assignees, schema versions, and limits from `packages/investigation/`,
+   so a contract change alters the prompt without touching `planning_prompt.py`.
+3. **The fingerprint.** The entry's `sha256` is the module source, as for the other module targets.
+   A `fingerprint` object adds `instructions` (the SHA-256 of the evaluated instruction constants, data
+   fences, version, and feedback limit) and `sample` (the SHA-256 of the initial and repair prompts
+   rendered from a fixed synthetic input). `scripts/prompt_registry.py` computes both. An entry is stale
+   when any of the three differs, when a target that needs a fingerprint lacks one, or when another
+   entry claims one. `tests/test_prompt_registry.py` has one regression test per path: an
+   instruction-text edit, an added task kind, and a projection change.
+4. **Baseline provenance.** The registry file's digest is provenance of the scripted workflow
+   baseline. It was updated only through `python -m tests.e2e.workflow_baseline_runner --update
+   --justification "..."`; no case, outcome, metric, or safety result changed.
+5. **Limits.** The sample is one synthetic input. It pins the projection and serialization logic for
+   that input, not for every input; the existing rendered-prompt pins in
+   `tests/test_investigation_planning_prompt.py` remain. The fingerprint records *that* the prompt
+   changed, not whether the change was reviewed: that is still the registry entry's `approved_by`.
 
 ## Alternatives rejected
 
