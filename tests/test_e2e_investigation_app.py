@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests.consent_helpers import accept_current_notice
 from tests.e2e import investigation_app
 from tests.test_utils import isolated_directory_path, thread_stacks
 
@@ -51,10 +52,7 @@ def _proposal(client: TestClient) -> tuple[str, str]:
     ).json()["id"]
     dataset_id = client.post(f"/api/v1/tabular-uploads/{upload}/dataset", json={}).json()["id"]
     assert client.put(f"/api/v1/datasets/{dataset_id}/schema-mapping", json=MAPPING).is_success
-    consent = client.put(
-        f"/api/v1/workspaces/{workspace_id}/consent",
-        json={"accepted": True, "notice_version": "2026-09"},
-    )
+    consent = accept_current_notice(client, workspace_id)
     assert consent.is_success, consent.text
     conversation_id = client.post(
         f"/api/v1/workspaces/{workspace_id}/conversations", json={"dataset_id": dataset_id}
