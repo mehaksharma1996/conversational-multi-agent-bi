@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from time import sleep
 from typing import Any
@@ -162,23 +163,25 @@ def _billed_output_tokens(usage: Any) -> int | None:
     return candidates
 
 
+_RETRYABLE_CODES = frozenset({429, 500, 502, 503, 504})
+_RETRYABLE_MARKERS = re.compile(
+    r"\b(?:429|500|502|503|504)\b|timeout|timed out|rate limit|temporarily unavailable"
+    r"|connection reset"
+)
+
+
 def _is_retryable_error(error: Exception) -> bool:
-    message = str(error).lower()
-    return any(
-        marker in message
-        for marker in (
-            "timeout",
-            "timed out",
-            "429",
-            "500",
-            "502",
-            "503",
-            "504",
-            "rate limit",
-            "temporarily unavailable",
-            "connection reset",
-        )
-    )
+    """Transient failures only (EVAL-3 #148, defect D1).
+
+    A ``google.genai`` ``APIError`` carries its HTTP status as an integer ``code``, and that is
+    decisive: its text also holds provider free text, where a number such as a token count
+    (``1500``) must not turn a 400 into a retried 500. Other exceptions are classified by
+    whole-word markers.
+    """
+    code = getattr(error, "code", None)
+    if type(code) is int:
+        return code in _RETRYABLE_CODES
+    return _RETRYABLE_MARKERS.search(str(error).lower()) is not None
 
 
 def build_gemini_client(settings: Settings) -> GeminiClient:
