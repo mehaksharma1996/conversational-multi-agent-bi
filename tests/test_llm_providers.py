@@ -582,15 +582,28 @@ def test_workspace_and_consent_name_the_providers_that_receive_data(tmp_path: Pa
         f"/api/v1/workspaces/{workspace['id']}/consent",
         json={"accepted": True, "notice_version": "2026-09", "data_recipients": ["Nobody"]},
     )
-    consent = client.put(
+    legacy = client.put(
         f"/api/v1/workspaces/{workspace['id']}/consent",
         json={"accepted": True, "notice_version": "2026-09"},
+    ).json()
+    notice = client.get(f"/api/v1/workspaces/{workspace['id']}/consent").json()["notice"]
+    consent = client.put(
+        f"/api/v1/workspaces/{workspace['id']}/consent",
+        json={
+            "accepted": True,
+            "notice_version": notice["version"],
+            "notice_digest": notice["digest"],
+        },
     ).json()
 
     assert workspace["data_recipients"] == ["Gemini", "Anthropic"]
     assert workspace["consent_required"] is True
     assert forged.status_code == 422  # recipients are never accepted from the request
+    # Without a digest nothing proves Anthropic was shown, so only the legacy recipient is recorded.
+    assert (legacy["data_recipients"], legacy["status"]) == (["Gemini"], "stale")
+    assert notice["recipients"] == ["Gemini", "Anthropic"]
     assert consent["data_recipients"] == ["Gemini", "Anthropic"]  # from server configuration
+    assert consent["status"] == "current"
 
 
 def test_adding_a_provider_invalidates_prior_consent(tmp_path: Path) -> None:
@@ -609,9 +622,19 @@ def test_adding_a_provider_invalidates_prior_consent(tmp_path: Path) -> None:
 
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "gemini_consent_required"
-    client.put(
+    client.put(  # a digest-free acceptance cannot cover the added provider
         f"/api/v1/workspaces/{workspace_id}/consent",
         json={"accepted": True, "notice_version": "2026-09"},
+    )
+    assert _ask(client, conversation_id).status_code == 409
+    notice = client.get(f"/api/v1/workspaces/{workspace_id}/consent").json()["notice"]
+    client.put(
+        f"/api/v1/workspaces/{workspace_id}/consent",
+        json={
+            "accepted": True,
+            "notice_version": notice["version"],
+            "notice_digest": notice["digest"],
+        },
     )
     assert _ask(client, conversation_id).status_code == 201
 

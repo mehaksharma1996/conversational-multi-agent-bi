@@ -575,7 +575,10 @@ provider or says anything about how a real one behaves.
    change. Accepting a notice this server does not currently serve is refused the same way. A digest is
    an integrity check, not proof that a person read or understood anything.
 2. **Compatibility.** Only acceptance changed. Stored consent stays valid and no digest is stored. A
-   client may still accept `2026-09` without a digest, which never authorizes OpenAI. The digest is not
+   client may still accept `2026-09` without a digest, which never authorizes OpenAI. **Post-merge fix
+   (2026-11-17, PR #208 review finding):** such a digest-free acceptance now records Gemini only;
+   any other configured recipient (Anthropic, a remote Ollama) needs the digest of the notice that
+   named it, so the workspace reads `stale` until the current notice is accepted with its digest. The digest is not
    audited.
 3. **Unknown consent.** `questionGate` and `investigationGate` derive one gate from the existing consent
    view: `open`, `loading`, `error`, `needs_acceptance`, or `needs_administrator`. Loading and error never

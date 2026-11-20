@@ -78,6 +78,21 @@
       "reason": "INV-8 (#141): new model prompt, registered as a whole-module target (decision V10). No evaluation baseline exercises it (investigation routing is off, #142); live narrative evaluation is deferred to #145/#147.",
       "approved_by": "user-directed INV-8 engineering work; pending maintainer review",
       "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
+    },
+    {
+      "id": "investigation-planning-prompt",
+      "target": "src.orchestration.planning_prompt",
+      "purpose": "INV-6 Supervisor planning prompts (inv6-planning-prompt-v2): the initial and the one repair prompt, rendered only by the planning gateway; instructions interpolate task kinds, schema versions, and limits imported from packages/investigation, so the entry adds a fingerprint of the evaluated instructions and a pinned rendered sample.",
+      "sha256": "8cc5241addd41e8cbb8c2a7bfa4a81a70099866553fb0056dcbe28ccb208f75c",
+      "fingerprint": {
+        "instructions": "57fdc133025264f29f1297149f3fc4a262c14268f258b5199e34fa145392e0f6",
+        "sample": "0264f4cc6d8378628ccf1dfe37703c2ce0957f502e9107e9cbe48c9d7be47f2a"
+      },
+      "version": 1,
+      "changed": "2026-11-16",
+      "reason": "#185 (ADR 0024 Amendment 14): registered with a complete provenance fingerprint (module source, evaluated instructions, rendered sample), completing INV-8 decision V10. The prompt text is unchanged since INV-6 (#139); its rendered prompts stay pinned by tests/test_investigation_planning_prompt.py.",
+      "approved_by": "user-directed #185 engineering work; pending maintainer review",
+      "rollback": "git revert the change; evals/v1 baseline is regenerated only by an approved run."
     }
   ],
   "models": {
