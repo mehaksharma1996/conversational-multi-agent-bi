@@ -173,6 +173,14 @@ jobs:
           docker build --check -f Dockerfile.streamlit .
       - name: Build images
         run: docker compose --profile streamlit build
+      - name: Verify nginx package in final web image
+        run: |
+          docker run --rm --entrypoint sh conversational-bi/web:local -c '
+            installed="$(apk info -v nginx | sed "s/^nginx-//")"
+            echo "installed nginx package: ${installed}"
+            comparison="$(apk version -t "${installed}" "1.30.7-r0")"
+            test "${comparison}" = "=" || test "${comparison}" = ">"
+          '
       - name: Enforce image size budgets
         # Guards against regressions such as the multi-gigabyte CUDA PyTorch wheel.
         run: |
