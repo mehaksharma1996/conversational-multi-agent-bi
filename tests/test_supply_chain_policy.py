@@ -34,7 +34,7 @@ def test_ci_scans_images_and_publishes_sboms_with_an_enforced_policy() -> None:
 def test_ci_verifies_the_patched_nginx_package_in_the_final_web_image() -> None:
     assert "name: Verify nginx package in final web image" in CI
     assert "--entrypoint sh conversational-bi/web:local" in CI
-    assert "apk info -v nginx" in CI
+    assert "apk list --manifest nginx" in CI
     assert "apk version -t" in CI
     assert '"1.30.7-r0"' in CI
 

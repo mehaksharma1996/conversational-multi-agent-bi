@@ -176,7 +176,9 @@ jobs:
       - name: Verify nginx package in final web image
         run: |
           docker run --rm --entrypoint sh conversational-bi/web:local -c '
-            installed="$(apk info -v nginx | sed "s/^nginx-//")"
+            set -- $(apk list --manifest nginx)
+            test "$1" = "nginx"
+            installed="$2"
             echo "installed nginx package: ${installed}"
             comparison="$(apk version -t "${installed}" "1.30.7-r0")"
             test "${comparison}" = "=" || test "${comparison}" = ">"
