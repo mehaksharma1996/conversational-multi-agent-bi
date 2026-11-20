@@ -13,7 +13,8 @@ Windows 3.12); S5b implemented offline and CI-verified (2026-11-01, run 41273557
 `bebcfcd`, 10/10 green, 33/33 S5b tests on Python 3.12); S5c implemented offline and CI-verified
 (2026-11-01, run 41323475156 at `cd5739f`, 10/10 green, 69/69 S5c tests on Ubuntu and Windows 3.12);
 S5d implemented offline and CI-verified (2026-11-02 UTC, run 41386563069 at `2790554`, 10/10 green,
-51/51 S5d tests on Ubuntu and Windows 3.12); S5d hardening implemented locally, unpushed.
+51/51 S5d tests on Ubuntu and Windows 3.12); S5d hardening merged with PR #208; S6a (live smoke
+tooling, offline) implemented locally 2026-11-16; the S6 live run itself has not happened.
 Production still uses `FailClosedAdapters` (S4 adds a selection path that admits nothing), no
 snapshot is reviewed, no live model call was made, no API key was used, and external spend is
 $0.** S5 and S6 each need approval first.
@@ -629,6 +630,51 @@ provider or says anything about how a real one behaves.
 8. **Remaining.** Legal review of the notice text. S6 under a separate spend approval: real evidence for
    every provider claim and a real reviewed bundle. DEP-1. The UI still learns of a change made elsewhere
    only at its next read.
+
+## S6a record (live smoke tooling, offline)
+
+External spend stays $0. The tool exists; it has never been run against the provider, no key was
+used, and nothing here is evidence about how OpenAI behaves.
+
+1. **Tool.** `python -m scripts.prod1_live_smoke` (section 9). `--plan` prints the probe set, its
+   SHA-256, the request count, and the worst case at operator-entered prices, with no key and no
+   network. A live run drives the real `OpenAIResponsesBoundedAdapter` and `ResponsesTransport` (the
+   default per-request, retry-free `httpx.HTTPTransport`), never a reimplementation.
+2. **Probe set (fixed, synthetic, no tenant data).** 22 count probes (ASCII, accents, Greek,
+   Cyrillic, Chinese, Japanese, Korean, Arabic, Hebrew, Devanagari, combining marks, emoji and ZWJ
+   sequences, NFKC-expanding ligatures, units, full-width and circled forms, and injection-shaped
+   text), one forced-long cap probe (cap 64), one cancellation mid-generation (after 1.5 s), and one
+   short deadline (6 s). 25 probes, 50 model requests. Each maps to a section 5 evidence row.
+3. **Candidate profile.** The adapter needs a `ResponsesCapabilityProfile` whose four evidence fields
+   are `True`; those are exactly what S6 measures. The tool builds one in memory, labelled
+   `s6-smoke-candidate-unreviewed`, for that run only. It never touches
+   `REVIEWED_CAPABILITY_PROFILES`, `REVIEWED_MODEL_PROFILES`, the evidence registry, or
+   `LIVE_ADMISSION_RELEASED` (pinned by `tests/test_prod1_live_smoke.py`).
+4. **Spend bounds, all checked before a key is read or a transport exists.** `--confirm-spend`;
+   refusal when `CI` or `GITHUB_ACTIONS` is set; a dated snapshot ID; complete pricing with an https
+   source and access date; `--max-usd` within the hard cap of $5.00 and `--max-requests` within 80;
+   a worst-case plan that fits both; a new output file. The key comes only from `OPENAI_API_KEY` in
+   the process environment, never from `.env`. During the run every count and create reserves its
+   worst case first (a count at the input rate as if billable; a create at its exact count plus the
+   full cap) and is refused if it would cross the ceiling. A reservation is reduced only to
+   provider-reported usage after a provider-confirmed terminal status. An uncertain create or an
+   unconfirmed termination keeps the full reservation and ends the run. At illustrative rates of
+   $0.15/$0.60 and $2.50/$10.00 per million tokens, the whole plan's worst case is about $0.009 and
+   $0.14 (`--plan`); these are not reviewed prices.
+5. **Artifact.** A new JSON file, `evidence_kind: measured`, `reviewed: false`: commit, dirty flag,
+   probe-set digest, model requested and served, entered prices, limits, and per-probe token counts,
+   statuses, terminations, fixed failure codes, and timings. It never holds a prompt, an answer, a
+   response ID, the instructions, or the key. A probe with any failure (for example
+   `identity_mismatch`) never counts as meeting its expectation.
+6. **Tests.** `tests/test_prod1_live_smoke.py`, 24 offline tests against a scripted Responses API
+   and a fake clock, with real network transports patched to fail: a full run meeting every
+   expectation and a content-free artifact; count mismatches reported, not hidden; cancellation and
+   deadline requiring provider confirmation; identity mismatch; the ceiling and request cap; an
+   uncertain create never resent; every pre-flight refusal; no overwrite; and import boundaries.
+7. **Remaining (S6, separate approval).** The user approved building this offline with no spend
+   (2026-11-16). A live run needs a separate approval of the snapshot (D2), the key, the USD
+   ceiling, and the request cap, plus a check of the count endpoint's billing on the usage dashboard.
+   Its artifact is then reviewed before any evidence bundle, price entry, or ADR amendment is written.
 
 ## Outcome
 
