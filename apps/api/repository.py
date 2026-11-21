@@ -1326,6 +1326,30 @@ class LocalResourceRepository:
                 "Document collection",
             )
 
+    def delete_document_collection(
+        self,
+        collection_id: str,
+        tenant_id: str,
+    ) -> DocumentCollectionRecord:
+        """Remove a collection, its stored record, and its index data (UI-5, #153).
+
+        A foreign, unknown, or already deleted ID is the usual 404. The index is cleared before the
+        record is forgotten, so a failure leaves the collection listed rather than orphaning data.
+        """
+        with self._lock:
+            record = self._owned(
+                self._document_collections,
+                collection_id,
+                tenant_id,
+                "Document collection",
+            )
+            record.retriever.clear()
+            record.retriever.close()
+            self._document_collections.pop(collection_id, None)
+            if self._store is not None:
+                self._store.delete_document_collection(collection_id)
+            return record
+
     def latest_document_collection_for_workspace(
         self,
         workspace_id: str,

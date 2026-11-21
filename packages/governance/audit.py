@@ -47,6 +47,7 @@ AUDIT_ACTIONS: frozenset[str] = frozenset(
         "dataset.created",
         "dataset.schema_confirmed",
         "documents.indexed",
+        "documents.deleted",
         "analysis.executed",
         "conversation.created",
         "agent.route_executed",

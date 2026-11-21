@@ -111,6 +111,7 @@ Each event has: `name`, `occurred_at` (UTC), `tenant_id`, `request_id`, optional
 | `dataset.schema_confirmed` | The user confirms a schema mapping | mapping version |
 | `analysis.executed` | Deterministic analysis runs | mapping version, anomaly feature count |
 | `documents.indexed` | PDFs are indexed | document, page, chunk counts |
+| `documents.deleted` | Indexed documents are removed (UI-5, #153) | document, page, chunk counts |
 | `conversation.created` | A conversation is created | none |
 | `agent.route_executed` | A question is answered or refused | route, outcome, safe error category, provider/model, provider used, has SQL, result row count, source count, grounding status |
 | `report.generated` / `report.downloaded` | A report is created / rendered | charts flag; format, size |
