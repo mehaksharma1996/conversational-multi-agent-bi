@@ -23,3 +23,6 @@ digest of the input text; it never retains source text. Re-uploading unchanged c
 workspace/model can avoid recomputation, while changed content/model/scope misses. Workspace deletion
 or expiry purges both rate-limit counters and cached vectors. Telemetry reports only hit/miss/entry
 counts and limit decisions, never keys, vectors, document text, or other user content.
+
+Provider-side 429 handling, backoff, and accounting under threads (EVAL-3, #148) are described in
+[concurrency and rate limits](concurrency-and-rate-limits.md).

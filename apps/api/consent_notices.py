@@ -129,6 +129,12 @@ _DISCLOSING_VERSIONS: Mapping[str, frozenset[str]] = MappingProxyType(
 # discloses a recipient in ``_DISCLOSING_VERSIONS``.
 _DIGEST_OPTIONAL_VERSIONS: frozenset[str] = frozenset({BASE_NOTICE_VERSION})
 
+# What a digest-free acceptance may record: the recipient the pre-digest client was written for.
+# Without a digest nothing proves which recipients a person was shown, so any other configured
+# recipient (Anthropic, a remote Ollama) needs the digest of the notice that named it. The workspace
+# then reads ``stale`` until the current notice is accepted with its digest.
+_DIGEST_FREE_RECIPIENTS: frozenset[str] = frozenset({"Gemini"})
+
 # Audit tokens for recipient names, so a display name never reaches the audit log as free text.
 _AUDIT_TOKENS: Mapping[str, str] = MappingProxyType(
     {
@@ -157,6 +163,17 @@ def discloses(notice_version: str | None, recipient: str) -> bool:
 def disclosed_recipients(notice_version: str | None, recipients: Iterable[str]) -> tuple[str, ...]:
     """``recipients`` without any that ``notice_version`` does not disclose, order kept."""
     return tuple(recipient for recipient in recipients if discloses(notice_version, recipient))
+
+
+def acceptable_recipients(
+    notice_version: str, recipients: Iterable[str], *, digest_verified: bool
+) -> tuple[str, ...]:
+    """The recipients an acceptance records: disclosed by the version and, without a verified
+    digest, limited to ``_DIGEST_FREE_RECIPIENTS``. Order is kept."""
+    disclosed = disclosed_recipients(notice_version, recipients)
+    if digest_verified:
+        return disclosed
+    return tuple(recipient for recipient in disclosed if recipient in _DIGEST_FREE_RECIPIENTS)
 
 
 def consent_in_force(
@@ -227,6 +244,7 @@ __all__ = [
     "ConsentStatus",
     "NoticeSection",
     "ServedNotice",
+    "acceptable_recipients",
     "audit_recipients",
     "consent_in_force",
     "consent_status",

@@ -9,7 +9,7 @@ approval and evidence required, how to roll back, and what proves the policy is 
 | Artifact | Where it is recorded | Enforced by |
 |---|---|---|
 | Prompt builders: route classification, hybrid criteria extraction, SQL generation, SQL correction, document answer | `evals/v1/prompt-registry.json` (SHA-256 of each builder's source) | `tests/test_prompt_registry.py` |
-| Investigation prompt modules: INV-7 findings draft and Critic review (`src/orchestration/review_prompts.py`), INV-8 report narrative (`src/orchestration/report_prompt.py`) | same registry, as whole-module targets (SHA-256 of the module's source) | `tests/test_prompt_registry.py` |
+| Investigation prompt modules: INV-6 planning (`src/orchestration/planning_prompt.py`), INV-7 findings draft and Critic review (`src/orchestration/review_prompts.py`), INV-8 report narrative (`src/orchestration/report_prompt.py`) | same registry, as whole-module targets (SHA-256 of the module's source; the planning prompt adds a `fingerprint`, see below) | `tests/test_prompt_registry.py` |
 | Approved default model (`GEMINI_MODEL`) | same registry, `models.default_gemini_model` | `tests/test_prompt_registry.py` |
 | Safety and quality behaviour around the model | `evals/v1/` fixtures, thresholds, and baseline | `python -m scripts.run_evaluations` (CI gate) |
 | Provider chain, tier routing, and consent | [ADR 0017](../adr/0017-model-providers-and-fallback.md); consent notice version | Tests plus the consent flow |
@@ -18,9 +18,23 @@ A new prompt-building function named `build_*prompt` must be added to the regist
 Inline prompts inside a larger function are registered by that function's qualified name.
 A module that renders a model prompt (`render_*prompt`) is registered as a whole-module target
 (`package.module`, no `:`), because its instructions, markers, and layout live at module level and a
-function hash alone would be a partial fingerprint. The only exception is the INV-6 planning prompt
-(`src/orchestration/planning_prompt.py`), whose rendered prompts are pinned by
-`tests/test_investigation_planning_prompt.py`; registering it with a complete provenance fingerprint is #185 (ADR 0024 Amendment 6). Adding a registry entry changes the registry file, whose digest is critical provenance
+function hash alone would be a partial fingerprint. There are no exceptions.
+
+When a prompt's text also depends on code outside its module, the source hash is still partial. The
+INV-6 planning prompt (`src/orchestration/planning_prompt.py`) is the one such case: its instructions
+interpolate task kinds, schema versions, and limits imported from `packages/investigation/`. Its entry
+therefore adds a `fingerprint` object (#185, ADR 0024 Amendment 14):
+
+| Field | Covers |
+|---|---|
+| `sha256` | The module source: every constant and rendering function |
+| `fingerprint.instructions` | The evaluated instruction constants, data fences, version, and feedback limit, including imported vocabulary |
+| `fingerprint.sample` | The initial and repair prompts rendered from a fixed synthetic input: the projection and serialization logic |
+
+`python -m scripts.prompt_registry` prints all three; `--check` and the tests fail when any of them
+changes, when such an entry lacks its fingerprint, or when another entry claims one. A new prompt with
+the same dependency adds its components to `FINGERPRINT_COMPONENTS` in `scripts/prompt_registry.py`.
+Adding a registry entry changes the registry file, whose digest is critical provenance
 of the scripted workflow baseline: update it with `python -m tests.e2e.workflow_baseline_runner
 --update --justification "..."` and confirm that only the digest and the review record changed.
 
@@ -71,6 +85,7 @@ of the scripted workflow baseline: update it with `python -m tests.e2e.workflow_
   provider changes (including an operator override by environment variable) are audited at the next start as
   `config.changed` with a configuration hash ([audit document](audit-and-observability.md)); the audit proves
   *that* and *when* the configuration changed, not who changed it or whether the change was approved.
-- The registry hashes prompt-building code, not rendered prompts, so a change to data fed into a prompt
+- The registry hashes prompt-building code, not rendered prompts (except the planning prompt's one pinned
+  synthetic sample), so a change to data fed into a prompt
   (for example sample-value redaction) is covered by the evaluation suite rather than the registry.
 - Approval is a maintainer review; there is no separate sign-off workflow.
