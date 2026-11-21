@@ -341,3 +341,56 @@ test("keyboard-only journey reaches content in order with visible focus and no t
   expect(new Set(focused).size).toBeGreaterThan(2);
   expect(focused.some((snapshot) => snapshot.includes("button"))).toBe(true);
 });
+
+test("documents stage: sources, removal confirmation, and phone width pass axe (UI-5)", async ({ page }) => {
+  const deletes: string[] = [];
+  await page.route("**/api/v1/**", async (route) => {
+    if (await fulfillConsent(route)) return;
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/auth/config") {
+      await route.fallback();
+      return;
+    }
+    if (request.method() === "GET" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 200, json: { items: [] } });
+    } else if (request.method() === "POST" && path === "/api/v1/workspaces") {
+      await route.fulfill({ status: 201, json: { ...workspaceFixture, consent_accepted: true } });
+    } else if (request.method() === "POST" && path.endsWith("/document-collections")) {
+      await route.fulfill({ status: 201, json: documentCollectionFixture });
+    } else if (request.method() === "DELETE" && path.startsWith("/api/v1/document-collections/")) {
+      deletes.push(path);
+      await route.fulfill({ status: 204, body: "" });
+    } else {
+      await route.abort("failed");
+    }
+  });
+  await page.goto("/");
+  await page.getByRole("link", { name: /Documents/ }).click();
+  await page.getByLabel("PDF documents").setInputFiles({
+    name: "policy.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF policy"),
+  });
+  await page.getByRole("button", { name: "Upload and index PDFs" }).click();
+
+  const sources = page.getByRole("region", { name: "Indexed documents" });
+  await expect(sources.getByRole("listitem")).toHaveText("policy.pdf");
+  await expectNoAxeViolations(page);
+
+  await sources.getByRole("button", { name: "Remove indexed documents" }).click();
+  const dialog = page.getByRole("dialog", { name: "Remove the indexed documents?" });
+  await expect(dialog).toContainText("cannot be undone");
+  await expectNoAxeViolations(page);
+  await dialog.getByRole("button", { name: "Remove documents" }).click();
+
+  await expect(sources).toContainText("No documents are indexed");
+  expect(deletes).toEqual([`/api/v1/document-collections/${documentCollectionFixture.id}`]);
+  await expect(page.getByRole("heading", { name: "Index PDF guidance" })).toBeFocused();
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect
+    .poll(() => page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"))
+    .toBeLessThanOrEqual(0);
+  await expectNoAxeViolations(page);
+});

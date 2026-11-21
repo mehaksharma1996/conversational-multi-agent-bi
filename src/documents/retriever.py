@@ -205,6 +205,17 @@ class DocumentRetriever:
             }
         return [chunk for chunk, _score in search(question, pool, **arguments)]
 
+    def clear(self) -> None:
+        """Delete every indexed chunk in this collection's store (UI-5, #153).
+
+        Chroma drops and recreates its collection; pgvector deletes the scope's rows. A store that
+        cannot clear itself refuses, so a deletion never reports success while data remains.
+        """
+        reset = getattr(self.store, "reset", None)
+        if not callable(reset):
+            raise TypeError("This document store cannot delete its chunks.")
+        reset()
+
     def purge(self) -> None:
         """Delete persisted rows when the store keeps them outside the workspace directory."""
         purge = getattr(self.store, "purge", None)

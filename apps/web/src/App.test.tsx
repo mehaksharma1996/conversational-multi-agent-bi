@@ -143,7 +143,10 @@ describe("tabular analysis journey", () => {
     expect(screen.getByLabelText("amount")).toHaveValue("amount");
     await user.click(screen.getByRole("button", { name: "Confirm schema" }));
 
-    expect(await screen.findByRole("heading", { name: "transactions.csv is ready for analysis" })).toHaveFocus();
+    // Focus moves on the next frame (focusOnNextFrame), after the heading renders (#222).
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "transactions.csv is ready for analysis" })).toHaveFocus(),
+    );
     await user.click(screen.getByRole("button", { name: "Open analysis" }));
     expect(await screen.findByRole("heading", { name: "Configure anomaly review" })).toBeVisible();
     expect(screen.getByRole("checkbox", { name: "amount" })).toBeChecked();
@@ -189,6 +192,34 @@ describe("tabular analysis journey", () => {
     expect(runAnalysis).toHaveBeenCalledTimes(2);
   });
 
+  it("still focuses the data-ready heading when frames are slow (#222)", async () => {
+    // A slow frame shows the heading before focus moves: an assertion made when the heading appears
+    // sees <body>. Focus must still arrive once the frame runs, with no user intent in between.
+    const frame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => window.setTimeout(() => callback(performance.now()), 120));
+    try {
+      const user = userEvent.setup();
+      render(<App />);
+
+      await screen.findByText("Local workspace ready");
+      await user.click(screen.getByRole("link", { name: /Data/ }));
+      await user.upload(
+        await screen.findByLabelText("CSV or Excel file"),
+        new File(["amount,merchant\n25,North"], "transactions.csv", { type: "text/csv" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Upload and profile" }));
+      await screen.findByRole("heading", { name: "Confirm the canonical schema" });
+      await user.click(screen.getByRole("button", { name: "Confirm schema" }));
+
+      const heading = await screen.findByRole("heading", { name: "transactions.csv is ready for analysis" });
+      expect(heading).not.toHaveFocus();
+      await waitFor(() => expect(heading).toHaveFocus(), { timeout: 2000 });
+    } finally {
+      frame.mockRestore();
+    }
+  });
+
   it("indexes documents, records model consent, and renders a cited answer", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -196,7 +227,7 @@ describe("tabular analysis journey", () => {
     await screen.findByText("Local workspace ready");
     await user.click(screen.getByRole("link", { name: /Documents/ }));
     await user.upload(
-      screen.getByLabelText("PDF documents"),
+      await screen.findByLabelText("PDF documents"),
       new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
@@ -236,7 +267,7 @@ describe("tabular analysis journey", () => {
     await screen.findByText("Local workspace ready");
     await user.click(screen.getByRole("link", { name: /Documents/ }));
     await user.upload(
-      screen.getByLabelText("PDF documents"),
+      await screen.findByLabelText("PDF documents"),
       new File(["%PDF policy"], "policy.pdf", { type: "application/pdf" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));

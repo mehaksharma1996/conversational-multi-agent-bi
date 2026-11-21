@@ -25,6 +25,7 @@ import {
   runAnalysis,
   uploadTabular,
   uploadDocuments,
+  deleteDocumentCollection,
   type Analysis,
   type Conversation,
   type Dataset,
@@ -40,7 +41,6 @@ import { ConfirmDialog, type ConfirmationRequest } from "./components/ConfirmDia
 import { ConsentPanel } from "./components/ConsentPanel";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { DemoGuide } from "./components/DemoGuide";
-import { DocumentUpload } from "./components/DocumentUpload";
 import { OperationAnnouncer, type Announcement } from "./components/OperationAnnouncer";
 import { ProductOverview } from "./components/ProductOverview";
 import { StatusBanner } from "./components/StatusBanner";
@@ -124,6 +124,11 @@ const SchemaReview = lazy(() =>
 // The analysis dashboard (UI-4, #152) loads when results exist, keeping it out of the entry chunk.
 const AnalysisDashboard = lazy(() =>
   import("./components/AnalysisDashboard").then((module) => ({ default: module.AnalysisDashboard })),
+);
+
+// The document stage (UI-5, #153) loads on demand, keeping it out of the entry chunk.
+const DocumentUpload = lazy(() =>
+  import("./components/DocumentUpload").then((module) => ({ default: module.DocumentUpload })),
 );
 
 const UploadStep = lazy(() =>
@@ -730,6 +735,57 @@ export default function App() {
       if (from !== epoch.current) return false;
       setError(normalizeError(caught));
       if (previous.documentsId) await reconcileReplacement("documents", workspace, from, previous);
+      return false;
+    }
+  };
+
+  // UI-5 (#153): removing the indexed documents. The original PDFs are not stored, so the
+  // confirmation says it cannot be undone, and an uncertain failure is read back from the server.
+  const handleRemoveDocuments = async (): Promise<boolean> => {
+    if (!workspace || !documents || busy) return false;
+    const removing = documents;
+    const accepted = await confirm({
+      title: "Remove the indexed documents?",
+      consequences: [
+        `The server deletes ${plural(removing.document_count, "indexed document")} (${removing.filenames.join(", ")}) and their search index. The original PDFs are not stored, so this cannot be undone.`,
+        "New answers can no longer cite these documents.",
+        ...conversationConsequences(),
+      ],
+      confirmLabel: "Remove documents",
+      tone: "danger",
+    });
+    if (!accepted) return false;
+    const operation = begin("documents");
+    if (!operation) return false;
+    const from = epoch.current;
+    setError(null);
+    setNotice(null);
+    try {
+      await deleteDocumentCollection(removing.id);
+      if (discardStale(operation, from, epoch.current)) return false;
+      setDocuments(null);
+      clearConversation();
+      operation.finish("succeeded");
+      setNotice("The indexed documents were removed. Answers now use the data only.");
+      focusOnNextFrame(() => document.querySelector<HTMLElement>("#documents-heading"));
+      return true;
+    } catch (caught) {
+      operation.finish("failed");
+      if (from !== epoch.current) return false;
+      setError(normalizeError(caught));
+      try {
+        const overview = await getWorkspaceOverview(workspace.id);
+        if (from !== epoch.current) return false;
+        if (overview.document_collection_id === removing.id) {
+          setNotice("Nothing was removed: the current documents are still indexed.");
+        } else if (overview.document_collection_id === null) {
+          setDocuments(null);
+          clearConversation();
+          setNotice("The server removed the documents despite the error. Answers now use the data only.");
+        }
+      } catch {
+        if (from === epoch.current) setUnconfirmed({ kind: "documents" });
+      }
       return false;
     }
   };
@@ -1457,14 +1513,17 @@ export default function App() {
 
       {activeSection === "documents" ? (
         <div className="section-stack" id="documents-workspace" aria-busy={mutationBusy || undefined}>
-          <DocumentUpload
-            disabled={!workspace || busy}
-            busy={isActive("documents")}
-            collection={documents}
-            files={drafts.documentFiles}
-            onFilesChange={(files) => updateDraft("documentFiles", files)}
-            onUpload={handleDocuments}
-          />
+          <Suspense fallback={<div className="panel" role="status">Loading the document stage…</div>}>
+            <DocumentUpload
+              disabled={!workspace || busy}
+              busy={isActive("documents")}
+              collection={documents}
+              files={drafts.documentFiles}
+              onFilesChange={(files) => updateDraft("documentFiles", files)}
+              onUpload={handleDocuments}
+              onRemove={handleRemoveDocuments}
+            />
+          </Suspense>
         </div>
       ) : null}
 

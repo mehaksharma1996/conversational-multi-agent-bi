@@ -67,7 +67,7 @@ async function goTo(user: UserEvent, section: RegExp) {
 
 async function startAsk(user: UserEvent) {
   await goTo(user, /Documents/);
-  await user.upload(screen.getByLabelText("PDF documents"), pdfFile());
+  await user.upload(await screen.findByLabelText("PDF documents"), pdfFile());
   await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
   await screen.findByText("Indexed 1 document(s)", { exact: false });
   await goTo(user, /Ask/);
@@ -139,11 +139,11 @@ describe("unsaved workflow drafts across section navigation", () => {
     await screen.findByText("Local workspace ready");
 
     await goTo(user, /Documents/);
-    await user.upload(screen.getByLabelText("PDF documents"), file);
+    await user.upload(await screen.findByLabelText("PDF documents"), file);
     await goTo(user, /Ask/);
     await goTo(user, /Documents/);
 
-    expect(screen.getByText("Selected file:", { exact: false })).toHaveTextContent("policy.pdf");
+    expect(screen.getByText("Selected file:", { exact: false }).closest(".selected-files")).toHaveTextContent("policy.pdf");
     await user.click(screen.getByRole("button", { name: "Upload and index PDFs" }));
     expect(uploadDocuments).toHaveBeenCalledWith("workspace-1", [file]);
   });
@@ -378,7 +378,7 @@ describe("unsaved workflow drafts across section navigation", () => {
     await goTo(user, /Data/);
     await user.upload(screen.getByLabelText("CSV or Excel file"), csvFile());
     await goTo(user, /Documents/);
-    await user.upload(screen.getByLabelText("PDF documents"), pdfFile());
+    await user.upload(await screen.findByLabelText("PDF documents"), pdfFile());
     await goTo(user, /Ask/);
     await user.click(await screen.findByRole("button", { name: "Accept this notice for Gemini" }));
 

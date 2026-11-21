@@ -247,9 +247,14 @@ test("consent the browser cannot read keeps the composer locked; a retry recover
 }) => {
   const workspaceId = await emptyWorkspace(request);
   await readyConversation(request, workspaceId);
+  // Accepted as the web client does, with the served notice's digest: a digest-free 2026-09
+  // acceptance records only Gemini and would read "Needs a new acceptance" on this stack.
+  const { notice } = await json<{ notice: { version: string; digest: string } }>(
+    await request.get(`${API}/api/v1/workspaces/${workspaceId}/consent`),
+  );
   await json(
     await request.put(`${API}/api/v1/workspaces/${workspaceId}/consent`, {
-      data: { accepted: true, notice_version: "2026-09" },
+      data: { accepted: true, notice_version: notice.version, notice_digest: notice.digest },
     }),
   );
   const consentPath = `**/api/v1/workspaces/${workspaceId}/consent`;

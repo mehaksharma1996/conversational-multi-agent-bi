@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
@@ -16,11 +16,11 @@ from apps.api.approvals import ApprovalCheckpoints
 from apps.api.authorization import Capability, capabilities_for, requires
 from apps.api.consent_notices import (
     NOTICES,
+    acceptable_recipients,
     audit_recipients,
     consent_in_force,
     consent_status,
     digest_required,
-    disclosed_recipients,
     effective_recipients,
     served_notice,
 )
@@ -161,7 +161,8 @@ def accept_gemini_consent(
             "consent_notice_unknown",
             "This notice version is not recognized. Read the current notice and accept that.",
         )
-    if command.notice_digest is not None or digest_required(command.notice_version):
+    digest_verified = command.notice_digest is not None or digest_required(command.notice_version)
+    if digest_verified:
         current = served_notice(settings.consent_recipients())
         if (
             current is None
@@ -173,13 +174,18 @@ def accept_gemini_consent(
                 "The notice changed after it was displayed. Read the current notice and accept "
                 "that.",
             )
-    # The recipients are read from server configuration, never from the request, and a recipient
-    # is recorded only when the accepted notice version discloses it (PROD-1 S4).
+    # The recipients are read from server configuration, never from the request. A recipient is
+    # recorded only when the accepted notice version discloses it (PROD-1 S4) and, without a
+    # verified digest, only the legacy Gemini recipient (the PR #208 review finding).
     workspace = repository.set_consent(
         workspace_id,
         identity.tenant_id,
         command.notice_version,
-        recipients=disclosed_recipients(command.notice_version, settings.consent_recipients()),
+        recipients=acceptable_recipients(
+            command.notice_version,
+            settings.consent_recipients(),
+            digest_verified=digest_verified,
+        ),
     )
     observability.audit(
         "consent.accepted",
@@ -510,6 +516,41 @@ def get_document_collection(
     return document_collection_response(
         repository.get_document_collection(collection_id, identity.tenant_id)
     )
+
+
+@router.delete(
+    "/document-collections/{collection_id}",
+    dependencies=[requires(Capability.DATA_WRITE)],
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=STANDARD_ERROR_RESPONSES,
+    tags=["documents"],
+    description=(
+        "Remove the workspace's indexed documents: the collection record, every indexed chunk, and "
+        "the workspace's cached embeddings. Original PDFs are never stored, so this cannot be "
+        "undone. A foreign, unknown, or already removed collection is 404. Conversations that were "
+        "bound to the collection can no longer ask questions (404)."
+    ),
+)
+def delete_document_collection(
+    collection_id: str,
+    request: Request,
+    identity: IdentityDependency,
+    repository: RepositoryDependency,
+    observability: ObservabilityDependency,
+) -> Response:
+    record = repository.delete_document_collection(collection_id, identity.tenant_id)
+    cache = getattr(request.app.state, "embedding_cache", None)
+    if cache is not None:
+        cache.delete_workspace(identity.tenant_id, record.workspace_id)
+    observability.audit(
+        "documents.deleted",
+        identity,
+        resource_id=record.id,
+        document_count=len(record.filenames),
+        page_count=record.page_count,
+        chunk_count=record.chunk_count,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

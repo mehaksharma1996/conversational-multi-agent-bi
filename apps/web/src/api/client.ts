@@ -453,6 +453,14 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   if (!response.ok) unwrap(undefined, error, response);
 }
 
+/** Removes the workspace's indexed documents and their index (UI-5, #153). Cannot be undone. */
+export async function deleteDocumentCollection(collectionId: string): Promise<void> {
+  const { error, response } = await api.DELETE("/api/v1/document-collections/{collection_id}", {
+    params: { path: { collection_id: collectionId } },
+  });
+  if (!response.ok) unwrap(undefined, error, response);
+}
+
 export async function uploadDocuments(
   workspaceId: string,
   files: File[],
