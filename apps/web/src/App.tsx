@@ -37,7 +37,6 @@ import {
   type Consent,
   type ConsentNotice,
 } from "./api/client";
-import { AnalysisDashboard } from "./components/AnalysisDashboard";
 import { ConfirmDialog, type ConfirmationRequest } from "./components/ConfirmDialog";
 import { ConsentPanel } from "./components/ConsentPanel";
 import { ConversationPanel } from "./components/ConversationPanel";
@@ -75,7 +74,7 @@ import { consentGateReason, investigationGate, questionGate, useConsent } from "
 import { INVESTIGATION_STATUS_LABEL } from "./investigations/model";
 import { useInvestigation } from "./investigations/useInvestigation";
 import { useWorkflowDrafts } from "./workspace/drafts";
-import { captureFocusIntent, focusOnNextFrame } from "./workspace/focus";
+import { captureFocusIntent, focusOnNextFrame, type FocusIntent } from "./workspace/focus";
 import {
   assessMarker,
   describeAssessment,
@@ -122,6 +121,11 @@ const SchemaReview = lazy(() =>
   import("./components/SchemaReview").then((module) => ({ default: module.SchemaReview })),
 );
 
+// The analysis dashboard (UI-4, #152) loads when results exist, keeping it out of the entry chunk.
+const AnalysisDashboard = lazy(() =>
+  import("./components/AnalysisDashboard").then((module) => ({ default: module.AnalysisDashboard })),
+);
+
 // The document stage (UI-5, #153) loads on demand, keeping it out of the entry chunk.
 const DocumentUpload = lazy(() =>
   import("./components/DocumentUpload").then((module) => ({ default: module.DocumentUpload })),
@@ -147,6 +151,8 @@ export default function App() {
   const [sheets, setSheets] = useState<string[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [analysisFocus, setAnalysisFocus] = useState<FocusIntent | null>(null);
+  const clearAnalysisFocus = useCallback(() => setAnalysisFocus(null), []);
   const [documents, setDocuments] = useState<DocumentCollection | null>(null);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -686,6 +692,7 @@ export default function App() {
       setAnalysis(result);
       clearConversation();
       operation.finish("succeeded");
+      setAnalysisFocus(captureFocusIntent());
     } catch (caught) {
       operation.finish("failed");
       setError(normalizeError(caught));
@@ -1483,11 +1490,15 @@ export default function App() {
           ) : null}
 
           {analysis ? (
-            <AnalysisDashboard
-              analysis={analysis}
-              downloadBusy={busy}
-              onDownloadReport={handleReportDownload}
-            />
+            <Suspense fallback={<div className="panel" role="status">Loading analysis results…</div>}>
+              <AnalysisDashboard
+                analysis={analysis}
+                downloadBusy={busy}
+                onDownloadReport={handleReportDownload}
+                focusRequest={analysisFocus}
+                onFocusRequestHandled={clearAnalysisFocus}
+              />
+            </Suspense>
           ) : null}
           {dataset?.status !== "ready" ? (
             <section className="empty-workspace-state" aria-labelledby="analysis-empty-heading">

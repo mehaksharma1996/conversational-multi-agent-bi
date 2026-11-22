@@ -153,6 +153,8 @@ describe("tabular analysis journey", () => {
     await user.click(screen.getByRole("button", { name: "Run deterministic analysis" }));
 
     expect(await screen.findByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
+    // UI-4 (#152): a finished run moves focus to the results, on the next frame.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Analysis dashboard" })).toHaveFocus());
     expect(screen.getByText("Anomaly flags and classifier scores", { exact: false })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Supervised classification" })).toBeVisible();
     expect(screen.getByText("Classifier candidates for human review")).toBeVisible();
@@ -161,6 +163,33 @@ describe("tabular analysis journey", () => {
       anomaly_contamination: 0.05,
       anomaly_features: ["amount"],
     });
+  });
+
+  it("keeps the analysis retryable after a failed run (UI-4, #152)", async () => {
+    vi.mocked(runAnalysis).mockRejectedValueOnce(new Error("analysis unavailable"));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Local workspace ready");
+    await user.click(screen.getByRole("link", { name: /Data/ }));
+    await user.upload(
+      await screen.findByLabelText("CSV or Excel file"),
+      new File(["amount,merchant\n25,North"], "transactions.csv", { type: "text/csv" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload and profile" }));
+    await screen.findByRole("heading", { name: "Confirm the canonical schema" });
+    await user.click(screen.getByRole("button", { name: "Confirm schema" }));
+    await user.click(await screen.findByRole("button", { name: "Open analysis" }));
+    await user.click(await screen.findByRole("button", { name: "Run deterministic analysis" }));
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Analysis dashboard" })).toBeNull();
+    const retry = screen.getByRole("button", { name: "Run deterministic analysis" });
+    expect(retry).toBeEnabled();
+
+    await user.click(retry);
+    expect(await screen.findByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
+    expect(runAnalysis).toHaveBeenCalledTimes(2);
   });
 
   it("still focuses the data-ready heading when frames are slow (#222)", async () => {

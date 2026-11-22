@@ -1039,8 +1039,25 @@ export interface components {
             /** Required Fields */
             required_fields: string[];
         };
+        /**
+         * ChartAlternativeResponse
+         * @description The same numbers as a chart: a one-sentence summary and a table of at most 50 rows (UI-4).
+         */
+        ChartAlternativeResponse: {
+            /** Columns */
+            columns: string[];
+            /** Rows */
+            rows: (string | number | null)[][];
+            /** Summary */
+            summary: string;
+            /** Total Rows */
+            total_rows: number;
+            /** Truncated */
+            truncated: boolean;
+        };
         /** ChartResponse */
         ChartResponse: {
+            alternative?: components["schemas"]["ChartAlternativeResponse"] | null;
             /** Chart Type */
             chart_type: string;
             /** Description */

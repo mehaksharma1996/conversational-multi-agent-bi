@@ -398,9 +398,76 @@
         "title": "CapabilityResponse",
         "type": "object"
       },
+      "ChartAlternativeResponse": {
+        "additionalProperties": false,
+        "description": "The same numbers as a chart: a one-sentence summary and a table of at most 50 rows (UI-4).",
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "total_rows": {
+            "title": "Total Rows",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "summary",
+          "columns",
+          "rows",
+          "total_rows",
+          "truncated"
+        ],
+        "title": "ChartAlternativeResponse",
+        "type": "object"
+      },
       "ChartResponse": {
         "additionalProperties": false,
         "properties": {
+          "alternative": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChartAlternativeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "chart_type": {
             "title": "Chart Type",
             "type": "string"

@@ -107,7 +107,7 @@ describe("workspace continuity", () => {
     expect(await screen.findByText("Your workspace was restored.")).toBeVisible();
     expect(screen.getByRole("button", { name: /AnalysisComplete/ })).toBeVisible();
     await user.click(screen.getByRole("link", { name: /Analysis/ }));
-    expect(screen.getByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Analysis dashboard" })).toBeVisible();
     await user.click(screen.getByRole("link", { name: /Documents/ }));
     expect(await screen.findByText("Indexed 1 document(s)", { exact: false })).toBeVisible();
     await user.click(screen.getByRole("link", { name: /Ask/ }));

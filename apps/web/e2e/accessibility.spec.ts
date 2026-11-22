@@ -82,6 +82,13 @@ async function routeTabularJourney(page: Page, includeChart = false) {
           data: [{ x: ["2026-01-01"], y: [1025], type: "scatter", mode: "lines" }],
           layout: { title: "Amount trend" },
         },
+        alternative: {
+          summary: "1 period from 2026-01-01 to 2026-01-01; the total amount is 1,025.",
+          columns: ["Period", "Total amount"],
+          rows: [["2026-01-01", 1025]],
+          total_rows: 1,
+          truncated: false,
+        },
       };
       await route.fulfill({
         status: 201,
@@ -167,6 +174,23 @@ test("axe baseline: dashboard with charts", async ({ page }) => {
   await page.getByRole("button", { name: "Run deterministic analysis" }).click();
   await expect(page.getByRole("heading", { name: "Amount trend" })).toBeVisible();
   await expectNoAxeViolations(page, true);
+
+  // UI-4 (#152): the chart is a named figure, and its numbers are reachable by keyboard.
+  const figure = page.getByRole("figure", { name: "Amount trend" });
+  await expect(figure).toHaveAccessibleDescription(/the total amount is 1,025/);
+  await figure.getByText("Show the data as a table").focus();
+  await page.keyboard.press("Enter");
+  const table = figure.getByRole("table", { name: "Amount trend" });
+  await expect(table).toBeVisible();
+  await expect(table.getByRole("cell", { name: "1,025" })).toBeVisible();
+  await expectNoAxeViolations(page, true);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect(table).toBeVisible();
+  // Plotly redraws on the resize event, so wait for it rather than measuring mid-redraw.
+  await expect
+    .poll(() => page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"))
+    .toBeLessThanOrEqual(0);
 });
 
 test("axe baseline: chat answer and provenance warning", async ({ page }) => {
