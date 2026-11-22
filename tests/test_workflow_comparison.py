@@ -759,3 +759,49 @@ def test_the_local_wilson_interval_equals_the_workflow_baseline_interval() -> No
     for trials in range(0, 41):
         for successes in range(0, trials + 1):
             assert wc.wilson_interval(successes, trials) == baseline_wilson(successes, trials)
+
+
+# --- S1b additions: not-routed runs and routing records ----------------------------------------
+
+
+def test_a_not_routed_arm_b_run_fails_completion_and_nothing_else_is_observable() -> None:
+    grade = _grade(wc.not_routed_arm_b())
+    assert grade["failure_mode"] == "not_routed"
+    assert grade["dimensions"]["task_completion"] == {"outcome": FAIL, "reason": "not_answered"}
+    for name in wc.DIMENSIONS:
+        if name != "task_completion":
+            assert _outcome(grade, name) == NOT_OBSERVABLE, name
+
+
+ROUTING_ENTRY = {
+    "case_id": "synthetic-case",
+    "arm": "B",
+    "route": "rag",
+    "gate_reason": "intent_not_eligible",
+    "runs": 5,
+}
+
+
+def test_routing_records_are_identifiers_only_and_rendered_in_the_summary() -> None:
+    document = _document(routing=[ROUTING_ENTRY])
+    assert document["routing"] == [ROUTING_ENTRY]
+    assert document["definitions"]["routing"] == wc.ROUTING_DEFINITION
+    assert document["definitions"]["metering"] == wc.METERING_DEFINITION
+    summary = wc.render_summary(document)
+    assert "intent_not_eligible" in summary and wc.ROUTING_DEFINITION in summary
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"route": "free text route"},
+        {"gate_reason": "SELECT 1"},
+        {"arm": "C"},
+        {"runs": 0},
+        {"runs": True},
+        {"extra": "x"},
+    ],
+)
+def test_malformed_routing_records_are_refused(change: dict[str, Any]) -> None:
+    with pytest.raises(ComparisonError):
+        _document(routing=[{**ROUTING_ENTRY, **change}])

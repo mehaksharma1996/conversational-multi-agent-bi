@@ -91,6 +91,9 @@ FAILURE_MODES: Final = (
     "expired",
     "not_terminal",
     "no_response",
+    # Arm B only: production routing did not propose an investigation for the question, so the
+    # investigation workflow never ran. Never bypassed and never rephrased (EVAL-2 S1b decision).
+    "not_routed",
 )
 
 # Fixed reason codes: the only strings a grade may carry besides outcomes and identifiers.
@@ -159,6 +162,17 @@ NUMERIC_DEFINITION: Final = (
     "set of tolerances. Rates need an explicit percent sign or a decimal fraction; a bare number "
     "is never read as a percentage. An ambiguously written number, or a value contradicted by "
     "another nearby value with the same explicit unit, never counts as stated."
+)
+METERING_DEFINITION: Final = (
+    "Metering counts only what was observed. A figure with observed 0 is unavailable, never zero: "
+    "scripted adapters report no provider token counts or costs. Latency is the end-to-end "
+    "wall-clock time of a run through the API, not a model measurement."
+)
+ROUTING_DEFINITION: Final = (
+    "Each arm is asked through production routing unchanged. An arm B run whose question the "
+    "routing gate does not propose for investigation is recorded as not_routed: task completion "
+    "fails, and every other dimension is not observable (or not applicable where the case defines "
+    "nothing to grade), because the investigation never ran."
 )
 RATE_DEFINITION: Final = (
     "PASS / (PASS + FAIL); NOT_APPLICABLE and NOT_OBSERVABLE are reported, not counted."
@@ -682,6 +696,11 @@ def observe_arm_a(message: Mapping[str, Any] | None) -> RunView:
     return RunView("A", mode, text, result_sets, citations)
 
 
+def not_routed_arm_b() -> RunView:
+    """Arm B when production routing proposed no investigation: nothing ran, nothing to grade."""
+    return RunView("B", "not_routed", None, None, None)
+
+
 _ARM_B_TERMINAL = {
     "completed": "none",
     "completed_partial": "completed_partial",
@@ -1041,8 +1060,12 @@ def build_document(
     provenance: Mapping[str, Any],
     planned_repeats: int,
     sensitive: Iterable[str] = (),
+    routing: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """The comparison document: per-arm, per-dimension outcomes with denominators and intervals.
+
+    ``routing`` optionally records, per case and arm, the route production routing chose and the
+    gate's reason code: identifiers only, checked like every other value.
 
     Raises :class:`ComparisonRefused` for evidence this stage must not label (measured live), and
     :class:`ComparisonError` when a grade is malformed or the document would carry content.
@@ -1116,9 +1139,12 @@ def build_document(
             "numeric": NUMERIC_DEFINITION,
             "secondary": "structured_fact_accuracy is arm B only and is never compared with arm A.",
             "judge": JUDGE_NOTE,
+            "metering": METERING_DEFINITION,
+            "routing": ROUTING_DEFINITION,
         },
         "provenance": checked,
         "planned_repeats": planned_repeats,
+        "routing": [_checked_routing(entry) for entry in routing],
         "compared": section("compared"),
         "safety_probes": {
             "note": "Safety probes are reported, not compared.",
@@ -1132,6 +1158,20 @@ def build_document(
     if problems:
         raise ComparisonError("The comparison document would carry content: " + "; ".join(problems))
     return document
+
+
+_ROUTING_KEYS = frozenset({"case_id", "arm", "route", "gate_reason", "runs"})
+
+
+def _checked_routing(entry: Mapping[str, Any]) -> dict[str, Any]:
+    if set(entry) != _ROUTING_KEYS or entry["arm"] not in ARMS:
+        raise ComparisonError("A routing entry names a case, an arm, a route, a reason, and runs.")
+    if not isinstance(entry["runs"], int) or isinstance(entry["runs"], bool) or entry["runs"] < 1:
+        raise ComparisonError("A routing entry counts at least one run.")
+    for key in ("case_id", "route", "gate_reason"):
+        if not isinstance(entry[key], str) or not _SAFE_TOKEN.match(entry[key]):
+            raise ComparisonError("Routing values must be safe identifiers.")
+    return {key: entry[key] for key in ("case_id", "arm", "route", "gate_reason", "runs")}
 
 
 def _check_grade(grade: Mapping[str, Any]) -> None:
@@ -1157,6 +1197,8 @@ _FIXED_PROSE = frozenset(
         *EVIDENCE_STATEMENTS.values(),
         *ARM_LABELS.values(),
         RATE_DEFINITION,
+        METERING_DEFINITION,
+        ROUTING_DEFINITION,
         "Wilson score interval, 95%.",
         "structured_fact_accuracy is arm B only and is never compared with arm A.",
         "Safety probes are reported, not compared.",
@@ -1248,7 +1290,27 @@ def render_summary(document: Mapping[str, Any]) -> str:
                     f"{stats['not_applicable']} | {stats['not_observable']} | {rate} | {interval} |"
                 )
         lines.append("")
-    lines += [f"_{document['definitions']['judge']}_", ""]
+    if document.get("routing"):
+        lines += [
+            "## Routing",
+            "",
+            document["definitions"]["routing"],
+            "",
+            "| Case | Arm | Route | Gate reason | Runs |",
+            "|---|---|---|---|---|",
+        ]
+        lines += [
+            f"| {entry['case_id']} | {entry['arm']} | {entry['route']} | "
+            f"{entry['gate_reason']} | {entry['runs']} |"
+            for entry in document["routing"]
+        ]
+        lines.append("")
+    lines += [
+        f"_{document['definitions']['metering']}_",
+        "",
+        f"_{document['definitions']['judge']}_",
+        "",
+    ]
     return "\n".join(lines)
 
 
