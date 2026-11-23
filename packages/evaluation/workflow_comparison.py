@@ -180,10 +180,16 @@ ROUTING_DEFINITION: Final = (
 VISIBLE_ANSWER_DEFINITION: Final = (
     "Both arms are graded on their complete user-visible answer: the displayed prose and the "
     "displayed table cells (arm A: the message and its rows; arm B: the report sentences and "
-    "its query tables), with the same rules. A value counts in prose only in a sentence naming "
-    "its period, population, and row labels, and in a table only when one row holds its whole "
-    "expected row. A value with no expected row is never credited from a table cell. A value "
-    "shown in both places counts once; a contradiction in the prose is never outweighed."
+    "its query tables), with the same rules. In prose, a value counts only when its sentence "
+    "clearly ties it to its period and population: the only such label in its clause, a label "
+    "written beside it, or one unambiguous from-to pair; listed labels or values are never tied "
+    "by position. A matching value with no clear tie is ambiguous, and a value explicitly tied "
+    "to its context that holds another period's or population's expected value of the same "
+    "measure is a contradiction. In a table, a value counts only when one row holds its whole "
+    "expected row under column headers naming each value's measure; an unrecognised header is "
+    "ambiguous and another measure's column never counts. A value with no expected row is never "
+    "credited from a table cell. A value shown in both places counts once; a contradiction in "
+    "either place is never outweighed."
 )
 COMPLETION_DEFINITION: Final = (
     "A run is complete when it shows an answer and the product reports no unexecuted step the "
@@ -270,17 +276,74 @@ class Tolerances:
 
 FACT_KINDS: Final = ("rate", "currency", "count", "label")
 
+# The measure each expected value is, and the displayed column headers that name it (S1d). The
+# first header of each set is the column name in the evaluator's own reference query; the others
+# are a short fixed list of synonyms. Headers are compared after lower-casing and joining words with
+# underscores. One set serves both arms. A header in no set is unknown: a value under it is never
+# credited, because its meaning cannot be told from the display.
+METRIC_HEADERS: Final[dict[str, frozenset[str]]] = {
+    "churn_rate": frozenset({"churn_rate"}),
+    "mrr_lost": frozenset({"mrr_lost", "lost_mrr"}),
+    "incremental_churn_share": frozenset({"incremental_churn_share"}),
+    "escalation_count": frozenset({"escalation_count", "escalations"}),
+    "breaches": frozenset({"breaches", "breach_count"}),
+    "transactions": frozenset({"transactions", "transaction_count"}),
+    "breach_rate": frozenset({"breach_rate"}),
+    "dataset_breaches": frozenset({"dataset_breaches"}),
+    "dataset_transactions": frozenset({"dataset_transactions"}),
+    "dataset_breach_rate": frozenset({"dataset_breach_rate"}),
+    "total_revenue": frozenset({"total_revenue", "revenue"}),
+}
+# Headers known to name something other than a graded measure (a dimension, or a count that is not
+# an expected value): a value under one of them is another column's value, not an unknown one.
+KNOWN_OTHER_HEADERS: Final = frozenset(
+    {
+        "quarter",
+        "quarter_start",
+        "period",
+        "month",
+        "region",
+        "category",
+        "customer_segment",
+        "plan_tier",
+        "tenure_group",
+        "numerator",
+        "denominator",
+        "churned",
+        "missing",
+        "missing_rate",
+        "value_sum",
+        "value_count",
+    }
+)
+
+
+def _check_header_vocabulary() -> frozenset[str]:
+    seen: set[str] = set()
+    for headers in METRIC_HEADERS.values():
+        if seen & headers:
+            raise ComparisonError("A header may name only one measure.")
+        seen |= headers
+    if seen & KNOWN_OTHER_HEADERS:
+        raise ComparisonError("A measure header cannot also be a known non-measure header.")
+    return frozenset(seen | KNOWN_OTHER_HEADERS)
+
+
+_KNOWN_HEADERS: Final = _check_header_vocabulary()
+
 
 @dataclass(frozen=True)
 class Fact:
     """One expected value. ``expected`` is evaluator-only and never serialized or printed.
 
     ``context`` holds the labels that locate the value (a period, a segment, the other labels of
-    its expected row): text credit needs a sentence naming every one, table credit a displayed row
-    holding every one. ``row`` names the expected row the value belongs to; a fact with no row
-    (a policy threshold) can only be credited from prose, never from an arbitrary table cell.
-    ``exclusive`` marks a population-specific measurement: a sentence or row that names a
-    different population of the same case does not count for it.
+    its expected row): prose credit needs the value clearly tied to every one, table credit a
+    displayed row holding every one. ``row`` names the expected row the value belongs to; a fact
+    with no row (a policy threshold) can only be credited from prose, never from a table cell.
+    ``exclusive`` marks a population-specific measurement: a value tied to a different population
+    of the same case does not count for it. ``metric`` names the measure (a key of
+    :data:`METRIC_HEADERS`): a table cell counts only under a header naming it, and a fact with no
+    metric is never credited from a table.
     """
 
     fact_id: str
@@ -290,12 +353,15 @@ class Fact:
     context: tuple[str, ...] = field(repr=False, default=())
     row: str | None = None
     exclusive: bool = False
+    metric: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in FACT_KINDS:
             raise ComparisonError(f"Unknown fact kind: {self.kind}")
         if (self.kind == "label") != isinstance(self.expected, str):
             raise ComparisonError("A label fact holds text; every other fact holds a number.")
+        if self.metric is not None and (self.kind == "label" or self.metric not in METRIC_HEADERS):
+            raise ComparisonError("A metric must be a known measure of a numeric fact.")
 
 
 @dataclass(frozen=True)
@@ -333,9 +399,10 @@ def _leaf_fact(
     context: tuple[str, ...] = (),
     row: str | None = None,
     exclusive: bool = False,
+    metric: str | None = None,
 ) -> Fact:
     def fact(kind: str, expected: Decimal | str) -> Fact:
-        return Fact(fact_id, group, kind, expected, context, row, exclusive)
+        return Fact(fact_id, group, kind, expected, context, row, exclusive, metric)
 
     if isinstance(value, bool):
         raise ComparisonError("A boolean is not an expected value.")
@@ -344,6 +411,8 @@ def _leaf_fact(
     number = _decimal(value)
     if number is None:
         if isinstance(value, str) and value.strip():
+            if metric is not None:
+                raise ComparisonError("A label cell has no measure.")
             return fact("label", value)
         raise ComparisonError("An expected value must be a number or non-empty text.")
     text = value if isinstance(value, str) else repr(value)
@@ -366,21 +435,36 @@ CHURN_POPULATION_LABELS: Final[dict[str, tuple[str, ...]]] = {
     "mrr_lost": (),
     "smb_basic_incremental_churn_share": ("SMB", "Basic"),
 }
+# The measure each oracle fact path holds (S1d): the column a displayed table must head it with.
+CHURN_FACT_METRICS: Final[dict[str, str]] = {
+    "overall": "churn_rate",
+    "smb_basic": "churn_rate",
+    "apac": "churn_rate",
+    "enterprise": "churn_rate",
+    "mrr_lost": "mrr_lost",
+    "smb_basic_incremental_churn_share": "incremental_churn_share",
+}
 
 
 def _oracle_facts(path: str, node: Any) -> list[Fact]:
     """Primary values under one oracle fact path: each period's rate, or a scalar per period."""
     if path not in CHURN_POPULATION_LABELS:
         raise ComparisonError("An oracle fact path has no defined population.")
+    if path not in CHURN_FACT_METRICS:
+        raise ComparisonError("An oracle fact path has no defined measure.")
     labels = CHURN_POPULATION_LABELS[path]
+    metric = CHURN_FACT_METRICS[path]
     if not isinstance(node, Mapping):
-        return [_leaf_fact(path, path, node, context=labels, row=path, exclusive=True)]
+        return [
+            _leaf_fact(path, path, node, context=labels, row=path, exclusive=True, metric=metric)
+        ]
     facts: list[Fact] = []
     for period, value in node.items():
         fact_id = f"{path}.{period}"
         located: dict[str, Any] = {
             "context": (str(period), *labels),
             "exclusive": True,
+            "metric": metric,
         }
         if isinstance(value, Mapping):
             if "rate" not in value:
@@ -399,16 +483,59 @@ def _is_label(value: Any) -> bool:
     return isinstance(value, str) and _decimal(value) is None
 
 
-def _row_facts(group: str, row_id: str, row: Sequence[Any], ids: Sequence[str]) -> list[Fact]:
+def _row_facts(
+    group: str,
+    row_id: str,
+    row: Sequence[Any],
+    ids: Sequence[str],
+    metrics: Sequence[str | None],
+) -> list[Fact]:
     """One expected row: each cell is a fact located by the row's other labels."""
+    if len(metrics) != len(row):
+        raise ComparisonError("Each expected cell needs its measure (None for a label cell).")
     labels = [str(cell) for cell in row if _is_label(cell)]
     facts = []
-    for fact_id, cell in zip(ids, row, strict=True):
+    for fact_id, cell, metric in zip(ids, row, metrics, strict=True):
         others = list(labels)
         if _is_label(cell):
             others.remove(str(cell))
-        facts.append(_leaf_fact(fact_id, group, cell, context=tuple(others), row=row_id))
+        elif metric is None:
+            raise ComparisonError("An expected value cell needs a defined measure.")
+        facts.append(
+            _leaf_fact(fact_id, group, cell, context=tuple(others), row=row_id, metric=metric)
+        )
     return facts
+
+
+# The measure of each cell of each retail case's expected rows, in cell order (None for a label
+# cell), named after the columns of the case's own evaluator-only reference query (S1d). A case or
+# row that is not listed is refused rather than graded without column meanings.
+RETAIL_ROW_METRICS: Final[dict[str, dict[str, tuple[str | None, ...]]]] = {
+    "investigation-top-region-fulfillment": {"expected_answer": (None, "escalation_count")},
+    "investigation-review-category-rate": {
+        "expected_answer": (
+            None,
+            "breaches",
+            "transactions",
+            "breach_rate",
+            "dataset_breaches",
+            "dataset_transactions",
+            "dataset_breach_rate",
+        )
+    },
+    "investigation-october-peak-explanation": {
+        "descriptive_fact.peak-and-runner-up-month": (None, "total_revenue"),
+        "descriptive_fact.peak-month-largest-category": (None, "total_revenue"),
+    },
+}
+
+
+def _metrics_for(
+    row_metrics: Mapping[str, Sequence[str | None]], group: str
+) -> Sequence[str | None]:
+    if group not in row_metrics:
+        raise ComparisonError("An expected row has no defined column meanings.")
+    return row_metrics[group]
 
 
 # Which committed reference query result belongs to which required churn fact path.
@@ -452,14 +579,20 @@ def churn_case_spec(oracle: Mapping[str, Any], public_case: Mapping[str, Any]) -
     )
 
 
-def retail_case_spec(case: Mapping[str, Any]) -> CaseSpec:
+def retail_case_spec(
+    case: Mapping[str, Any],
+    row_metrics: Mapping[str, Sequence[str | None]] | None = None,
+) -> CaseSpec:
     """Expectations for one retail investigation case, from its evaluator-only fields (D4).
 
     Sub-questions are the case's existing evaluator-only fields: the expected answer cells, the
     documented policy-rule values when the case needs the policy, and each descriptive fact. The
-    ``steps`` text is never used for matching and never reaches either arm.
+    ``steps`` text is never used for matching and never reaches either arm. Each expected cell's
+    measure comes from ``row_metrics`` (by default :data:`RETAIL_ROW_METRICS` for the case).
     """
     case_id = str(case.get("id", ""))
+    if row_metrics is None:
+        row_metrics = RETAIL_ROW_METRICS.get(case_id, {})
     facts: list[Fact] = []
     references: list[tuple[tuple[Any, ...], ...]] = []
     if case.get("expected_rows"):
@@ -473,7 +606,11 @@ def retail_case_spec(case: Mapping[str, Any]) -> CaseSpec:
             f"expected_answer.{cell}" if len(answer_rows) == 1 else f"{row_id}.{cell}"
             for cell in range(len(row))
         ]
-        facts.extend(_row_facts("expected_answer", row_id, row, ids))
+        facts.extend(
+            _row_facts(
+                "expected_answer", row_id, row, ids, _metrics_for(row_metrics, "expected_answer")
+            )
+        )
     policy_rules = case.get("policy_rules") or {}
     for name, value in policy_rules.items():
         # A documented threshold has no row: it counts only when the prose states it.
@@ -482,7 +619,11 @@ def retail_case_spec(case: Mapping[str, Any]) -> CaseSpec:
         group = f"descriptive_fact.{descriptive.get('id', '')}"
         for row_index, row in enumerate(descriptive.get("expected_rows", [])):
             ids = [f"{group}.{row_index}.{cell}" for cell in range(len(row))]
-            facts.extend(_row_facts(group, f"{group}.{row_index}", row, ids))
+            facts.extend(
+                _row_facts(
+                    group, f"{group}.{row_index}", row, ids, _metrics_for(row_metrics, group)
+                )
+            )
         references.append(_rows(descriptive.get("expected_rows", [])))
     if not facts:
         raise ComparisonError("A retail case must define expected values.")
@@ -546,8 +687,13 @@ def extract_numbers(text: str) -> list[NumberMention]:
     anything else (``1,5`` or ``12,3456``) is kept as an ambiguous mention with no value.
     Magnitude suffixes (``28.1K``) and accounting parentheses are not read as numbers.
     """
+    return [mention for _, _, mention in _number_spans(text)]
+
+
+def _number_spans(text: str) -> list[tuple[int, int, NumberMention]]:
+    """:func:`extract_numbers` with each mention's character span in ``text``."""
     masked = _PERIOD.sub(lambda match: " " * len(match.group(0)), text)
-    mentions: list[NumberMention] = []
+    mentions: list[tuple[int, int, NumberMention]] = []
     for match in _NUMBER.finditer(masked):
         body = match.group("body")
         unit_text = (match.group("unit") or "").strip().lower()
@@ -559,13 +705,14 @@ def extract_numbers(text: str) -> list[NumberMention]:
             unit = "currency"
         else:
             unit = "plain"
+        span = (match.start(), match.end())
         if "," in body and not _THOUSANDS.match(body):
-            mentions.append(NumberMention(None, unit, integral=False, ambiguous=True))
+            mentions.append((*span, NumberMention(None, unit, integral=False, ambiguous=True)))
             continue
         value = Decimal(body.replace(",", ""))
         if match.group("sign"):
             value = -value
-        mentions.append(NumberMention(value, unit, integral="." not in body))
+        mentions.append((*span, NumberMention(value, unit, integral="." not in body)))
     return mentions
 
 
@@ -627,9 +774,19 @@ class FactOutcome:
     source: str | None = None  # where a stated value was shown: "text", "table", or "both"
 
 
-Table = Sequence[Sequence[Any]]
+@dataclass(frozen=True)
+class DisplayedTable:
+    """A table as the user sees it: its column headers and its rows (held in memory only)."""
+
+    columns: tuple[str, ...]
+    rows: tuple[tuple[Any, ...], ...] = field(repr=False, default=())
+
+    def header(self, position: int) -> str:
+        return self.columns[position] if position < len(self.columns) else ""
+
 
 _MONTH_NAMES = _MONTHS.split("|")[:12]
+_PERIOD_LABEL: Final = re.compile(r"(?:19|20)\d{2}-(?:Q[1-4]|\d{2})")
 
 
 def _label_aliases(label: str) -> tuple[str, ...]:
@@ -691,13 +848,12 @@ def _cell_number(cell: Any, kind: str) -> Decimal | None:
 
 def _population(facts: Sequence[Fact]) -> set[str]:
     """Labels that name a population in this case (for exclusive, population-specific facts)."""
-    periods = re.compile(r"(?:19|20)\d{2}-(?:Q[1-4]|\d{2})")
     return {
         label
         for fact in facts
         if fact.exclusive
         for label in fact.context
-        if not periods.fullmatch(label)
+        if not _PERIOD_LABEL.fullmatch(label)
     }
 
 
@@ -710,93 +866,534 @@ def _sentence_locates(fact: Fact, sentence: str, population: set[str]) -> bool:
     return True
 
 
-def _row_states(row_facts: Sequence[Fact], row: Sequence[Any], tolerances: Tolerances) -> bool:
-    """A displayed row shows an expected row: every label in place and every value, cell by cell.
+# --- S1d: displayed tables, read by their column headers ------------------------------------
 
-    For a population-specific row, any other label cell disqualifies the row: an SMB row never
-    counts for the overall rate, even when its rate cell holds the overall value.
+
+def _header_key(header: Any) -> str:
+    return re.sub(r"[^0-9a-z]+", "_", str(header).casefold()).strip("_")
+
+
+def _header_meaning(header: Any, metric: str | None) -> str:
+    """What a displayed header says about a fact's measure: ``match``, ``other`` or ``unknown``.
+
+    A fact with no defined measure has no matching column, so it is never credited from a table.
     """
+    key = _header_key(header)
+    if metric is None:
+        return "other"
+    if key in METRIC_HEADERS[metric]:
+        return "match"
+    return "other" if key in _KNOWN_HEADERS else "unknown"
+
+
+def _expected_labels(row_facts: Sequence[Fact]) -> set[str]:
     labels = {label for fact in row_facts for label in fact.context}
     labels |= {str(fact.expected) for fact in row_facts if fact.kind == "label"}
+    return labels
+
+
+def _only_expected_labels(labels: set[str], row: Sequence[Any]) -> bool:
+    return all(
+        not _is_label(cell) or any(_label_in_cell(label, cell) for label in labels) for cell in row
+    )
+
+
+def _row_holds_labels(row_facts: Sequence[Fact], labels: set[str], row: Sequence[Any]) -> bool:
+    """Every expected label is in the row; a population-specific row has no other label cell."""
     if not all(any(_label_in_cell(label, cell) for cell in row) for label in labels):
         return False
-    if any(fact.exclusive for fact in row_facts):
-        for cell in row:
-            if _is_label(cell) and not any(_label_in_cell(label, cell) for label in labels):
-                return False
-    numeric = [fact for fact in row_facts if fact.kind != "label"]
-    candidates = {
-        index: [
-            position
-            for position, cell in enumerate(row)
-            if (value := _cell_number(cell, fact.kind)) is not None
-            and _within(fact.kind, value, _expected_number(fact), tolerances)
-        ]
-        for index, fact in enumerate(numeric)
-    }
-    return len(_maximum_matching(candidates)) == len(numeric)
+    return not any(fact.exclusive for fact in row_facts) or _only_expected_labels(labels, row)
 
 
-def _table_stated(
-    facts: Sequence[Fact], tables: Sequence[Table], tolerances: Tolerances
-) -> set[str]:
-    """Facts shown in a displayed table: those whose whole expected row appears in one row."""
+def _table_states(
+    facts: Sequence[Fact], tables: Sequence[DisplayedTable], tolerances: Tolerances
+) -> dict[str, str]:
+    """Per fact: ``stated``, ``ambiguous`` or ``conflicting`` in the displayed tables (or absent).
+
+    A row states an expected row when it holds every expected label and, one cell each, every
+    expected value under a header naming that value's measure. A row that would state it only if
+    an unknown header named the measure is ``ambiguous``. A value under a header naming another
+    measure never counts. A row whose labels are exactly the expected labels and whose matching
+    column holds a different value contradicts the fact, whatever other rows show.
+    """
     rows: dict[str, list[Fact]] = {}
     for fact in facts:
         if fact.row is not None:
             rows.setdefault(fact.row, []).append(fact)
-    stated: set[str] = set()
+    states: dict[str, str] = {}
     for row_facts in rows.values():
-        if any(_row_states(row_facts, row, tolerances) for table in tables for row in table):
-            stated |= {fact.fact_id for fact in row_facts}
-    return stated
+        labels = _expected_labels(row_facts)
+        numeric = [fact for fact in row_facts if fact.kind != "label"]
+        shown: str | None = None
+        conflicting: set[str] = set()
+        for table in tables:
+            for row in table.rows:
+                if not _row_holds_labels(row_facts, labels, row):
+                    continue
+                meanings = [
+                    [_header_meaning(table.header(p), fact.metric) for p in range(len(row))]
+                    for fact in numeric
+                ]
+                values = [[_cell_number(cell, fact.kind) for cell in row] for fact in numeric]
+                exact = _only_expected_labels(labels, row)
+                fits: dict[str, dict[int, list[int]]] = {"match": {}, "unknown": {}}
+                for index, fact in enumerate(numeric):
+                    expected = _expected_number(fact)
+                    for accepted, positions in (
+                        ("match", fits["match"].setdefault(index, [])),
+                        ("unknown", fits["unknown"].setdefault(index, [])),
+                    ):
+                        positions.extend(
+                            p
+                            for p, value in enumerate(values[index])
+                            if value is not None
+                            and _within(fact.kind, value, expected, tolerances)
+                            and (meanings[index][p] == "match" or meanings[index][p] == accepted)
+                        )
+                    if exact and any(
+                        meanings[index][p] == "match"
+                        and value is not None
+                        and not _within(fact.kind, value, expected, tolerances)
+                        for p, value in enumerate(values[index])
+                    ):
+                        conflicting.add(fact.fact_id)
+                if len(_maximum_matching(fits["match"])) == len(numeric):
+                    shown = "stated"
+                elif shown is None and len(_maximum_matching(fits["unknown"])) == len(numeric):
+                    shown = "ambiguous"
+        for fact in row_facts:
+            if fact.fact_id in conflicting:
+                states[fact.fact_id] = "conflicting"
+            elif shown is not None:
+                states[fact.fact_id] = shown
+    return states
+
+
+# --- S1d: tying a written value to its period and population --------------------------------
+#
+# Every number in a sentence gets one binding per dimension (period, population). It is
+# ``explicit`` when the sentence clearly ties the number to one label: the only such label in its
+# clause, a label written directly beside it ("2026-01-01 0.0600", "2025-10 at 113,432.96",
+# "7.1% in 2026-Q2", "4.8% (2026-Q1)"), a short label-led phrase ("Q1 2026 churn was 4.8%"), or one
+# unambiguous "from L1 to L2 ... from V1 to V2" pair. It is ``inherited`` when its clause names no
+# such label and the sentence names exactly one (credit only, never a contradiction), ``none`` when
+# the sentence names none, and ``ambiguous`` otherwise. Labels or numbers written as a list
+# ("Q1 and Q2 ... 4.8% and 7.1%") are never tied by position. A clause that names no population
+# but says "overall" is explicitly about no population ("..., while overall churn was 4.8%").
+
+_CLAUSE_BREAK: Final = re.compile(
+    r";|\b(?:while|whereas|but|compared (?:with|to)|versus|vs\.?)(?!\w)", flags=re.IGNORECASE
+)
+_TIGHT_BEFORE: Final = re.compile(r"\s*(?:[:=]\s*)?(?:(?:was|were|is|are|at|of)\s+)?", re.I)
+_TIGHT_AFTER: Final = re.compile(
+    r"\s*(?:\(\s*(?:(?:in|for|during)\s+)?|(?:in|for|during)\s+(?:the\s+)?)", re.I
+)
+_LIST_JOIN: Final = re.compile(
+    r"\s*(?:,|&|/|-|–|\band\b|\bor\b|\bto\b|\bthrough\b|\buntil\b)\s*(?:and\s+)?", re.I
+)
+_RANGE_OPEN: Final = re.compile(r"\b(?:from|between)\s+$", re.I)
+_LABEL_RANGE_JOIN: Final = re.compile(r"\s*(?:to|through|until|and|-|–)\s*", re.I)
+_VALUE_RANGE_JOIN: Final = re.compile(r"\s*(?:to|and)\s*", re.I)
+_MAX_LEAD_WORDS: Final = 4
+_NO_POPULATION: Final = re.compile(r"\boverall\b", re.I)
+
+Span = tuple[int, int]
+NumberSpan = tuple[int, int, NumberMention]
+
+
+@dataclass(frozen=True)
+class _Occurrence:
+    start: int
+    end: int
+    key: str  # a period label (or "?" and the text of an unknown period), or a population label
+
+
+@dataclass(frozen=True)
+class _Binding:
+    state: str  # "explicit" | "inherited" | "none" | "ambiguous"
+    key: frozenset[str] = frozenset()
+    # An explicit tie strong enough to contradict: a label beside the number, a from-to pair, or
+    # the clause's only label written before the number. A clause's only label written after the
+    # number ("4.8%, 1.2 points below SMB Basic") earns credit but never makes a contradiction.
+    strong: bool = True
+
+
+_UNCLEAR: Final = _Binding("ambiguous")
+_UNNAMED: Final = _Binding("none")
+
+
+def _period_of(fact: Fact) -> str | None:
+    return next((label for label in fact.context if _PERIOD_LABEL.fullmatch(label)), None)
+
+
+def _group_of(fact: Fact) -> frozenset[str]:
+    return frozenset(label for label in fact.context if not _PERIOD_LABEL.fullmatch(label))
+
+
+@dataclass(frozen=True)
+class _Vocabulary:
+    """The case's period labels, population labels, and populations (label groups)."""
+
+    periods: tuple[str, ...]
+    entities: tuple[str, ...]
+    groups: frozenset[frozenset[str]]
+
+    @classmethod
+    def of(cls, facts: Sequence[Fact]) -> _Vocabulary:
+        labels = _expected_labels(facts)
+        periods = tuple(sorted(label for label in labels if _PERIOD_LABEL.fullmatch(label)))
+        entities = tuple(sorted(label for label in labels if not _PERIOD_LABEL.fullmatch(label)))
+        groups = {_group_of(fact) for fact in facts if _group_of(fact)}
+        grouped = {label for group in groups for label in group}
+        groups |= {frozenset({label}) for label in entities if label not in grouped}
+        return cls(periods, entities, frozenset(groups))
+
+
+def _period_occurrences(text: str, vocabulary: _Vocabulary) -> list[_Occurrence]:
+    found = []
+    for match in _PERIOD.finditer(text):
+        written = match.group(0).casefold()
+        known = [
+            label
+            for label in vocabulary.periods
+            if written in {alias.casefold() for alias in _label_aliases(label)}
+        ]
+        key = known[0] if len(known) == 1 else f"?{written}"
+        found.append(_Occurrence(match.start(), match.end(), key))
+    return found
+
+
+def _entity_occurrences(
+    text: str, vocabulary: _Vocabulary, periods: Sequence[_Occurrence]
+) -> list[_Occurrence]:
+    found = [
+        _Occurrence(match.start(), match.end(), label)
+        for label in vocabulary.entities
+        for match in re.finditer(rf"(?<!\w){re.escape(label)}(?!\w)", text, flags=re.IGNORECASE)
+        if not any(p.start < match.end() and match.start() < p.end for p in periods)
+    ]
+    return sorted(found, key=lambda o: (o.start, o.end))
+
+
+def _clauses(text: str) -> list[Span]:
+    spans, start = [], 0
+    for match in _CLAUSE_BREAK.finditer(text):
+        spans.append((start, match.start()))
+        start = match.end()
+    spans.append((start, len(text)))
+    return spans
+
+
+def _inside(occurrences: Sequence[_Occurrence], span: Span) -> list[_Occurrence]:
+    return [o for o in occurrences if span[0] <= o.start and o.end <= span[1]]
+
+
+def _named(
+    occurrences: Sequence[_Occurrence], groups: frozenset[frozenset[str]], span: Span
+) -> tuple[set[frozenset[str]], bool]:
+    """The populations (or periods) fully named in ``span``, and whether a stray label remains."""
+    present = {o.key for o in _inside(occurrences, span)}
+    named = {group for group in groups if group <= present}
+    maximal = {group for group in named if not any(group < other for other in named)}
+    covered = {label for group in maximal for label in group}
+    return maximal, bool(present - covered)
+
+
+def _from_to(
+    text: str, numbers: Sequence[NumberSpan], periods: Sequence[_Occurrence], clause: Span
+) -> dict[int, str]:
+    """The one unambiguous "from L1 to L2 ... from V1 to V2" pairing in a clause, if any."""
+    occurrences = _inside(periods, clause)
+    label_pairs = [
+        (first, second)
+        for first, second in zip(occurrences, occurrences[1:], strict=False)
+        if first.key != second.key
+        and _LABEL_RANGE_JOIN.fullmatch(text[first.end : second.start])
+        and _RANGE_OPEN.search(text[clause[0] : first.start])
+    ]
+    indexes = [i for i, (s, e, _) in enumerate(numbers) if clause[0] <= s and e <= clause[1]]
+    value_pairs = [
+        (i, j)
+        for i, j in zip(indexes, indexes[1:], strict=False)
+        if _VALUE_RANGE_JOIN.fullmatch(text[numbers[i][1] : numbers[j][0]])
+        and _RANGE_OPEN.search(text[clause[0] : numbers[i][0]])
+    ]
+    if len(label_pairs) != 1 or len(value_pairs) != 1:
+        return {}
+    (first, second), (i, j) = label_pairs[0], value_pairs[0]
+    return {i: first.key, j: second.key}
+
+
+def _number_listed(text: str, numbers: Sequence[NumberSpan], index: int) -> bool:
+    """Whether a number is one of a written list or range ("4.8% and 7.1%", "96 to 142")."""
+    start, end, mention = numbers[index]
+    for other in (index - 1, index + 1):
+        if not 0 <= other < len(numbers):
+            continue
+        o_start, o_end, o_mention = numbers[other]
+        gap = text[o_end:start] if other < index else text[end:o_start]
+        joined = _LIST_JOIN.fullmatch(gap)
+        if joined and (gap.strip() != "," or o_mention.unit == mention.unit):
+            return True
+    return False
+
+
+def _label_listed(
+    text: str, occurrences: Sequence[_Occurrence], chosen: _Occurrence, group: frozenset[str]
+) -> bool:
+    """Whether a label is one of a written list or range of different labels ("Q1 and Q2")."""
+    foreign = [o for o in occurrences if o.key not in group]
+    before = [o for o in foreign if o.end <= chosen.start]
+    after = [o for o in foreign if o.start >= chosen.end]
+    return bool(
+        (before and _LIST_JOIN.fullmatch(text[before[-1].end : chosen.start]))
+        or (after and _LIST_JOIN.fullmatch(text[chosen.end : after[0].start]))
+    )
+
+
+def _blocked(
+    numbers: Sequence[NumberSpan],
+    occurrences: Sequence[_Occurrence],
+    group: frozenset[str],
+    span: Span,
+) -> bool:
+    """Whether another number or another label of the same dimension lies inside ``span``."""
+    return any(span[0] <= s < span[1] for s, _, _ in numbers) or any(
+        o.key not in group for o in _inside(occurrences, span)
+    )
+
+
+def _blank(text: str, span: Span, others: Sequence[_Occurrence]) -> str:
+    """``text[span]`` with the other dimension's labels blanked out."""
+    chars = list(text[span[0] : span[1]])
+    for o in _inside(others, span):
+        chars[o.start - span[0] : o.end - span[0]] = " " * (o.end - o.start)
+    return "".join(chars)
+
+
+def _lead(
+    text: str,
+    numbers: Sequence[NumberSpan],
+    index: int,
+    clause: Span,
+    occurrences: Sequence[_Occurrence],
+    others: Sequence[_Occurrence],
+    group: frozenset[str],
+) -> str | None:
+    """How a label written before a number leads to it: ``tight``, ``loose`` or not at all."""
+    start = numbers[index][0]
+    chosen = []
+    for label in group:
+        before = [o for o in _inside(occurrences, (clause[0], start)) if o.key == label]
+        if not before:
+            return None
+        chosen.append(before[-1])
+    first, last = min(o.start for o in chosen), max(o.end for o in chosen)
+    if _blocked(numbers, occurrences, group, (first, start)):
+        return None
+    if any(_label_listed(text, occurrences, o, group) for o in chosen):
+        return None
+    gap = _blank(text, (last, start), others)
+    if _TIGHT_BEFORE.fullmatch(gap):
+        return "tight"
+    words = re.findall(r"[^\W\d_]+", gap)
+    if not re.search(r"\d", gap) and len(words) <= _MAX_LEAD_WORDS:
+        return "loose"
+    return None
+
+
+def _trail(
+    text: str,
+    numbers: Sequence[NumberSpan],
+    index: int,
+    clause: Span,
+    occurrences: Sequence[_Occurrence],
+    group: frozenset[str],
+) -> bool:
+    """Whether a label just after a number names it ("7.1% in 2026-Q2", "4.8% (Q1 2026)")."""
+    end = numbers[index][1]
+    chosen = []
+    for label in group:
+        after = [o for o in _inside(occurrences, (end, clause[1])) if o.key == label]
+        if not after:
+            return False
+        chosen.append(after[0])
+    first, last = min(o.start for o in chosen), max(o.end for o in chosen)
+    if _blocked(numbers, occurrences, group, (end, last)):
+        return False
+    if any(_label_listed(text, occurrences, o, group) for o in chosen):
+        return False
+    return _TIGHT_AFTER.fullmatch(text[end:first]) is not None
+
+
+def _bind(
+    text: str,
+    numbers: Sequence[NumberSpan],
+    index: int,
+    clauses: Sequence[Span],
+    occurrences: Sequence[_Occurrence],
+    others: Sequence[_Occurrence],
+    groups: frozenset[frozenset[str]],
+    ranges: Mapping[int, str],
+    unnamed: re.Pattern[str] | None = None,
+) -> _Binding:
+    """One number's binding in one dimension (see the section comment).
+
+    ``unnamed`` marks a clause that names no label of this dimension as explicitly about none.
+    """
+    if index in ranges:
+        return _Binding("explicit", frozenset({ranges[index]}))
+    start = numbers[index][0]
+    clause = next(span for span in clauses if span[0] <= start < span[1])
+    named, stray = _named(occurrences, groups, clause)
+    if len(named) == 1 and not stray:
+        group = next(iter(named))
+        before = {o.key for o in _inside(occurrences, (clause[0], start))}
+        return _Binding("explicit", group, strong=group <= before)
+    if named or stray:
+        if not _number_listed(text, numbers, index):
+            args = (text, numbers, index, clause, occurrences)
+            tight = {
+                group
+                for group in named
+                if _lead(*args, others, group) == "tight" or _trail(*args, group)
+            }
+            if len(tight) == 1:
+                return _Binding("explicit", next(iter(tight)))
+            if not tight:
+                loose = {group for group in named if _lead(*args, others, group) == "loose"}
+                if len(loose) == 1:
+                    return _Binding("explicit", next(iter(loose)))
+        return _UNCLEAR
+    if unnamed is not None and unnamed.search(text[clause[0] : clause[1]]):
+        return _UNNAMED
+    named, stray = _named(occurrences, groups, (0, len(text)))
+    if not named and not stray:
+        return _UNNAMED
+    if len(named) == 1 and not stray:
+        return _Binding("inherited", next(iter(named)))
+    return _UNCLEAR
+
+
+def _sentence_bindings(
+    text: str, vocabulary: _Vocabulary
+) -> list[tuple[NumberMention, _Binding, _Binding]]:
+    """Each number in a sentence with its period binding and its population binding."""
+    numbers = _number_spans(text)
+    periods = _period_occurrences(text, vocabulary)
+    entities = _entity_occurrences(text, vocabulary, periods)
+    clauses = _clauses(text)
+    ranges: dict[int, str] = {}
+    for clause in clauses:
+        ranges.update(_from_to(text, numbers, periods, clause))
+    period_groups = frozenset(frozenset({o.key}) for o in periods)
+    return [
+        (
+            mention,
+            _bind(text, numbers, index, clauses, periods, entities, period_groups, ranges),
+            _bind(
+                text,
+                numbers,
+                index,
+                clauses,
+                entities,
+                periods,
+                vocabulary.groups,
+                {},
+                _NO_POPULATION,
+            ),
+        )
+        for index, (_, _, mention) in enumerate(numbers)
+    ]
+
+
+def _fit_one(binding: _Binding, key: frozenset[str]) -> str:
+    if binding.state in ("explicit", "inherited") and binding.key == key:
+        return "bound"
+    if binding.state in ("ambiguous", "inherited"):
+        return "possible"
+    return "excluded"
+
+
+def _fit(fact: Fact, period: _Binding, population: _Binding) -> str:
+    """Whether a number is tied to the fact's context: ``bound``, ``possible`` or ``excluded``."""
+    results = []
+    label = _period_of(fact)
+    if label is not None:
+        results.append(_fit_one(period, frozenset({label})))
+    group = _group_of(fact)
+    if group:
+        results.append(_fit_one(population, group))
+    elif fact.exclusive:
+        results.append({"none": "bound", "explicit": "excluded"}.get(population.state, "possible"))
+    if "excluded" in results:
+        return "excluded"
+    return "bound" if all(result == "bound" for result in results) else "possible"
+
+
+def _explicitly_for(fact: Fact, period: _Binding, population: _Binding) -> bool:
+    """Whether a number is strongly tied to exactly this fact's period and population."""
+    label, group = _period_of(fact), _group_of(fact)
+    if label is None and not group:
+        return False
+    if label is None:
+        tied = period.state == "none"
+    else:
+        tied = period.state == "explicit" and period.strong and period.key == frozenset({label})
+    if group:
+        return (
+            tied
+            and population.state == "explicit"
+            and population.strong
+            and population.key == group
+        )
+    return tied and population.state == "none"
 
 
 def grade_facts(
     facts: Sequence[Fact],
     text: str,
     tolerances: Tolerances,
-    tables: Sequence[Table] = (),
+    tables: Sequence[DisplayedTable] = (),
 ) -> list[FactOutcome]:
     """Whether each expected value is shown to the user, never resolving doubt favourably.
 
-    Prose: a value counts only in a sentence that names its context (period, population, row
-    labels), and, for a population-specific value, names no other population of the case. Each
-    written number may satisfy at most one expected value (a maximum one-to-one matching, so the
-    result does not depend on fact order). A value matched only by an ambiguous mention, or
-    contradicted by an unmatched mention with the same explicit unit within :data:`CONFLICT_BAND`
-    in a locating sentence, is not stated from prose.
+    Prose: a value counts only when its sentence ties it to the value's period and population
+    (see the binding rules above); each written number satisfies at most one expected value (a
+    maximum one-to-one matching, so the result does not depend on fact order). A matching value
+    whose tie is unclear is ``ambiguous_value``. A value is contradicted (``conflicting_values``)
+    when a number explicitly tied to its own period and population holds the expected value of
+    another context of the same measure (a swapped period or population), or when an unmatched
+    tied number with the same explicit unit lies within :data:`CONFLICT_BAND`.
 
-    Tables: a value counts only when one displayed row holds its whole expected row (labels and
-    values); a value with no expected row (a policy threshold) is never credited from a table.
+    Tables: see :func:`_table_states`. A value with no expected row (a policy threshold) is never
+    credited from a table.
 
-    A value shown in both places is counted once, with its source recorded. A contradiction in the
-    prose is never outweighed by a table.
+    A value shown in both places is counted once, with its source recorded. A contradiction in
+    either place is never outweighed by a correct value in the other.
     """
+    vocabulary = _Vocabulary.of(facts)
     population = _population(facts)
     sentences = _sentences(text)
     mentions = [
-        (index, mention)
+        (index, mention, period, group)
         for index, sentence in enumerate(sentences)
-        for mention in extract_numbers(sentence)
+        for mention, period, group in _sentence_bindings(sentence, vocabulary)
     ]
-    located = {
-        fact.fact_id: {
-            index
-            for index, sentence in enumerate(sentences)
-            if _sentence_locates(fact, sentence, population)
-        }
-        for fact in facts
-    }
     numeric = [fact for fact in facts if fact.kind != "label"]
+    fits = {
+        (index, position): _fit(fact, period, group)
+        for index, fact in enumerate(numeric)
+        for position, (_, _, period, group) in enumerate(mentions)
+    }
     candidates: dict[int, list[int]] = {}
     for index, fact in enumerate(numeric):
         reader = _READERS[fact.kind]
         expected = _expected_number(fact)
         candidates[index] = [
             position
-            for position, (sentence, mention) in enumerate(mentions)
-            if sentence in located[fact.fact_id]
+            for position, (_, mention, _, _) in enumerate(mentions)
+            if fits[(index, position)] == "bound"
             and (value := reader(mention)) is not None
             and _within(fact.kind, value, expected, tolerances)
         ]
@@ -805,36 +1402,50 @@ def grade_facts(
     in_text: dict[str, str] = {}
     for index, fact in enumerate(numeric):
         expected = _expected_number(fact)
-        nearby = [
+        reader = _READERS[fact.kind]
+        bound = [
             (position, mention)
-            for position, (sentence, mention) in enumerate(mentions)
-            if sentence in located[fact.fact_id]
+            for position, (_, mention, _, _) in enumerate(mentions)
+            if fits[(index, position)] == "bound"
         ]
-        if index in assignment:
+        if _misattributed(fact, numeric, mentions, tolerances) or (
+            index in assignment and _contradicted(fact, expected, bound, used, tolerances)
+        ):
+            reason = "conflicting_values"
+        elif index in assignment:
             reason = "all_stated"
-            if _contradicted(fact, expected, nearby, used, tolerances):
-                reason = "conflicting_values"
-        elif any(mention.ambiguous and _could_be(fact.kind, mention) for _, mention in nearby):
+        elif any(mention.ambiguous and _could_be(fact.kind, mention) for _, mention in bound):
+            reason = "ambiguous_value"
+        elif any(
+            fits[(index, position)] == "possible"
+            and (value := reader(mention)) is not None
+            and _within(fact.kind, value, expected, tolerances)
+            and all(_label_in_text(label, sentences[sentence]) for label in fact.context)
+            for position, (sentence, mention, _, _) in enumerate(mentions)
+        ):
             reason = "ambiguous_value"
         else:
             reason = "value_not_stated"
         in_text[fact.fact_id] = reason
+    located = {
+        fact.fact_id: [s for s in sentences if _sentence_locates(fact, s, population)]
+        for fact in facts
+        if fact.kind == "label"
+    }
     for fact in facts:
         if fact.kind == "label":
-            present = any(
-                _label_in_text(str(fact.expected), sentences[index])
-                for index in located[fact.fact_id]
-            )
+            present = any(_label_in_text(str(fact.expected), s) for s in located[fact.fact_id])
             in_text[fact.fact_id] = "all_stated" if present else "value_not_stated"
-    in_table = _table_stated(facts, tables, tolerances)
+    in_table = _table_states(facts, tables, tolerances)
     outcomes = []
     for fact in facts:
         text_reason = in_text[fact.fact_id]
-        shown_in_text = text_reason == "all_stated"
-        shown_in_table = fact.fact_id in in_table
-        if text_reason == "conflicting_values":
-            outcomes.append(FactOutcome(fact.fact_id, fact.group, False, text_reason))
+        table_state = in_table.get(fact.fact_id)
+        if text_reason == "conflicting_values" or table_state == "conflicting":
+            outcomes.append(FactOutcome(fact.fact_id, fact.group, False, "conflicting_values"))
             continue
+        shown_in_text = text_reason == "all_stated"
+        shown_in_table = table_state == "stated"
         if shown_in_text or shown_in_table:
             source = (
                 "both"
@@ -842,9 +1453,47 @@ def grade_facts(
                 else ("text" if shown_in_text else "table")
             )
             outcomes.append(FactOutcome(fact.fact_id, fact.group, True, "all_stated", source))
+        elif text_reason == "ambiguous_value" or table_state == "ambiguous":
+            outcomes.append(FactOutcome(fact.fact_id, fact.group, False, "ambiguous_value"))
         else:
             outcomes.append(FactOutcome(fact.fact_id, fact.group, False, text_reason))
     return outcomes
+
+
+def _misattributed(
+    fact: Fact,
+    numeric: Sequence[Fact],
+    mentions: Sequence[tuple[int, NumberMention, _Binding, _Binding]],
+    tolerances: Tolerances,
+) -> bool:
+    """Whether a number explicitly tied to this fact's context holds another context's value.
+
+    The other value must be an expected value of the same measure and kind in a different context
+    (another period or population), so a different measure written beside it never counts.
+    """
+    if fact.metric is None:
+        return False
+    peers = [
+        other
+        for other in numeric
+        if other is not fact
+        and other.metric == fact.metric
+        and other.kind == fact.kind
+        and set(other.context) != set(fact.context)
+    ]
+    if not peers:
+        return False
+    reader = _READERS[fact.kind]
+    expected = _expected_number(fact)
+    for _, mention, period, group in mentions:
+        if not _explicitly_for(fact, period, group):
+            continue
+        value = reader(mention)
+        if value is None or _within(fact.kind, value, expected, tolerances):
+            continue
+        if any(_within(fact.kind, value, _expected_number(peer), tolerances) for peer in peers):
+            return True
+    return False
 
 
 def _expected_number(fact: Fact) -> Decimal:
@@ -911,8 +1560,9 @@ class RunView:
     citations: tuple[bool, bool] | None
     # Arm B only: the displayed values of its structured report facts.
     structured_values: tuple[Decimal, ...] | None = field(repr=False, default=None)
-    # The tables the user is shown (arm A: the message's rows; arm B: the report's query tables).
-    tables: tuple[tuple[tuple[Any, ...], ...], ...] = field(repr=False, default=())
+    # The tables the user is shown, with their headers (arm A: the message's rows, headed by their
+    # keys; arm B: the report's query tables, headed by their columns).
+    tables: tuple[DisplayedTable, ...] = field(repr=False, default=())
     # The product's own structured signals that a step did not execute (fixed codes).
     not_executed: tuple[str, ...] = ()
 
@@ -927,7 +1577,7 @@ class RunView:
     @property
     def visible(self) -> bool:
         """Whether the user was shown any answer at all (prose or a table)."""
-        return self.answer_text is not None or any(self.tables)
+        return self.answer_text is not None or any(table.rows for table in self.tables)
 
 
 # A required query step did not run, by the product's own account: arm A's hybrid query fell back
@@ -965,6 +1615,7 @@ def observe_arm_a(message: Mapping[str, Any] | None) -> RunView:
         mode = "none"
     text = answer if isinstance(answer, str) and answer.strip() else None
     result_sets: tuple[tuple[tuple[Any, ...], ...], ...] | None
+    tables: tuple[DisplayedTable, ...] = ()
     if "rows" not in message:
         result_sets = None
     elif message["rows"] is None:
@@ -974,6 +1625,13 @@ def observe_arm_a(message: Mapping[str, Any] | None) -> RunView:
         if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
             raise ComparisonError("Arm A rows must be a list of objects.")
         result_sets = (tuple(tuple(row.values()) for row in rows),)
+        if rows:
+            columns = tuple(str(key) for key in rows[0])
+            tables = (
+                DisplayedTable(
+                    columns, tuple(tuple(row.get(column) for column in columns) for row in rows)
+                ),
+            )
     citations: tuple[bool, bool] | None = None
     provenance = message.get("provenance")
     if isinstance(provenance, Mapping) and isinstance(message.get("sources"), list):
@@ -988,7 +1646,7 @@ def observe_arm_a(message: Mapping[str, Any] | None) -> RunView:
         text,
         result_sets,
         citations,
-        tables=tuple(table for table in result_sets or () if table),
+        tables=tables,
         not_executed=not_executed,
     )
 
@@ -1056,11 +1714,14 @@ def observe_arm_b(
         )
         citations = (cited and bool(documents), valid)
     structured = _structured_values(report) if report is not None else None
-    tables: tuple[tuple[tuple[Any, ...], ...], ...] = ()
+    tables: tuple[DisplayedTable, ...] = ()
     not_executed: tuple[str, ...] = ()
     if report is not None:
         tables = tuple(
-            tuple(tuple(row) for row in table.get("rows", []))
+            DisplayedTable(
+                tuple(str(column) for column in table.get("columns", [])),
+                tuple(tuple(row) for row in table.get("rows", [])),
+            )
             for table in report.get("query_tables", [])
             if isinstance(table, Mapping) and table.get("rows")
         )

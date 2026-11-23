@@ -26,6 +26,7 @@ from packages.evaluation.workflow_comparison import (
     CaseSpec,
     ComparisonError,
     ComparisonRefused,
+    DisplayedTable,
     Fact,
     RunMetering,
     Tolerances,
@@ -810,16 +811,34 @@ def test_malformed_routing_records_are_refused(change: dict[str, Any]) -> None:
 # --- S1c: the complete user-visible answer, located by context ---------------------------------
 
 OVERALL_Q1 = Fact(
-    "overall.q1", "overall", "rate", Decimal("0.0480"), ("2026-Q1",), "overall.q1", True
+    "overall.q1",
+    "overall",
+    "rate",
+    Decimal("0.0480"),
+    ("2026-Q1",),
+    "overall.q1",
+    True,
+    "churn_rate",
 )
 SMB_Q1 = Fact(
-    "smb.q1", "smb", "rate", Decimal("0.0600"), ("2026-Q1", "SMB", "Basic"), "smb.q1", True
+    "smb.q1",
+    "smb",
+    "rate",
+    Decimal("0.0600"),
+    ("2026-Q1", "SMB", "Basic"),
+    "smb.q1",
+    True,
+    "churn_rate",
 )
 POPULATION = [OVERALL_Q1, SMB_Q1]
 
 
+def _table(columns: tuple[str, ...], *rows: tuple[Any, ...]) -> DisplayedTable:
+    return DisplayedTable(columns, tuple(rows))
+
+
 def _shown(
-    facts: list[Fact], text: str = "", tables: tuple[Any, ...] = ()
+    facts: list[Fact], text: str = "", tables: tuple[DisplayedTable, ...] = ()
 ) -> dict[str, tuple[bool, str, str | None]]:
     return {
         o.fact_id: (o.stated, o.reason, o.source) for o in wc.grade_facts(facts, text, TOL, tables)
@@ -845,74 +864,101 @@ def test_equivalent_period_labels_locate_a_value(period: str) -> None:
     assert _shown([OVERALL_Q1], f"Churn in {period} was 4.8%.")["overall.q1"][0] is True
 
 
+CHURN_COLUMNS = ("quarter_start", "churn_rate")
+
+
 def test_a_table_row_counts_only_when_it_holds_the_whole_expected_row() -> None:
-    assert _shown([OVERALL_Q1], tables=((("2026-01-01", 0.048),),))["overall.q1"] == (
-        True,
-        "all_stated",
-        "table",
-    )
-    for row in (
-        ("2026-01-01", "SMB", "Basic", 0.048),  # another population's row
-        ("2026-04-01", 0.048),  # another period's row
-        ("2026-01-01", 48),  # a count cell, not a rate
-        ("2026-01-01", 0.071),  # the wrong value
+    table = _table(CHURN_COLUMNS, ("2026-01-01", 0.048))
+    assert _shown([OVERALL_Q1], tables=(table,))["overall.q1"] == (True, "all_stated", "table")
+    segment_columns = ("quarter_start", "customer_segment", "plan_tier", "churn_rate")
+    for columns, row in (
+        (segment_columns, ("2026-01-01", "SMB", "Basic", 0.048)),  # another population's row
+        (CHURN_COLUMNS, ("2026-04-01", 0.048)),  # another period's row
+        (CHURN_COLUMNS, ("2026-01-01", 48)),  # a count cell, not a rate
+        (CHURN_COLUMNS, ("2026-01-01", 0.071)),  # the wrong value
     ):
-        assert _shown([OVERALL_Q1], tables=((row,),))["overall.q1"][0] is False, row
-    smb = _shown([SMB_Q1], tables=((("2026-01-01", "SMB", "Basic", 0.06),),))
+        assert _shown([OVERALL_Q1], tables=(_table(columns, row),))["overall.q1"][0] is False
+    smb = _shown([SMB_Q1], tables=(_table(segment_columns, ("2026-01-01", "SMB", "Basic", 0.06)),))
     assert smb["smb.q1"] == (True, "all_stated", "table")
 
 
 RETAIL_ROW = [
     Fact("answer.0", "answer", "label", "West", (), "answer.row"),
-    Fact("answer.1", "answer", "count", Decimal(2), ("West",), "answer.row"),
+    Fact(
+        "answer.1",
+        "answer",
+        "count",
+        Decimal(2),
+        ("West",),
+        "answer.row",
+        metric="escalation_count",
+    ),
 ]
+RETAIL_COLUMNS = ("region", "escalation_count")
 THRESHOLD = Fact("policy.days", "policy", "count", Decimal(10))
 
 
 def test_retail_rows_need_every_cell_and_thresholds_are_never_read_from_tables() -> None:
-    assert _shown(RETAIL_ROW, tables=((("West", 2),),)) == {
+    assert _shown(RETAIL_ROW, tables=(_table(RETAIL_COLUMNS, ("West", 2)),)) == {
         "answer.0": (True, "all_stated", "table"),
         "answer.1": (True, "all_stated", "table"),
     }
     for row in (("West", 3), ("East", 2)):
-        assert not any(stated for stated, _, _ in _shown(RETAIL_ROW, tables=((row,),)).values())
+        shown = _shown(RETAIL_ROW, tables=(_table(RETAIL_COLUMNS, row),))
+        assert not any(stated for stated, _, _ in shown.values())
     # A threshold has no expected row: an unrelated cell holding 10 never counts.
-    assert _shown([THRESHOLD], tables=((("West", 10),),))["policy.days"][0] is False
+    shown = _shown([THRESHOLD], tables=(_table(RETAIL_COLUMNS, ("West", 10)),))
+    assert shown["policy.days"][0] is False
     assert _shown([THRESHOLD], "Escalate at 10 days or more.")["policy.days"][0] is True
 
 
 def test_a_value_in_both_places_is_counted_once_with_its_source() -> None:
-    shown = _shown([OVERALL_Q1], "Churn in 2026-Q1 was 4.8%.", ((("2026-Q1", 0.048),),))
+    shown = _shown(
+        [OVERALL_Q1],
+        "Churn in 2026-Q1 was 4.8%.",
+        (_table(("quarter", "churn_rate"), ("2026-Q1", 0.048)),),
+    )
     assert shown == {"overall.q1": (True, "all_stated", "both")}
 
 
 def test_ambiguous_prose_falls_back_to_a_clear_table_but_a_contradiction_never_does() -> None:
-    fact = Fact("r", "g", "rate", Decimal("0.015"), ("2026-Q1",), "r", True)
+    fact = Fact("r", "g", "rate", Decimal("0.015"), ("2026-Q1",), "r", True, "churn_rate")
+    table = _table(("quarter", "churn_rate"), ("2026-Q1", 0.015))
     assert _shown([fact], "Churn in 2026-Q1 was about 1,5%.") == {
         "r": (False, "ambiguous_value", None)
     }
-    assert _shown([fact], "Churn in 2026-Q1 was about 1,5%.", ((("2026-Q1", 0.015),),)) == {
+    assert _shown([fact], "Churn in 2026-Q1 was about 1,5%.", (table,)) == {
         "r": (True, "all_stated", "table")
     }
     conflicting = "Churn in 2026-Q1 was 1.5%, or 1.7% on the revised basis."
-    assert _shown([fact], conflicting, ((("2026-Q1", 0.015),),)) == {
-        "r": (False, "conflicting_values", None)
-    }
+    assert _shown([fact], conflicting, (table,)) == {"r": (False, "conflicting_values", None)}
 
 
 SYMMETRY_SPEC = CaseSpec(
     "symmetry-case",
     "compared",
-    (*RETAIL_ROW, Fact("answer.2", "answer", "rate", Decimal("0.0392"), ("West",), "answer.row")),
+    (
+        *RETAIL_ROW,
+        Fact(
+            "answer.2",
+            "answer",
+            "rate",
+            Decimal("0.0392"),
+            ("West",),
+            "answer.row",
+            metric="breach_rate",
+        ),
+    ),
 )
+SYMMETRY_ROW = {"region": "West", "escalation_count": 2, "breach_rate": 0.0392}
 
 
 def test_the_same_visible_answer_grades_identically_in_both_arms() -> None:
     prose = "West leads the regions."
-    message = _message(answer=prose, rows=[{"region": "West", "n": 2, "rate": 0.0392}])
+    message = _message(answer=prose, rows=[SYMMETRY_ROW])
     report = _report(prose, facts=[])
     report["query_tables"] = [
-        {"task_id": "t", "columns": ["region", "n", "rate"], "rows": [["West", 2, 0.0392]]}
+        {"task_id": "t", "columns": list(SYMMETRY_ROW), "rows": [list(SYMMETRY_ROW.values())]}
     ]
     evidence = _evidence(prose)
     evidence["report"] = report
@@ -946,7 +992,7 @@ def test_hidden_metadata_raw_evidence_and_structured_facts_are_not_the_visible_a
 
 
 def test_rows_alone_are_a_visible_answer() -> None:
-    message = _message(answer="", rows=[{"region": "West", "n": 2, "rate": 0.0392}])
+    message = _message(answer="", rows=[SYMMETRY_ROW])
     grade = wc.grade_run(SYMMETRY_SPEC, wc.observe_arm_a(message), TOL, repeat=1)
     assert _outcome(grade, "numeric_accuracy") == PASS
 
@@ -1108,3 +1154,253 @@ def test_retail_facts_are_located_by_their_expected_row() -> None:
     assert facts["expected_answer.0"].row == facts["expected_answer.1"].row == "expected_answer.0"
     threshold = next(fact for fact in spec.facts if fact.group == "policy_rule")
     assert threshold.row is None and threshold.context == ()
+
+
+# --- S1d: values tied to their period and population; tables read by their headers --------------
+
+
+def _churn(fact_id: str, value: str, *context: str, metric: str = "churn_rate") -> Fact:
+    kind = "currency" if metric == "mrr_lost" else "rate"
+    return Fact(
+        fact_id, fact_id.split(".")[0], kind, Decimal(value), context, fact_id, True, metric
+    )
+
+
+OVERALL = [_churn("overall.q1", "0.0480", "2026-Q1"), _churn("overall.q2", "0.0710", "2026-Q2")]
+SMB = [
+    _churn("smb.q1", "0.0600", "2026-Q1", "SMB", "Basic"),
+    _churn("smb.q2", "0.1400", "2026-Q2", "SMB", "Basic"),
+]
+APAC_Q2 = _churn("apac.q2", "0.0900", "2026-Q2", "APAC")
+MRR_Q1 = _churn("mrr.q1", "28124.00", "2026-Q1", metric="mrr_lost")
+CHURN = [*OVERALL, *SMB, APAC_Q2, MRR_Q1]
+
+
+def _both_arms(
+    facts: list[Fact], prose: str, table: DisplayedTable | None = None
+) -> dict[str, tuple[bool, str, str | None]]:
+    """Grade the same visible prose and table through both arms' observers; they must agree."""
+    rows = None
+    if table is not None:
+        rows = [dict(zip(table.columns, row, strict=True)) for row in table.rows]
+    message = _message(answer=prose, rows=rows)
+    evidence = _evidence(prose)
+    query_tables = []
+    if table is not None:
+        query_tables = [
+            {"task_id": "t", "columns": list(table.columns), "rows": [list(r) for r in table.rows]}
+        ]
+    evidence["report"] = {
+        "sections": [{"name": "executive_summary", "sentences": [_sentence(prose)]}],
+        "citations": [],
+        "facts": [],
+        "tasks": [],
+        "query_tables": query_tables,
+    }
+    graded = []
+    for view in (wc.observe_arm_a(message), wc.observe_arm_b(_investigation(), evidence)):
+        outcomes = wc.grade_facts(facts, view.answer_text or "", TOL, view.tables)
+        graded.append({o.fact_id: (o.stated, o.reason, o.source) for o in outcomes})
+    assert graded[0] == graded[1]
+    return graded[0]
+
+
+STATED_IN_TEXT = (True, "all_stated", "text")
+STATED_IN_TABLE = (True, "all_stated", "table")
+CONFLICTING = (False, "conflicting_values", None)
+AMBIGUOUS = (False, "ambiguous_value", None)
+NOT_STATED = (False, "value_not_stated", None)
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "Churn was 4.8% in Q1 2026 and 7.1% in Q2 2026.",
+        "In 2026-Q1 churn was 4.8%; in 2026-Q2 it was 7.1%.",
+        "2026-01-01: 4.8%, 2026-04-01: 7.1%.",
+        "Q1 2026 churn was 4.8% and Q2 2026 churn was 7.1%.",
+        "From 2026-Q1 to 2026-Q2, churn rose from 4.8% to 7.1%.",
+        "Churn rose from 4.8% to 7.1% between 2026-Q1 and 2026-Q2.",
+        "Churn rose to 7.1% in Q2 2026 from 4.8% in Q1 2026.",
+    ],
+)
+def test_correct_period_value_pairs_are_credited_in_both_arms(prose: str) -> None:
+    graded = _both_arms(OVERALL, prose)
+    assert graded == {"overall.q1": STATED_IN_TEXT, "overall.q2": STATED_IN_TEXT}
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "Churn was 7.1% in Q1 2026 and 4.8% in Q2 2026.",
+        "In 2026-Q1 churn was 7.1%; in 2026-Q2 it was 4.8%.",
+        "2026-01-01: 7.1%, 2026-04-01: 4.8%.",
+        "From 2026-Q1 to 2026-Q2, churn fell from 7.1% to 4.8%.",
+    ],
+)
+def test_swapped_period_value_pairs_are_contradictions_in_both_arms(prose: str) -> None:
+    assert _both_arms(OVERALL, prose) == {"overall.q1": CONFLICTING, "overall.q2": CONFLICTING}
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "In Q1 2026 and Q2 2026, churn was 4.8% and 7.1%.",
+        "Churn was 4.8% and 7.1% in Q1 2026 and Q2 2026 respectively.",
+        "Churn moved between 2026-Q1 and 2026-Q2; it was 4.8% and later 7.1%.",
+        "From 2026-Q1 to 2026-Q2 and from 2026-Q2 to 2026-Q3, churn went from 4.8% to 7.1%.",
+    ],
+)
+def test_unclear_associations_are_ambiguous_and_withheld_in_both_arms(prose: str) -> None:
+    assert _both_arms(OVERALL, prose) == {"overall.q1": AMBIGUOUS, "overall.q2": AMBIGUOUS}
+
+
+def test_several_values_in_one_sentence_are_each_tied_to_their_own_context() -> None:
+    prose = (
+        "SMB Basic churn was 6.0% in Q1 2026 and 14.0% in Q2 2026, while overall churn was "
+        "4.8% in Q1 2026 and 7.1% in Q2 2026."
+    )
+    graded = _both_arms(CHURN, prose)
+    for fact_id in ("smb.q1", "smb.q2", "overall.q1", "overall.q2"):
+        assert graded[fact_id] == STATED_IN_TEXT, fact_id
+    assert graded["apac.q2"] == NOT_STATED
+
+
+def test_a_single_period_and_population_sentence_keeps_its_credit() -> None:
+    graded = _both_arms(CHURN, "In 2026-Q2 SMB Basic churn reached 14.0%, up sharply.")
+    assert graded["smb.q2"] == STATED_IN_TEXT
+    # The product's own measurement sentence: each value written straight after its period.
+    measured = (
+        "Measurement f1: rate of churned where customer_segment = SMB, plan_tier = Basic: "
+        "2026-01-01 0.0600 and 2026-04-01 0.1400, a difference of +0.0800 (+8.0 percentage "
+        "points, +133.3 percent relative to 2026-01-01); observed an increase."
+    )
+    graded = _both_arms(CHURN, measured)
+    assert (graded["smb.q1"], graded["smb.q2"]) == (STATED_IN_TEXT, STATED_IN_TEXT)
+
+
+def test_population_value_associations_are_credited_or_contradicted_in_both_arms() -> None:
+    correct = _both_arms(CHURN, "In 2026-Q2, APAC churn was 9.0% and SMB Basic churn was 14.0%.")
+    assert (correct["apac.q2"], correct["smb.q2"]) == (STATED_IN_TEXT, STATED_IN_TEXT)
+    swapped = _both_arms(CHURN, "In 2026-Q2, APAC churn was 14.0% and SMB Basic churn was 9.0%.")
+    assert (swapped["apac.q2"], swapped["smb.q2"]) == (CONFLICTING, CONFLICTING)
+    listed = _both_arms(CHURN, "In 2026-Q2, APAC and SMB Basic churn were 9.0% and 14.0%.")
+    assert (listed["apac.q2"], listed["smb.q2"]) == (AMBIGUOUS, AMBIGUOUS)
+    # A population's rate that equals the overall rate is not the overall rate.
+    assert _both_arms(CHURN, "In 2026-Q1 SMB Basic churn was 4.8%.")["overall.q1"] == NOT_STATED
+
+
+def test_weak_or_unrelated_ties_never_make_a_contradiction() -> None:
+    # The clause's only population is written after the value: the value is not credited to the
+    # overall rate (as in S1c), and it is not a contradiction of the SMB Basic rate either.
+    graded = _both_arms(CHURN, "In 2026-Q1 churn was 4.8%, 1.2 points below SMB Basic.")
+    assert (graded["overall.q1"], graded["smb.q1"]) == (NOT_STATED, NOT_STATED)
+    # The same population written before the value ties it strongly: that is a contradiction.
+    strong = _both_arms(CHURN, "In 2026-Q1 SMB Basic churn was 4.8%.")
+    assert strong["smb.q1"] == CONFLICTING
+    # Another measure's value in the same period is not another expected value: no contradiction.
+    other = _both_arms(OVERALL, "In 2026-Q1 churn was 4.8% and margin was 31.0%.")
+    assert other["overall.q1"] == STATED_IN_TEXT
+
+
+SEGMENT_COLUMNS = ("quarter_start", "customer_segment", "plan_tier", "churn_rate")
+
+
+def test_table_values_count_under_headers_naming_their_measure_in_both_arms() -> None:
+    table = _table(
+        SEGMENT_COLUMNS, ("2026-01-01", "SMB", "Basic", 0.06), ("2026-04-01", "SMB", "Basic", 0.14)
+    )
+    graded = _both_arms(CHURN, "", table)
+    assert (graded["smb.q1"], graded["smb.q2"]) == (STATED_IN_TABLE, STATED_IN_TABLE)
+    # A short fixed alias list is accepted after normalising case and spacing.
+    aliased = _both_arms(CHURN, "", _table(("Quarter", "Churn Rate"), ("2026-Q1", 0.048)))
+    assert aliased["overall.q1"] == STATED_IN_TABLE
+
+
+def test_swapped_metric_columns_contradict_rather_than_credit_in_both_arms() -> None:
+    facts = [
+        Fact("r.0", "r", "label", "Electronics", (), "r"),
+        Fact("r.1", "r", "rate", Decimal("0.0392"), ("Electronics",), "r", metric="breach_rate"),
+        Fact(
+            "r.2",
+            "r",
+            "rate",
+            Decimal("0.0187"),
+            ("Electronics",),
+            "r",
+            metric="dataset_breach_rate",
+        ),
+    ]
+    columns = ("category", "breach_rate", "dataset_breach_rate")
+    swapped = _both_arms(facts, "", _table(columns, ("Electronics", 0.0187, 0.0392)))
+    assert (swapped["r.1"], swapped["r.2"]) == (CONFLICTING, CONFLICTING)
+    assert swapped["r.0"] == NOT_STATED  # the row as a whole is not shown
+    correct = _both_arms(facts, "", _table(columns, ("Electronics", 0.0392, 0.0187)))
+    assert all(state == STATED_IN_TABLE for state in correct.values())
+
+
+def test_unrelated_columns_never_count_even_holding_the_expected_number() -> None:
+    table = _table(("quarter", "denominator", "missing_rate"), ("2026-Q1", 2000, 0.048))
+    assert _both_arms(CHURN, "", table)["overall.q1"] == NOT_STATED
+
+
+@pytest.mark.parametrize("header", ["rate", "total", "value", "metric_1"])
+def test_unknown_headers_are_ambiguous_and_withheld_in_both_arms(header: str) -> None:
+    table = _table(("quarter", header), ("2026-Q1", 0.048))
+    assert _both_arms(CHURN, "", table)["overall.q1"] == AMBIGUOUS
+
+
+def test_october_revenue_under_a_bare_total_header_is_ambiguous_but_revenue_counts() -> None:
+    facts = [
+        Fact("p.0", "p", "label", "2025-10", (), "p"),
+        Fact(
+            "p.1",
+            "p",
+            "currency",
+            Decimal("113432.96"),
+            ("2025-10",),
+            "p",
+            metric="total_revenue",
+        ),
+    ]
+    total = _both_arms(facts, "", _table(("month", "total"), ("2025-10", 113432.96)))
+    assert total == {"p.0": AMBIGUOUS, "p.1": AMBIGUOUS}
+    revenue = _both_arms(facts, "", _table(("month", "revenue"), ("2025-10", 113432.96)))
+    assert all(state == STATED_IN_TABLE for state in revenue.values())
+    # The product's own prose for the same row is tied by its from-to pair.
+    prose = "From 2025-10 to 2025-11, total decreased from 113,432.96 to 112,727.46."
+    assert _both_arms(facts, prose)["p.1"] == STATED_IN_TEXT
+
+
+def test_a_fact_repeated_in_text_and_table_counts_once_as_both() -> None:
+    table = _table(SEGMENT_COLUMNS, ("2026-04-01", "SMB", "Basic", 0.14))
+    graded = _both_arms(CHURN, "SMB Basic churn was 14.0% in Q2 2026.", table)
+    assert graded["smb.q2"] == (True, "all_stated", "both")
+
+
+def test_a_contradiction_in_one_source_is_never_outweighed_by_the_other() -> None:
+    correct_table = _table(SEGMENT_COLUMNS, ("2026-04-01", "SMB", "Basic", 0.14))
+    swapped_prose = "In 2026-Q2, APAC churn was 14.0% and SMB Basic churn was 9.0%."
+    assert _both_arms(CHURN, swapped_prose, correct_table)["smb.q2"] == CONFLICTING
+    wrong_table = _table(SEGMENT_COLUMNS, ("2026-04-01", "SMB", "Basic", 0.09))
+    graded = _both_arms(CHURN, "SMB Basic churn was 14.0% in Q2 2026.", wrong_table)
+    assert graded["smb.q2"] == CONFLICTING
+
+
+def test_measures_and_column_meanings_are_evaluator_defined_and_refused_when_missing() -> None:
+    with pytest.raises(ComparisonError):
+        Fact("x", "g", "rate", Decimal("0.1"), metric="guessed_measure")
+    with pytest.raises(ComparisonError):
+        Fact("x", "g", "label", "West", metric="escalation_count")
+    cases = json.loads(RETAIL_PATH.read_text(encoding="utf-8"))["cases"]
+    case = next(c for c in cases if c["id"] == "investigation-top-region-fulfillment")
+    with pytest.raises(ComparisonError, match="column meanings"):
+        wc.retail_case_spec({**case, "id": "unlisted-case"})
+    spec = wc.retail_case_spec(case)
+    values = [f for f in spec.facts if f.group == "expected_answer" and f.kind != "label"]
+    assert [fact.metric for fact in values] == ["escalation_count"]
+    churn = _churn_specs()["churn-full-investigation"]
+    assert {fact.metric for fact in churn.facts} == {"churn_rate", "mrr_lost"}
+    headers = [header for group in wc.METRIC_HEADERS.values() for header in group]
+    assert len(headers) == len(set(headers))
+    assert not set(headers) & wc.KNOWN_OTHER_HEADERS
