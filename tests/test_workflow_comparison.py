@@ -530,7 +530,7 @@ def test_both_arms_are_graded_equally_on_the_same_user_visible_answer() -> None:
 
 
 def test_the_four_outcomes_are_distinct_and_explicit() -> None:
-    no_answer = _grade(wc.observe_arm_a(_message(answer="")))
+    no_answer = _grade(wc.observe_arm_a(_message(answer="", rows=None, sql=None)))
     assert _outcome(no_answer, "task_completion") == FAIL
     assert _outcome(no_answer, "numeric_accuracy") == NOT_OBSERVABLE
     assert _outcome(no_answer, "causal_language") == NOT_OBSERVABLE
@@ -605,10 +605,10 @@ def test_grades_are_content_free_and_hold_no_expected_or_answer_values() -> None
 
 
 def _grades() -> list[dict[str, Any]]:
-    """Five repeats per arm; arm A's fifth run returns no answer text."""
+    """Five repeats per arm; arm A's fifth run shows no answer at all (no prose, no rows)."""
     grades = []
     for repeat in range(1, 6):
-        message = _message(answer="") if repeat == 5 else _message()
+        message = _message(answer="", rows=None, sql=None) if repeat == 5 else _message()
         grades.append(_grade(wc.observe_arm_a(message), repeat=repeat))
         grades.append(_grade(wc.observe_arm_b(_investigation(), _evidence()), repeat=repeat))
     probe = _spec(
@@ -805,3 +805,306 @@ def test_routing_records_are_identifiers_only_and_rendered_in_the_summary() -> N
 def test_malformed_routing_records_are_refused(change: dict[str, Any]) -> None:
     with pytest.raises(ComparisonError):
         _document(routing=[{**ROUTING_ENTRY, **change}])
+
+
+# --- S1c: the complete user-visible answer, located by context ---------------------------------
+
+OVERALL_Q1 = Fact(
+    "overall.q1", "overall", "rate", Decimal("0.0480"), ("2026-Q1",), "overall.q1", True
+)
+SMB_Q1 = Fact(
+    "smb.q1", "smb", "rate", Decimal("0.0600"), ("2026-Q1", "SMB", "Basic"), "smb.q1", True
+)
+POPULATION = [OVERALL_Q1, SMB_Q1]
+
+
+def _shown(
+    facts: list[Fact], text: str = "", tables: tuple[Any, ...] = ()
+) -> dict[str, tuple[bool, str, str | None]]:
+    return {
+        o.fact_id: (o.stated, o.reason, o.source) for o in wc.grade_facts(facts, text, TOL, tables)
+    }
+
+
+def test_a_population_value_counts_only_in_a_sentence_naming_its_population() -> None:
+    located = _shown(
+        POPULATION, "Overall churn in Q1 2026 was 4.8%. SMB Basic churn in 2026-01-01 was 6.0%."
+    )
+    assert located == {
+        "overall.q1": (True, "all_stated", "text"),
+        "smb.q1": (True, "all_stated", "text"),
+    }
+    # The overall value in a sentence about SMB Basic is not the overall rate.
+    assert _shown(POPULATION, "In 2026-Q1 SMB Basic churn was 4.8%.")["overall.q1"][0] is False
+    # No period named: the value cannot be placed.
+    assert _shown(POPULATION, "Overall churn was 4.8%.")["overall.q1"][0] is False
+
+
+@pytest.mark.parametrize("period", ["2026-Q1", "2026-01-01", "Q1 2026"])
+def test_equivalent_period_labels_locate_a_value(period: str) -> None:
+    assert _shown([OVERALL_Q1], f"Churn in {period} was 4.8%.")["overall.q1"][0] is True
+
+
+def test_a_table_row_counts_only_when_it_holds_the_whole_expected_row() -> None:
+    assert _shown([OVERALL_Q1], tables=((("2026-01-01", 0.048),),))["overall.q1"] == (
+        True,
+        "all_stated",
+        "table",
+    )
+    for row in (
+        ("2026-01-01", "SMB", "Basic", 0.048),  # another population's row
+        ("2026-04-01", 0.048),  # another period's row
+        ("2026-01-01", 48),  # a count cell, not a rate
+        ("2026-01-01", 0.071),  # the wrong value
+    ):
+        assert _shown([OVERALL_Q1], tables=((row,),))["overall.q1"][0] is False, row
+    smb = _shown([SMB_Q1], tables=((("2026-01-01", "SMB", "Basic", 0.06),),))
+    assert smb["smb.q1"] == (True, "all_stated", "table")
+
+
+RETAIL_ROW = [
+    Fact("answer.0", "answer", "label", "West", (), "answer.row"),
+    Fact("answer.1", "answer", "count", Decimal(2), ("West",), "answer.row"),
+]
+THRESHOLD = Fact("policy.days", "policy", "count", Decimal(10))
+
+
+def test_retail_rows_need_every_cell_and_thresholds_are_never_read_from_tables() -> None:
+    assert _shown(RETAIL_ROW, tables=((("West", 2),),)) == {
+        "answer.0": (True, "all_stated", "table"),
+        "answer.1": (True, "all_stated", "table"),
+    }
+    for row in (("West", 3), ("East", 2)):
+        assert not any(stated for stated, _, _ in _shown(RETAIL_ROW, tables=((row,),)).values())
+    # A threshold has no expected row: an unrelated cell holding 10 never counts.
+    assert _shown([THRESHOLD], tables=((("West", 10),),))["policy.days"][0] is False
+    assert _shown([THRESHOLD], "Escalate at 10 days or more.")["policy.days"][0] is True
+
+
+def test_a_value_in_both_places_is_counted_once_with_its_source() -> None:
+    shown = _shown([OVERALL_Q1], "Churn in 2026-Q1 was 4.8%.", ((("2026-Q1", 0.048),),))
+    assert shown == {"overall.q1": (True, "all_stated", "both")}
+
+
+def test_ambiguous_prose_falls_back_to_a_clear_table_but_a_contradiction_never_does() -> None:
+    fact = Fact("r", "g", "rate", Decimal("0.015"), ("2026-Q1",), "r", True)
+    assert _shown([fact], "Churn in 2026-Q1 was about 1,5%.") == {
+        "r": (False, "ambiguous_value", None)
+    }
+    assert _shown([fact], "Churn in 2026-Q1 was about 1,5%.", ((("2026-Q1", 0.015),),)) == {
+        "r": (True, "all_stated", "table")
+    }
+    conflicting = "Churn in 2026-Q1 was 1.5%, or 1.7% on the revised basis."
+    assert _shown([fact], conflicting, ((("2026-Q1", 0.015),),)) == {
+        "r": (False, "conflicting_values", None)
+    }
+
+
+SYMMETRY_SPEC = CaseSpec(
+    "symmetry-case",
+    "compared",
+    (*RETAIL_ROW, Fact("answer.2", "answer", "rate", Decimal("0.0392"), ("West",), "answer.row")),
+)
+
+
+def test_the_same_visible_answer_grades_identically_in_both_arms() -> None:
+    prose = "West leads the regions."
+    message = _message(answer=prose, rows=[{"region": "West", "n": 2, "rate": 0.0392}])
+    report = _report(prose, facts=[])
+    report["query_tables"] = [
+        {"task_id": "t", "columns": ["region", "n", "rate"], "rows": [["West", 2, 0.0392]]}
+    ]
+    evidence = _evidence(prose)
+    evidence["report"] = report
+    a = wc.grade_run(SYMMETRY_SPEC, wc.observe_arm_a(message), TOL, repeat=1)
+    b = wc.grade_run(SYMMETRY_SPEC, wc.observe_arm_b(_investigation(), evidence), TOL, repeat=1)
+    for name in ("task_completion", "subquestion_completeness", "numeric_accuracy"):
+        assert a["dimensions"][name] == b["dimensions"][name], name
+    assert a["counts"] == b["counts"]
+    assert a["counts"]["stated_in_both"] == 1  # West: in the prose and in the row
+    assert a["counts"]["stated_in_table_only"] == 2
+
+
+def test_hidden_metadata_raw_evidence_and_structured_facts_are_not_the_visible_answer() -> None:
+    message = _message(
+        answer="No figures.",
+        rows=None,
+        sql="SELECT 'West', 2, 0.0392",
+        provenance={"invalid_citation_count": 0, "note": "West 2 0.0392"},
+    )
+    a = wc.grade_run(SYMMETRY_SPEC, wc.observe_arm_a(message), TOL, repeat=1)
+    assert a["counts"]["stated_correctly"] == 0
+    evidence = _evidence("No figures.", rows=[["West", 2, 0.0392]])  # raw evidence rows only
+    evidence["report"]["facts"] = [
+        {
+            "baseline": {"numerator": 2, "denominator": 51, "display": "0.0392"},
+            "comparison": {"numerator": 2, "denominator": 51, "display": "0.0392"},
+        }
+    ]
+    b = wc.grade_run(SYMMETRY_SPEC, wc.observe_arm_b(_investigation(), evidence), TOL, repeat=1)
+    assert b["counts"]["stated_correctly"] == 0
+
+
+def test_rows_alone_are_a_visible_answer() -> None:
+    message = _message(answer="", rows=[{"region": "West", "n": 2, "rate": 0.0392}])
+    grade = wc.grade_run(SYMMETRY_SPEC, wc.observe_arm_a(message), TOL, repeat=1)
+    assert _outcome(grade, "numeric_accuracy") == PASS
+
+
+# --- S1c: completion follows the product's own status --------------------------------------------
+
+
+def test_arm_a_is_partial_when_its_required_query_did_not_run() -> None:
+    fell_back = _message(
+        provenance={"invalid_citation_count": 0, "hybrid_fell_back_to_documents": True}
+    )
+    grade = _grade(wc.observe_arm_a(fell_back))
+    assert grade["failure_mode"] == "incomplete_execution"
+    assert grade["dimensions"]["task_completion"] == {
+        "outcome": FAIL,
+        "reason": "partial_execution",
+    }
+    # The same fallback is harmless when the case needs no query result.
+    optional = _grade(wc.observe_arm_a(fell_back), _spec(references=()))
+    assert optional["dimensions"]["task_completion"]["outcome"] == PASS
+    assert optional["failure_mode"] == "none"
+
+
+@pytest.mark.parametrize(
+    ("status", "outcome"),
+    [
+        ("failed", FAIL),
+        ("refused", FAIL),
+        ("cancelled", FAIL),
+        ("skipped", PASS),
+        ("succeeded", PASS),
+    ],
+)
+def test_arm_b_is_partial_when_a_query_task_did_not_run(status: str, outcome: str) -> None:
+    evidence = _evidence()
+    evidence["report"]["tasks"] = [{"task_id": "t1", "kind": "sql_analysis", "status": status}]
+    grade = _grade(wc.observe_arm_b(_investigation(), evidence))
+    assert grade["dimensions"]["task_completion"]["outcome"] == outcome
+    document_only = _evidence()
+    document_only["report"]["tasks"] = [
+        {"task_id": "t2", "kind": "document_research", "status": status}
+    ]
+    assert (
+        _outcome(_grade(wc.observe_arm_b(_investigation(), document_only)), "task_completion")
+        == PASS
+    )
+
+
+def test_completion_outcomes_cover_complete_partial_not_routed_and_unobservable() -> None:
+    assert _outcome(_grade(wc.observe_arm_a(_message())), "task_completion") == PASS
+    assert (
+        _outcome(
+            _grade(wc.observe_arm_b(_investigation("completed_partial"), _evidence())),
+            "task_completion",
+        )
+        == FAIL
+    )
+    not_routed = _grade(wc.not_routed_arm_b())
+    assert not_routed["dimensions"]["task_completion"]["reason"] == "not_answered"
+    silent = _grade(wc.observe_arm_a(None))
+    assert silent["failure_mode"] == "no_response"
+    assert _outcome(silent, "numeric_accuracy") == NOT_OBSERVABLE
+
+
+def test_unknown_not_executed_signals_are_refused() -> None:
+    with pytest.raises(ComparisonError):
+        wc.RunView("A", "none", "x", None, None, not_executed=("something_else",))
+
+
+# --- S1c: reporting views -----------------------------------------------------------------------
+
+
+def _routed_grades() -> list[dict[str, Any]]:
+    """Case "routed-case" reaches arm B in both repeats; "declined-case" never does."""
+    routed, declined = _spec(case_id="routed-case"), _spec(case_id="declined-case")
+    grades = []
+    for repeat in (1, 2):
+        for spec in (routed, declined):
+            grades.append(wc.grade_run(spec, wc.observe_arm_a(_message()), TOL, repeat=repeat))
+        grades.append(
+            wc.grade_run(
+                routed, wc.observe_arm_b(_investigation(), _evidence()), TOL, repeat=repeat
+            )
+        )
+        grades.append(wc.grade_run(declined, wc.not_routed_arm_b(), TOL, repeat=repeat))
+    return grades
+
+
+def test_routing_reach_counts_reached_runs_per_case_and_overall() -> None:
+    reach = wc.routing_reach(_routed_grades())
+    assert reach["per_case"] == {
+        "declined-case": {"reached": 0, "runs": 2},
+        "routed-case": {"reached": 2, "runs": 2},
+    }
+    assert (reach["reached"], reach["runs"], reach["cases_reached"], reach["cases"]) == (2, 4, 1, 2)
+    assert reach["consistently_routed_cases"] == ["routed-case"]
+
+
+def test_the_conditional_view_uses_the_same_gate_selected_cases_for_both_arms() -> None:
+    document = wc.build_document(
+        _routed_grades(), evidence_kind="synthetic", provenance=PROVENANCE, planned_repeats=2
+    )
+    assert document["primary_result"] == "compared"
+    assert document["compared"]["cases"] == ["declined-case", "routed-case"]
+    conditional = document["conditional"]
+    assert conditional["cases"] == ["routed-case"]
+    assert conditional["selected_by"] == "routing_gate" and conditional["representative"] is False
+    for arm in ("A", "B"):
+        assert conditional["arms"][arm]["runs"] == 2
+        assert list(conditional["arms"][arm]["per_case"]) == ["routed-case"]
+    end_to_end = document["compared"]["arms"]["B"]["dimensions"]["task_completion"]
+    assert (end_to_end["pass"], end_to_end["applicable"]) == (2, 4)
+    conditional_b = conditional["arms"]["B"]["dimensions"]["task_completion"]
+    assert (conditional_b["pass"], conditional_b["applicable"]) == (2, 2)
+
+
+def test_the_summary_separates_primary_reach_and_conditional_with_per_case_denominators() -> None:
+    document = wc.build_document(
+        _routed_grades(), evidence_kind="synthetic", provenance=PROVENANCE, planned_repeats=2
+    )
+    summary = wc.render_summary(document)
+    primary = summary.index("## Primary result")
+    reach = summary.index("### Routing reach (arm B)")
+    conditional = summary.index("## Conditional comparison")
+    assert primary < reach < conditional
+    assert "not representative" in summary and wc.CONDITIONAL_DEFINITION in summary
+    assert "| Denominator |" in summary and "### Per case" in summary
+    assert "| **all compared cases** | **2** | **4** |" in summary
+    assert wc.CONFOUND_HEADLINE in summary
+
+
+# --- S1c: expectation context from the evaluator-only files -------------------------------------
+
+
+def test_churn_facts_carry_their_period_and_population() -> None:
+    spec = _churn_specs()["churn-full-investigation"]
+    facts = {fact.fact_id: fact for fact in spec.facts}
+    assert facts["smb_basic.2026-Q1.rate"].context == ("2026-Q1", "SMB", "Basic")
+    assert facts["overall.2026-Q2.rate"].context == ("2026-Q2",)
+    assert all(fact.exclusive and fact.row == fact.fact_id for fact in spec.facts)
+    with pytest.raises(ComparisonError, match="population"):
+        wc.churn_case_spec(
+            {
+                "case_expectations": {"x": {"required_fact_paths": ["mystery"]}},
+                "facts": {"mystery": "1"},
+            },
+            {"id": "x"},
+        )
+
+
+def test_retail_facts_are_located_by_their_expected_row() -> None:
+    cases = json.loads(RETAIL_PATH.read_text(encoding="utf-8"))["cases"]
+    spec = wc.retail_case_spec(
+        next(c for c in cases if c["id"] == "investigation-top-region-fulfillment")
+    )
+    facts = {fact.fact_id: fact for fact in spec.facts}
+    assert facts["expected_answer.0"].kind == "label" and facts["expected_answer.0"].context == ()
+    assert facts["expected_answer.1"].context == ("West",)
+    assert facts["expected_answer.0"].row == facts["expected_answer.1"].row == "expected_answer.0"
+    threshold = next(fact for fact in spec.facts if fact.group == "policy_rule")
+    assert threshold.row is None and threshold.context == ()

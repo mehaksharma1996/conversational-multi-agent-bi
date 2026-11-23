@@ -91,6 +91,8 @@ FAILURE_MODES: Final = (
     "expired",
     "not_terminal",
     "no_response",
+    # The product reported that a query step this case needs did not run (S1c).
+    "incomplete_execution",
     # Arm B only: production routing did not propose an investigation for the question, so the
     # investigation workflow never ran. Never bypassed and never rephrased (EVAL-2 S1b decision).
     "not_routed",
@@ -101,6 +103,7 @@ REASONS: Final = frozenset(
     {
         "answered",
         "not_answered",
+        "partial_execution",
         "no_answer_text",
         "all_stated",
         "value_not_stated",
@@ -174,6 +177,34 @@ ROUTING_DEFINITION: Final = (
     "fails, and every other dimension is not observable (or not applicable where the case defines "
     "nothing to grade), because the investigation never ran."
 )
+VISIBLE_ANSWER_DEFINITION: Final = (
+    "Both arms are graded on their complete user-visible answer: the displayed prose and the "
+    "displayed table cells (arm A: the message and its rows; arm B: the report sentences and "
+    "its query tables), with the same rules. A value counts in prose only in a sentence naming "
+    "its period, population, and row labels, and in a table only when one row holds its whole "
+    "expected row. A value with no expected row is never credited from a table cell. A value "
+    "shown in both places counts once; a contradiction in the prose is never outweighed."
+)
+COMPLETION_DEFINITION: Final = (
+    "A run is complete when it shows an answer and the product reports no unexecuted step the "
+    "case needs. When the product's own status says a required query step did not run (arm A: "
+    "the hybrid query fell back to documents; arm B: a query task failed, was refused, or was "
+    "cancelled), completion fails as partial execution. A fallback in a capability the case does "
+    "not need does not count against it."
+)
+PRIMARY_DEFINITION: Final = (
+    "The end-to-end comparison over every approved compared case is the primary result. The "
+    "conditional comparison is a separate, secondary view and is never pooled with it."
+)
+REACH_DEFINITION: Final = (
+    "Routing reach counts the arm B runs in which production routing proposed an investigation, "
+    "per case and overall."
+)
+CONDITIONAL_DEFINITION: Final = (
+    "Conditional comparison: both arms restricted to the same cases, those arm B reached in every "
+    "run. The routing gate selected this subset, so it is not representative of the approved "
+    "case set, and its rates must not be read as the comparison."
+)
 RATE_DEFINITION: Final = (
     "PASS / (PASS + FAIL); NOT_APPLICABLE and NOT_OBSERVABLE are reported, not counted."
 )
@@ -242,12 +273,23 @@ FACT_KINDS: Final = ("rate", "currency", "count", "label")
 
 @dataclass(frozen=True)
 class Fact:
-    """One expected value. ``expected`` is evaluator-only and never serialized or printed."""
+    """One expected value. ``expected`` is evaluator-only and never serialized or printed.
+
+    ``context`` holds the labels that locate the value (a period, a segment, the other labels of
+    its expected row): text credit needs a sentence naming every one, table credit a displayed row
+    holding every one. ``row`` names the expected row the value belongs to; a fact with no row
+    (a policy threshold) can only be credited from prose, never from an arbitrary table cell.
+    ``exclusive`` marks a population-specific measurement: a sentence or row that names a
+    different population of the same case does not count for it.
+    """
 
     fact_id: str
     group: str
     kind: str
     expected: Decimal | str = field(repr=False)
+    context: tuple[str, ...] = field(repr=False, default=())
+    row: str | None = None
+    exclusive: bool = False
 
     def __post_init__(self) -> None:
         if self.kind not in FACT_KINDS:
@@ -283,40 +325,89 @@ class CaseSpec:
         return tuple(dict.fromkeys(fact.group for fact in self.facts))
 
 
-def _leaf_fact(fact_id: str, group: str, value: Any) -> Fact:
+def _leaf_fact(
+    fact_id: str,
+    group: str,
+    value: Any,
+    *,
+    context: tuple[str, ...] = (),
+    row: str | None = None,
+    exclusive: bool = False,
+) -> Fact:
+    def fact(kind: str, expected: Decimal | str) -> Fact:
+        return Fact(fact_id, group, kind, expected, context, row, exclusive)
+
     if isinstance(value, bool):
         raise ComparisonError("A boolean is not an expected value.")
     if isinstance(value, int):
-        return Fact(fact_id, group, "count", Decimal(value))
+        return fact("count", Decimal(value))
     number = _decimal(value)
     if number is None:
         if isinstance(value, str) and value.strip():
-            return Fact(fact_id, group, "label", value)
+            return fact("label", value)
         raise ComparisonError("An expected value must be a number or non-empty text.")
     text = value if isinstance(value, str) else repr(value)
     has_fraction = "." in text
     if has_fraction and abs(number) < 1:
-        return Fact(fact_id, group, "rate", number)
+        return fact("rate", number)
     if has_fraction:
-        return Fact(fact_id, group, "currency", number)
-    return Fact(fact_id, group, "count", number)
+        return fact("currency", number)
+    return fact("count", number)
+
+
+# The population each oracle fact path measures: the labels a sentence or a table row must name for
+# a value to count as this fact (evaluator-side knowledge of the oracle's fact paths). A path that
+# is not listed is refused rather than graded without context.
+CHURN_POPULATION_LABELS: Final[dict[str, tuple[str, ...]]] = {
+    "overall": (),
+    "smb_basic": ("SMB", "Basic"),
+    "apac": ("APAC",),
+    "enterprise": ("Enterprise",),
+    "mrr_lost": (),
+    "smb_basic_incremental_churn_share": ("SMB", "Basic"),
+}
 
 
 def _oracle_facts(path: str, node: Any) -> list[Fact]:
     """Primary values under one oracle fact path: each period's rate, or a scalar per period."""
+    if path not in CHURN_POPULATION_LABELS:
+        raise ComparisonError("An oracle fact path has no defined population.")
+    labels = CHURN_POPULATION_LABELS[path]
     if not isinstance(node, Mapping):
-        return [_leaf_fact(path, path, node)]
+        return [_leaf_fact(path, path, node, context=labels, row=path, exclusive=True)]
     facts: list[Fact] = []
-    for key, value in node.items():
-        fact_id = f"{path}.{key}"
+    for period, value in node.items():
+        fact_id = f"{path}.{period}"
+        located: dict[str, Any] = {
+            "context": (str(period), *labels),
+            "exclusive": True,
+        }
         if isinstance(value, Mapping):
             if "rate" not in value:
                 raise ComparisonError("A grouped oracle fact must carry its rate.")
-            facts.append(_leaf_fact(f"{fact_id}.rate", path, value["rate"]))
+            facts.append(
+                _leaf_fact(f"{fact_id}.rate", path, value["rate"], row=f"{fact_id}.rate", **located)
+            )
         else:
-            facts.append(_leaf_fact(fact_id, path, value))
+            facts.append(_leaf_fact(fact_id, path, value, row=fact_id, **located))
     if not facts:
         raise ComparisonError("An oracle fact path holds no values.")
+    return facts
+
+
+def _is_label(value: Any) -> bool:
+    return isinstance(value, str) and _decimal(value) is None
+
+
+def _row_facts(group: str, row_id: str, row: Sequence[Any], ids: Sequence[str]) -> list[Fact]:
+    """One expected row: each cell is a fact located by the row's other labels."""
+    labels = [str(cell) for cell in row if _is_label(cell)]
+    facts = []
+    for fact_id, cell in zip(ids, row, strict=True):
+        others = list(labels)
+        if _is_label(cell):
+            others.remove(str(cell))
+        facts.append(_leaf_fact(fact_id, group, cell, context=tuple(others), row=row_id))
     return facts
 
 
@@ -371,18 +462,27 @@ def retail_case_spec(case: Mapping[str, Any]) -> CaseSpec:
     case_id = str(case.get("id", ""))
     facts: list[Fact] = []
     references: list[tuple[tuple[Any, ...], ...]] = []
-    for index, cell in enumerate(case.get("expected_cells", [])):
-        facts.append(_leaf_fact(f"expected_answer.{index}", "expected_answer", cell))
     if case.get("expected_rows"):
+        answer_rows: list[Any] = list(case["expected_rows"])
         references.append(_rows(case["expected_rows"]))
+    else:
+        answer_rows = [case["expected_cells"]] if case.get("expected_cells") else []
+    for row_index, row in enumerate(answer_rows):
+        row_id = f"expected_answer.{row_index}"
+        ids = [
+            f"expected_answer.{cell}" if len(answer_rows) == 1 else f"{row_id}.{cell}"
+            for cell in range(len(row))
+        ]
+        facts.extend(_row_facts("expected_answer", row_id, row, ids))
     policy_rules = case.get("policy_rules") or {}
     for name, value in policy_rules.items():
+        # A documented threshold has no row: it counts only when the prose states it.
         facts.append(_leaf_fact(f"policy_rule.{name}", "policy_rule", value))
     for descriptive in case.get("descriptive_facts", []):
         group = f"descriptive_fact.{descriptive.get('id', '')}"
         for row_index, row in enumerate(descriptive.get("expected_rows", [])):
-            for cell_index, cell in enumerate(row):
-                facts.append(_leaf_fact(f"{group}.{row_index}.{cell_index}", group, cell))
+            ids = [f"{group}.{row_index}.{cell}" for cell in range(len(row))]
+            facts.extend(_row_facts(group, f"{group}.{row_index}", row, ids))
         references.append(_rows(descriptive.get("expected_rows", [])))
     if not facts:
         raise ComparisonError("A retail case must define expected values.")
@@ -515,37 +615,179 @@ def _could_be(kind: str, mention: NumberMention) -> bool:
     return mention.unit == "plain"
 
 
+SOURCES: Final = ("text", "table", "both")
+
+
 @dataclass(frozen=True)
 class FactOutcome:
     fact_id: str
     group: str
     stated: bool
     reason: str  # "all_stated" | "value_not_stated" | "ambiguous_value" | "conflicting_values"
+    source: str | None = None  # where a stated value was shown: "text", "table", or "both"
 
 
-def _label_present(label: str, text: str) -> bool:
-    candidates = [label]
-    period = re.fullmatch(r"((?:19|20)\d{2})-(\d{2})", label)
-    if period:
-        month_names = _MONTHS.split("|")[:12]
-        month = int(period.group(2))
-        if 1 <= month <= 12:
-            candidates.append(f"{month_names[month - 1]} {period.group(1)}")
+Table = Sequence[Sequence[Any]]
+
+_MONTH_NAMES = _MONTHS.split("|")[:12]
+
+
+def _label_aliases(label: str) -> tuple[str, ...]:
+    """A label and the equivalent ways a period label is written (``2026-Q1``, ``2026-01-01``)."""
+    quarter = re.fullmatch(r"((?:19|20)\d{2})-Q([1-4])", label)
+    if quarter:
+        year, number = quarter.group(1), int(quarter.group(2))
+        return (label, f"{year}-{3 * number - 2:02d}-01", f"Q{number} {year}")
+    month = re.fullmatch(r"((?:19|20)\d{2})-(\d{2})", label)
+    if month and 1 <= int(month.group(2)) <= 12:
+        year, number = month.group(1), int(month.group(2))
+        return (label, f"{_MONTH_NAMES[number - 1]} {year}", f"{year}-{number:02d}-01")
+    return (label,)
+
+
+def _label_in_text(label: str, text: str) -> bool:
     return any(
-        re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", text, flags=re.IGNORECASE)
-        for candidate in candidates
+        re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", text, flags=re.IGNORECASE)
+        for alias in _label_aliases(label)
     )
 
 
-def grade_facts(facts: Sequence[Fact], text: str, tolerances: Tolerances) -> list[FactOutcome]:
-    """Whether each expected value is stated in ``text``, never resolving doubt favourably.
+def _label_in_cell(label: str, cell: Any) -> bool:
+    if not isinstance(cell, str):
+        return False
+    value = cell.strip().casefold()
+    return any(value == alias.casefold() for alias in _label_aliases(label))
 
-    Each written number may satisfy at most one expected value (a maximum one-to-one matching, so
-    the result does not depend on fact order). A value matched only by an ambiguous mention, or
-    contradicted by an unmatched mention with the same explicit unit within :data:`CONFLICT_BAND`,
-    is not stated.
+
+def _sentences(text: str) -> list[str]:
+    """Prose split into sentences and lines; a value is located by the sentence that states it."""
+    parts = re.split(r"(?<=[.!?;])\s+(?=[A-Z(\-])|\n+", text)
+    return [part for part in parts if part.strip()]
+
+
+def _cell_number(cell: Any, kind: str) -> Decimal | None:
+    """A displayed table cell read as a value of ``kind``; text that is not a number is not."""
+    if isinstance(cell, bool) or cell is None:
+        return None
+    if isinstance(cell, int):
+        value, integral = Decimal(cell), True
+    elif isinstance(cell, float):
+        if not math.isfinite(cell):
+            return None
+        value, integral = Decimal(repr(cell)), False
+    elif isinstance(cell, str):
+        parsed = _decimal(cell)
+        if parsed is None:
+            return None
+        value, integral = parsed, "." not in cell
+    else:
+        return None
+    if kind == "rate":
+        return value if not integral and abs(value) <= 1 else None
+    if kind == "count":
+        return value if integral or value == value.to_integral_value() else None
+    return value  # currency
+
+
+def _population(facts: Sequence[Fact]) -> set[str]:
+    """Labels that name a population in this case (for exclusive, population-specific facts)."""
+    periods = re.compile(r"(?:19|20)\d{2}-(?:Q[1-4]|\d{2})")
+    return {
+        label
+        for fact in facts
+        if fact.exclusive
+        for label in fact.context
+        if not periods.fullmatch(label)
+    }
+
+
+def _sentence_locates(fact: Fact, sentence: str, population: set[str]) -> bool:
+    if not all(_label_in_text(label, sentence) for label in fact.context):
+        return False
+    if fact.exclusive:
+        others = population - set(fact.context)
+        return not any(_label_in_text(label, sentence) for label in others)
+    return True
+
+
+def _row_states(row_facts: Sequence[Fact], row: Sequence[Any], tolerances: Tolerances) -> bool:
+    """A displayed row shows an expected row: every label in place and every value, cell by cell.
+
+    For a population-specific row, any other label cell disqualifies the row: an SMB row never
+    counts for the overall rate, even when its rate cell holds the overall value.
     """
-    mentions = extract_numbers(text)
+    labels = {label for fact in row_facts for label in fact.context}
+    labels |= {str(fact.expected) for fact in row_facts if fact.kind == "label"}
+    if not all(any(_label_in_cell(label, cell) for cell in row) for label in labels):
+        return False
+    if any(fact.exclusive for fact in row_facts):
+        for cell in row:
+            if _is_label(cell) and not any(_label_in_cell(label, cell) for label in labels):
+                return False
+    numeric = [fact for fact in row_facts if fact.kind != "label"]
+    candidates = {
+        index: [
+            position
+            for position, cell in enumerate(row)
+            if (value := _cell_number(cell, fact.kind)) is not None
+            and _within(fact.kind, value, _expected_number(fact), tolerances)
+        ]
+        for index, fact in enumerate(numeric)
+    }
+    return len(_maximum_matching(candidates)) == len(numeric)
+
+
+def _table_stated(
+    facts: Sequence[Fact], tables: Sequence[Table], tolerances: Tolerances
+) -> set[str]:
+    """Facts shown in a displayed table: those whose whole expected row appears in one row."""
+    rows: dict[str, list[Fact]] = {}
+    for fact in facts:
+        if fact.row is not None:
+            rows.setdefault(fact.row, []).append(fact)
+    stated: set[str] = set()
+    for row_facts in rows.values():
+        if any(_row_states(row_facts, row, tolerances) for table in tables for row in table):
+            stated |= {fact.fact_id for fact in row_facts}
+    return stated
+
+
+def grade_facts(
+    facts: Sequence[Fact],
+    text: str,
+    tolerances: Tolerances,
+    tables: Sequence[Table] = (),
+) -> list[FactOutcome]:
+    """Whether each expected value is shown to the user, never resolving doubt favourably.
+
+    Prose: a value counts only in a sentence that names its context (period, population, row
+    labels), and, for a population-specific value, names no other population of the case. Each
+    written number may satisfy at most one expected value (a maximum one-to-one matching, so the
+    result does not depend on fact order). A value matched only by an ambiguous mention, or
+    contradicted by an unmatched mention with the same explicit unit within :data:`CONFLICT_BAND`
+    in a locating sentence, is not stated from prose.
+
+    Tables: a value counts only when one displayed row holds its whole expected row (labels and
+    values); a value with no expected row (a policy threshold) is never credited from a table.
+
+    A value shown in both places is counted once, with its source recorded. A contradiction in the
+    prose is never outweighed by a table.
+    """
+    population = _population(facts)
+    sentences = _sentences(text)
+    mentions = [
+        (index, mention)
+        for index, sentence in enumerate(sentences)
+        for mention in extract_numbers(sentence)
+    ]
+    located = {
+        fact.fact_id: {
+            index
+            for index, sentence in enumerate(sentences)
+            if _sentence_locates(fact, sentence, population)
+        }
+        for fact in facts
+    }
     numeric = [fact for fact in facts if fact.kind != "label"]
     candidates: dict[int, list[int]] = {}
     for index, fact in enumerate(numeric):
@@ -553,33 +795,56 @@ def grade_facts(facts: Sequence[Fact], text: str, tolerances: Tolerances) -> lis
         expected = _expected_number(fact)
         candidates[index] = [
             position
-            for position, mention in enumerate(mentions)
-            if (value := reader(mention)) is not None
+            for position, (sentence, mention) in enumerate(mentions)
+            if sentence in located[fact.fact_id]
+            and (value := reader(mention)) is not None
             and _within(fact.kind, value, expected, tolerances)
         ]
     assignment = _maximum_matching(candidates)
     used = set(assignment.values())
-    outcomes: dict[str, FactOutcome] = {}
+    in_text: dict[str, str] = {}
     for index, fact in enumerate(numeric):
         expected = _expected_number(fact)
+        nearby = [
+            (position, mention)
+            for position, (sentence, mention) in enumerate(mentions)
+            if sentence in located[fact.fact_id]
+        ]
         if index in assignment:
             reason = "all_stated"
-            if _contradicted(fact, expected, mentions, used, tolerances):
+            if _contradicted(fact, expected, nearby, used, tolerances):
                 reason = "conflicting_values"
-        elif any(mention.ambiguous and _could_be(fact.kind, mention) for mention in mentions):
+        elif any(mention.ambiguous and _could_be(fact.kind, mention) for _, mention in nearby):
             reason = "ambiguous_value"
         else:
             reason = "value_not_stated"
-        outcomes[fact.fact_id] = FactOutcome(
-            fact.fact_id, fact.group, reason == "all_stated", reason
-        )
+        in_text[fact.fact_id] = reason
     for fact in facts:
         if fact.kind == "label":
-            present = _label_present(str(fact.expected), text)
-            outcomes[fact.fact_id] = FactOutcome(
-                fact.fact_id, fact.group, present, "all_stated" if present else "value_not_stated"
+            present = any(
+                _label_in_text(str(fact.expected), sentences[index])
+                for index in located[fact.fact_id]
             )
-    return [outcomes[fact.fact_id] for fact in facts]
+            in_text[fact.fact_id] = "all_stated" if present else "value_not_stated"
+    in_table = _table_stated(facts, tables, tolerances)
+    outcomes = []
+    for fact in facts:
+        text_reason = in_text[fact.fact_id]
+        shown_in_text = text_reason == "all_stated"
+        shown_in_table = fact.fact_id in in_table
+        if text_reason == "conflicting_values":
+            outcomes.append(FactOutcome(fact.fact_id, fact.group, False, text_reason))
+            continue
+        if shown_in_text or shown_in_table:
+            source = (
+                "both"
+                if shown_in_text and shown_in_table
+                else ("text" if shown_in_text else "table")
+            )
+            outcomes.append(FactOutcome(fact.fact_id, fact.group, True, "all_stated", source))
+        else:
+            outcomes.append(FactOutcome(fact.fact_id, fact.group, False, text_reason))
+    return outcomes
 
 
 def _expected_number(fact: Fact) -> Decimal:
@@ -591,15 +856,16 @@ def _expected_number(fact: Fact) -> Decimal:
 def _contradicted(
     fact: Fact,
     expected: Decimal,
-    mentions: Sequence[NumberMention],
+    mentions: Sequence[tuple[int, NumberMention]],
     used: set[int],
     tolerances: Tolerances,
 ) -> bool:
+    """Whether an unmatched mention with the same explicit unit nearly restates the value."""
     unit = _EXPLICIT_UNIT.get(fact.kind)
     if unit is None or expected == 0:
         return False
     reader = _READERS[fact.kind]
-    for position, mention in enumerate(mentions):
+    for position, mention in mentions:
         if position in used or mention.unit != unit:
             continue
         value = reader(mention)
@@ -645,12 +911,32 @@ class RunView:
     citations: tuple[bool, bool] | None
     # Arm B only: the displayed values of its structured report facts.
     structured_values: tuple[Decimal, ...] | None = field(repr=False, default=None)
+    # The tables the user is shown (arm A: the message's rows; arm B: the report's query tables).
+    tables: tuple[tuple[tuple[Any, ...], ...], ...] = field(repr=False, default=())
+    # The product's own structured signals that a step did not execute (fixed codes).
+    not_executed: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.arm not in ARMS:
             raise ComparisonError("Unknown arm.")
         if self.failure_mode not in FAILURE_MODES:
             raise ComparisonError("Unknown failure mode.")
+        if any(signal not in NOT_EXECUTED_SIGNALS for signal in self.not_executed):
+            raise ComparisonError("Unknown not-executed signal.")
+
+    @property
+    def visible(self) -> bool:
+        """Whether the user was shown any answer at all (prose or a table)."""
+        return self.answer_text is not None or any(self.tables)
+
+
+# A required query step did not run, by the product's own account: arm A's hybrid query fell back
+# to documents; an arm B query task (SQL analysis or hypothesis test) failed, was refused, or was
+# cancelled. A skipped task is not counted: skipping is how the graph records an untestable step.
+QUERY_NOT_EXECUTED: Final = "query_not_executed"
+NOT_EXECUTED_SIGNALS: Final = frozenset({QUERY_NOT_EXECUTED})
+_ARM_B_QUERY_TASKS: Final = frozenset({"sql_analysis", "hypothesis_test"})
+_ARM_B_NOT_EXECUTED: Final = frozenset({"failed", "refused", "cancelled"})
 
 
 _ARM_A_INVALID_PROVENANCE = ("invalid_citation_count", "unverified_quote_count")
@@ -693,7 +979,18 @@ def observe_arm_a(message: Mapping[str, Any] | None) -> RunView:
     if isinstance(provenance, Mapping) and isinstance(message.get("sources"), list):
         invalid = sum(int(provenance.get(name) or 0) for name in _ARM_A_INVALID_PROVENANCE)
         citations = (len(message["sources"]) > 0, invalid == 0)
-    return RunView("A", mode, text, result_sets, citations)
+    not_executed: tuple[str, ...] = ()
+    if isinstance(provenance, Mapping) and provenance.get("hybrid_fell_back_to_documents") is True:
+        not_executed = (QUERY_NOT_EXECUTED,)
+    return RunView(
+        "A",
+        mode,
+        text,
+        result_sets,
+        citations,
+        tables=tuple(table for table in result_sets or () if table),
+        not_executed=not_executed,
+    )
 
 
 def not_routed_arm_b() -> RunView:
@@ -759,7 +1056,31 @@ def observe_arm_b(
         )
         citations = (cited and bool(documents), valid)
     structured = _structured_values(report) if report is not None else None
-    return RunView("B", mode, text, result_sets, citations, structured)
+    tables: tuple[tuple[tuple[Any, ...], ...], ...] = ()
+    not_executed: tuple[str, ...] = ()
+    if report is not None:
+        tables = tuple(
+            tuple(tuple(row) for row in table.get("rows", []))
+            for table in report.get("query_tables", [])
+            if isinstance(table, Mapping) and table.get("rows")
+        )
+        if any(
+            isinstance(task, Mapping)
+            and task.get("kind") in _ARM_B_QUERY_TASKS
+            and task.get("status") in _ARM_B_NOT_EXECUTED
+            for task in report.get("tasks", [])
+        ):
+            not_executed = (QUERY_NOT_EXECUTED,)
+    return RunView(
+        "B",
+        mode,
+        text,
+        result_sets,
+        citations,
+        structured,
+        tables=tables,
+        not_executed=not_executed,
+    )
 
 
 def _report_text(report: Mapping[str, Any]) -> str | None:
@@ -846,17 +1167,28 @@ def grade_run(
         raise ComparisonError("Repeats are numbered from 1.")
     text = view.answer_text
     dims: dict[str, dict[str, str]] = {}
-    answered = view.failure_mode == "none" and text is not None
-    dims["task_completion"] = _dimension(
-        PASS if answered else FAIL, "answered" if answered else "not_answered"
-    )
+    failure_mode = view.failure_mode
+    answered = failure_mode == "none" and view.visible
+    # The product reports that a query step did not run. That makes the answer partial only when
+    # this case needs query results; a fallback in a capability the case does not need is harmless.
+    if answered and spec.references and QUERY_NOT_EXECUTED in view.not_executed:
+        answered = False
+        failure_mode = "incomplete_execution"
+        dims["task_completion"] = _dimension(FAIL, "partial_execution")
+    else:
+        dims["task_completion"] = _dimension(
+            PASS if answered else FAIL, "answered" if answered else "not_answered"
+        )
 
-    # Expected values include text labels (a region or category name) as well as numbers.
-    fact_outcomes = grade_facts(spec.facts, text, tolerances) if text is not None else []
+    # The user-visible answer is the prose and the displayed tables (D3 as amended in S1c).
+    # Expected values include labels (a region or category name) as well as numbers.
+    fact_outcomes = (
+        grade_facts(spec.facts, text or "", tolerances, view.tables) if view.visible else []
+    )
     if not spec.facts:
         dims["subquestion_completeness"] = _dimension(NOT_APPLICABLE, "no_requirements")
         dims["numeric_accuracy"] = _dimension(NOT_APPLICABLE, "no_requirements")
-    elif text is None:
+    elif not view.visible:
         dims["subquestion_completeness"] = _dimension(NOT_OBSERVABLE, "no_answer_text")
         dims["numeric_accuracy"] = _dimension(NOT_OBSERVABLE, "no_answer_text")
     else:
@@ -928,11 +1260,14 @@ def grade_run(
         "role": spec.role,
         "arm": view.arm,
         "repeat": repeat,
-        "failure_mode": view.failure_mode,
+        "failure_mode": failure_mode,
         "dimensions": dims,
         "counts": {
             "expected_values": len(spec.facts),
             "stated_correctly": sum(o.stated for o in fact_outcomes),
+            "stated_in_text_only": sum(o.source == "text" for o in fact_outcomes),
+            "stated_in_table_only": sum(o.source == "table" for o in fact_outcomes),
+            "stated_in_both": sum(o.source == "both" for o in fact_outcomes),
             "ambiguous": sum(o.reason == "ambiguous_value" for o in fact_outcomes),
             "conflicting": sum(o.reason == "conflicting_values" for o in fact_outcomes),
             "subquestions": len(spec.groups),
@@ -1080,8 +1415,12 @@ def build_document(
     for grade in grades:
         _check_grade(grade)
 
-    def section(role: str) -> dict[str, Any]:
-        selected = [grade for grade in grades if grade["role"] == role]
+    def section(role: str, only: set[str] | None = None) -> dict[str, Any]:
+        selected = [
+            grade
+            for grade in grades
+            if grade["role"] == role and (only is None or grade["case_id"] in only)
+        ]
         cases = sorted({grade["case_id"] for grade in selected})
         arms: dict[str, Any] = {}
         for arm in ARMS:
@@ -1122,6 +1461,8 @@ def build_document(
             for name in grade.get("ungraded_expectations", [])
         }
     )
+    reach = routing_reach(grades)
+    consistent = set(reach["consistently_routed_cases"])
     document = {
         "schema": COMPARISON_SCHEMA,
         "headline": CONFOUND_HEADLINE,
@@ -1141,11 +1482,26 @@ def build_document(
             "judge": JUDGE_NOTE,
             "metering": METERING_DEFINITION,
             "routing": ROUTING_DEFINITION,
+            "visible_answer": VISIBLE_ANSWER_DEFINITION,
+            "completion": COMPLETION_DEFINITION,
+            "primary": PRIMARY_DEFINITION,
+            "reach": REACH_DEFINITION,
+            "conditional": CONDITIONAL_DEFINITION,
         },
         "provenance": checked,
         "planned_repeats": planned_repeats,
         "routing": [_checked_routing(entry) for entry in routing],
+        "primary_result": "compared",
+        "routing_reach": reach,
+        # End to end, over every approved compared case: the primary result.
         "compared": section("compared"),
+        # Restricted to the cases arm B reached in every run. Never pooled with the primary result.
+        "conditional": {
+            "note": CONDITIONAL_DEFINITION,
+            "selected_by": "routing_gate",
+            "representative": False,
+            **section("compared", consistent),
+        },
         "safety_probes": {
             "note": "Safety probes are reported, not compared.",
             **section("safety_probe"),
@@ -1158,6 +1514,34 @@ def build_document(
     if problems:
         raise ComparisonError("The comparison document would carry content: " + "; ".join(problems))
     return document
+
+
+def routing_reach(grades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """How often arm B's investigation workflow ran, per compared case and overall.
+
+    A run is reached unless production routing declined it (``not_routed``) or no response came
+    back (``no_response``). A case is consistently routed only when every arm B run reached it.
+    """
+    per_case: dict[str, dict[str, int]] = {}
+    for grade in grades:
+        if grade["arm"] != "B" or grade["role"] != "compared":
+            continue
+        entry = per_case.setdefault(grade["case_id"], {"reached": 0, "runs": 0})
+        entry["runs"] += 1
+        entry["reached"] += grade["failure_mode"] not in {"not_routed", "no_response"}
+    reached = sum(entry["reached"] for entry in per_case.values())
+    runs = sum(entry["runs"] for entry in per_case.values())
+    return {
+        "arm": "B",
+        "per_case": dict(sorted(per_case.items())),
+        "reached": reached,
+        "runs": runs,
+        "cases_reached": sum(entry["reached"] > 0 for entry in per_case.values()),
+        "cases": len(per_case),
+        "consistently_routed_cases": sorted(
+            case for case, entry in per_case.items() if entry["reached"] == entry["runs"] > 0
+        ),
+    }
 
 
 _ROUTING_KEYS = frozenset({"case_id", "arm", "route", "gate_reason", "runs"})
@@ -1199,6 +1583,11 @@ _FIXED_PROSE = frozenset(
         RATE_DEFINITION,
         METERING_DEFINITION,
         ROUTING_DEFINITION,
+        VISIBLE_ANSWER_DEFINITION,
+        COMPLETION_DEFINITION,
+        PRIMARY_DEFINITION,
+        REACH_DEFINITION,
+        CONDITIONAL_DEFINITION,
         "Wilson score interval, 95%.",
         "structured_fact_accuracy is arm B only and is never compared with arm A.",
         "Safety probes are reported, not compared.",
@@ -1263,33 +1652,33 @@ def render_summary(document: Mapping[str, Any]) -> str:
         "",
         f"Planned repeats per case per arm: {document['planned_repeats']}.",
         "",
+        f"_{document['definitions']['primary']}_",
+        "",
     ]
-    for title, key in (
-        ("Compared cases", "compared"),
-        ("Safety probes (not compared)", "safety_probes"),
-    ):
+    sections: list[tuple[str, str, str | None]] = [
+        ("Primary result: end to end, all compared cases", "compared", None),
+    ]
+    if "conditional" in document:
+        sections.append(
+            (
+                "Conditional comparison (selected by the routing gate; not representative)",
+                "conditional",
+                document["definitions"]["conditional"],
+            )
+        )
+    sections.append(("Safety probes (not compared)", "safety_probes", None))
+    reach = document.get("routing_reach")
+    for title, key, note in sections:
         block = document[key]
-        lines += [f"## {title}", "", f"Cases: {', '.join(block['cases']) or 'none'}", ""]
-        lines += [
-            "| Dimension | Arm | Pass | Fail | N/A | Not observable | Rate | Wilson 95% |",
-            "|---|---|---|---|---|---|---|---|",
-        ]
-        for name in DIMENSIONS:
-            for arm in ARMS:
-                stats = block["arms"][arm]["dimensions"].get(name)
-                if stats is None:
-                    continue
-                rate = "n/a" if stats["pass_rate"] is None else f"{stats['pass_rate']:.3f}"
-                interval = (
-                    "n/a"
-                    if stats["wilson_95"] is None
-                    else f"{stats['wilson_95'][0]:.3f}-{stats['wilson_95'][1]:.3f}"
-                )
-                lines.append(
-                    f"| {name} | {arm} | {stats['pass']} | {stats['fail']} | "
-                    f"{stats['not_applicable']} | {stats['not_observable']} | {rate} | {interval} |"
-                )
-        lines.append("")
+        lines += [f"## {title}", ""]
+        if note:
+            lines += [f"**{note}**", ""]
+        lines += [f"Cases: {', '.join(block['cases']) or 'none'}", ""]
+        lines += _dimension_table(block)
+        if block["cases"]:
+            lines += ["### Per case", "", *_per_case_table(block)]
+        if key == "compared" and reach:
+            lines += _reach_table(reach, document["definitions"]["reach"])
     if document.get("routing"):
         lines += [
             "## Routing",
@@ -1312,6 +1701,80 @@ def render_summary(document: Mapping[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _rate_cells(stats: Mapping[str, Any]) -> tuple[str, str]:
+    rate = "n/a" if stats["pass_rate"] is None else f"{stats['pass_rate']:.3f}"
+    interval = (
+        "n/a"
+        if stats["wilson_95"] is None
+        else f"{stats['wilson_95'][0]:.3f}-{stats['wilson_95'][1]:.3f}"
+    )
+    return rate, interval
+
+
+def _dimension_table(block: Mapping[str, Any]) -> list[str]:
+    lines = [
+        "| Dimension | Arm | Pass | Fail | N/A | Not observable | Denominator | Rate "
+        "| Wilson 95% |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for name in DIMENSIONS:
+        for arm in ARMS:
+            stats = block["arms"][arm]["dimensions"].get(name)
+            if stats is None:
+                continue
+            rate, interval = _rate_cells(stats)
+            lines.append(
+                f"| {name} | {arm} | {stats['pass']} | {stats['fail']} | "
+                f"{stats['not_applicable']} | {stats['not_observable']} | "
+                f"{stats['applicable']} | {rate} | {interval} |"
+            )
+    lines.append("")
+    return lines
+
+
+def _per_case_table(block: Mapping[str, Any]) -> list[str]:
+    lines = [
+        "| Case | Dimension | Arm | Pass | Fail | N/A | Not observable | Denominator |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for case in block["cases"]:
+        for name in DIMENSIONS:
+            for arm in ARMS:
+                stats = block["arms"][arm]["per_case"].get(case, {}).get(name)
+                if stats is None:
+                    continue
+                lines.append(
+                    f"| {case} | {name} | {arm} | {stats['pass']} | {stats['fail']} | "
+                    f"{stats['not_applicable']} | {stats['not_observable']} | "
+                    f"{stats['applicable']} |"
+                )
+    lines.append("")
+    return lines
+
+
+def _reach_table(reach: Mapping[str, Any], definition: str) -> list[str]:
+    lines = [
+        "### Routing reach (arm B)",
+        "",
+        definition,
+        "",
+        "| Case | Reached | Runs |",
+        "|---|---|---|",
+    ]
+    lines += [
+        f"| {case} | {entry['reached']} | {entry['runs']} |"
+        for case, entry in reach["per_case"].items()
+    ]
+    lines += [
+        f"| **all compared cases** | **{reach['reached']}** | **{reach['runs']}** |",
+        "",
+        f"Cases reached: {reach['cases_reached']} of {reach['cases']}. Consistently routed: "
+        f"{', '.join(reach['consistently_routed_cases']) or 'none'}.",
+        "",
+    ]
+    return lines
 
 
 # --- helpers ---------------------------------------------------------------------------------

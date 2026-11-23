@@ -115,6 +115,30 @@ class ScriptedBoundedComparisonLLM(ScriptedRetailLLM):
 
 # --- arm B: the investigation workflow's planner and execution models -----------------------------
 
+# EVAL-2's own wording for the scripted churn planner's hypotheses (S1c). The shared fixture
+# (``tests/investigation_churn_schema.py``) words them exactly as the oracle words its claims, so
+# that wording reached later prompts as model output. Only this local copy is reworded: the IDs,
+# tests, context tasks, SQL, and approvals are unchanged, and so is what each hypothesis means.
+EVAL2_CHURN_HYPOTHESES: dict[str, str] = {
+    "h1": "Basic-plan SMB customers churned more in the quarter the Basic price went up.",
+    "h2": "APAC customers churned more while support took longer to resolve their tickets.",
+    "h3": "Customers given the retention playbook churned less than other customers.",
+    "h4": "Enterprise customers churned more in the second quarter of 2026 than in the first.",
+}
+
+
+def eval2_churn_plan_response() -> str:
+    """The scripted churn plan with EVAL-2's hypothesis wording; everything else is unchanged."""
+    from tests.investigation_critique_fakes import churn_v7_response
+
+    body = json.loads(churn_v7_response())
+    hypotheses = body["plan"]["hypotheses"]
+    if {item["id"] for item in hypotheses} != set(EVAL2_CHURN_HYPOTHESES):
+        raise ValueError("the scripted churn plan's hypotheses changed; review EVAL-2's wording")
+    for item in hypotheses:
+        item["statement"] = EVAL2_CHURN_HYPOTHESES[item["id"]]
+    return json.dumps(body, separators=(",", ":"))
+
 
 def _retail_plans() -> dict[str, Callable[[], dict[str, Any]]]:
     from tests.e2e import investigation_trajectory_scenarios as scenarios
@@ -150,7 +174,6 @@ class ComparisonInvestigationAdapters:
 
     def planning(self) -> Any:
         from apps.api.investigations import PlanningProvider
-        from tests.e2e.investigation_app import ScriptedChurnReportAdapters
         from tests.investigation_planning_fakes import (
             ENVELOPE,
             ScriptedDeadlineAdapter,
@@ -159,16 +182,17 @@ class ComparisonInvestigationAdapters:
         )
 
         if self.case_id == CHURN_CASE:
-            provider = ScriptedChurnReportAdapters().planning()
+            # The browser journeys' churn planning provider, answering with EVAL-2's wording.
+            text = eval2_churn_plan_response()
         else:
             plan = _retail_plans()[self.case_id]()
             text = json.dumps({"plan": plan, "missing_information": []})
-            provider = PlanningProvider(
-                adapter=ScriptedDeadlineAdapter(answers=[text]),
-                evidence=evidence(),
-                pricing=pricing(),
-                envelope=ENVELOPE,
-            )
+        provider = PlanningProvider(
+            adapter=ScriptedDeadlineAdapter(answers=[text]),
+            evidence=evidence(),
+            pricing=pricing(),
+            envelope=ENVELOPE,
+        )
         self.planners.append(provider.adapter)
         return provider
 

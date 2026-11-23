@@ -25,9 +25,11 @@ non-loopback host stops the comparison before grading. Only after every run has 
 harness read the oracle and the case expectations and grade the runs with
 ``packages.evaluation.workflow_comparison`` (S1a).
 
-Results go to ``evals/results/`` (git-ignored): ``workflow-comparison.json`` and
-``workflow-comparison.md``. The module entry point re-execs from a temporary working directory with
-dotenv loading disabled.
+Results go to ``evals/results/`` (git-ignored): ``workflow-comparison.json``,
+``workflow-comparison.md``, and the content-free per-run grades ``workflow-comparison-grades.json``.
+``--compare-with <earlier grades>`` also writes ``workflow-comparison-delta.md``: every outcome,
+reason, failure mode, and count that changed, per case and arm. The module entry point re-execs
+from a temporary working directory with dotenv loading disabled.
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from scripts.offline_execution import ensure_offline_module
+from scripts.offline_execution import ensure_offline_module, invocation_path
 
 if __name__ == "__main__":
     ensure_offline_module("tests.e2e.workflow_comparison_runner")
@@ -55,6 +57,8 @@ ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = ROOT / "evals" / "results"
 RESULTS_JSON = "workflow-comparison.json"
 RESULTS_SUMMARY = "workflow-comparison.md"
+RESULTS_GRADES = "workflow-comparison-grades.json"
+RESULTS_DELTA = "workflow-comparison-delta.md"
 
 CHURN_PUBLIC_PATH = ROOT / "evals" / "investigation" / "v1" / "public_cases.json"
 RETAIL_CASES_PATH = ROOT / "evals" / "baseline" / "v2" / "investigation_cases.json"
@@ -603,27 +607,155 @@ def grade_runs(phase: RunPhase) -> Graded:
     return Graded(document, grades, texts)
 
 
-def write_results(document: Mapping[str, Any], results_dir: Path | None = None) -> list[Path]:
-    """Write the document and its summary to the git-ignored results directory only."""
-    from packages.evaluation.workflow_comparison import render_summary
+def stable_grades(grades: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Per-run grades without timing, so two scripted runs of the same code compare equal."""
+    return [{key: value for key, value in grade.items() if key != "metering"} for grade in grades]
+
+
+def write_results(
+    document: Mapping[str, Any],
+    results_dir: Path | None = None,
+    grades: Sequence[Mapping[str, Any]] | None = None,
+) -> list[Path]:
+    """Write the document, its summary, and (optionally) the per-run grades: results dir only."""
+    from packages.evaluation.workflow_comparison import content_problems, render_summary
 
     target = results_dir if results_dir is not None else RESULTS_DIR
     target.mkdir(parents=True, exist_ok=True)
     paths = [target / RESULTS_JSON, target / RESULTS_SUMMARY]
     paths[0].write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     paths[1].write_text(render_summary(document), encoding="utf-8")
+    if grades is not None:
+        body = {"grades": stable_grades(grades)}
+        if content_problems(body):
+            raise RuntimeError("per-run grades would carry content")
+        paths.append(target / RESULTS_GRADES)
+        paths[2].write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return paths
+
+
+DELTA_FIELDS = ("failure_mode",)
+
+
+def grade_deltas(
+    before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Every outcome, reason, failure mode, or count that differs, per case, arm, and repeat."""
+
+    def keyed(grades: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str, int], Mapping[str, Any]]:
+        return {(g["case_id"], g["arm"], int(g["repeat"])): g for g in grades}
+
+    old, new = keyed(before), keyed(after)
+    if set(old) != set(new):
+        raise ValueError("the two grade sets do not cover the same runs")
+    changes: list[dict[str, Any]] = []
+    for key in sorted(old):
+        a, b = old[key], new[key]
+        rows: list[tuple[str, Any, Any]] = [
+            (name, a.get(name), b.get(name)) for name in DELTA_FIELDS
+        ]
+        for name in sorted(set(a["dimensions"]) | set(b["dimensions"])):
+            was, now = a["dimensions"].get(name, {}), b["dimensions"].get(name, {})
+            rows.append(
+                (
+                    name,
+                    f"{was.get('outcome')}:{was.get('reason')}",
+                    f"{now.get('outcome')}:{now.get('reason')}",
+                )
+            )
+        # Count fields added after the earlier grades are new information, not changed outcomes.
+        for name in sorted(set(a.get("counts", {})) & set(b.get("counts", {}))):
+            rows.append((f"counts.{name}", a["counts"][name], b["counts"][name]))
+        for field_name, was, now in rows:
+            if was != now:
+                changes.append(
+                    {
+                        "case_id": key[0],
+                        "arm": key[1],
+                        "repeat": key[2],
+                        "field": field_name,
+                        "before": was,
+                        "after": now,
+                    }
+                )
+    return changes
+
+
+def new_count_fields(
+    before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]
+) -> list[str]:
+    """Count fields the later grades report that the earlier grades did not have."""
+    old = {name for grade in before for name in grade.get("counts", {})}
+    return sorted({name for grade in after for name in grade.get("counts", {})} - old)
+
+
+def render_deltas(
+    changes: Sequence[Mapping[str, Any]],
+    before_commit: str,
+    added_fields: Sequence[str] = (),
+) -> str:
+    """Changes grouped across repeats: identical changes in every repeat are listed once."""
+    grouped: Counter[tuple[str, str, str, str, str]] = Counter(
+        (c["case_id"], c["arm"], c["field"], str(c["before"]), str(c["after"])) for c in changes
+    )
+    lines = [
+        "# EVAL-2 grade deltas",
+        "",
+        f"Before: per-run grades from commit `{before_commit}`. After: this run. Scripted "
+        "evidence, deterministic repeats; not measured live.",
+        "",
+    ]
+    if added_fields:
+        lines += [
+            "New count fields (not present before, so not compared): "
+            + ", ".join(f"`{name}`" for name in added_fields)
+            + ".",
+            "",
+        ]
+    lines += [
+        "| Case | Arm | Field | Before | After | Repeats |",
+        "|---|---|---|---|---|---|",
+    ]
+    lines += [
+        f"| {case} | {arm} | {field_name} | {was} | {now} | {count} |"
+        for (case, arm, field_name, was, now), count in sorted(grouped.items())
+    ]
+    if not grouped:
+        lines.append("| (no changes) | | | | | |")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
     parser.add_argument("--case", action="append", dest="cases", default=None)
+    parser.add_argument(
+        "--compare-with",
+        type=invocation_path,
+        default=None,
+        help="earlier per-run grades (JSON) to report outcome changes against",
+    )
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory(prefix="eval2-") as directory:
         phase = run_arms(Path(directory), repeats=args.repeats, case_ids=args.cases)
     graded = grade_runs(phase)
-    for path in write_results(graded.document):
+    paths = write_results(graded.document, grades=graded.grades)
+    if args.compare_with is not None:
+        earlier = json.loads(args.compare_with.read_text(encoding="utf-8"))
+        current = stable_grades(graded.grades)
+        changes = grade_deltas(earlier["grades"], current)
+        delta = RESULTS_DIR / RESULTS_DELTA
+        delta.write_text(
+            render_deltas(
+                changes,
+                str(earlier.get("commit", "unrecorded")),
+                new_count_fields(earlier["grades"], current),
+            ),
+            encoding="utf-8",
+        )
+        paths.append(delta)
+    for path in paths:
         print(f"wrote {path.relative_to(ROOT)}")
     print("Scripted evidence, not real-model performance; model plus workflow, not workflow alone.")
     return 0

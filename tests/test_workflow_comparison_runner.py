@@ -95,25 +95,48 @@ def test_both_arms_receive_exactly_the_case_question(phase: runner.RunPhase) -> 
         assert any(public[run.case_id].question in prompt for prompt in run.prompts)
 
 
-def test_no_evaluator_only_text_reaches_a_prompt_unless_a_scripted_model_said_it(
+def test_no_evaluator_only_prose_reaches_any_prompt_or_scripted_output(
     phase: runner.RunPhase, graded: runner.Graded
 ) -> None:
-    """Evaluator prose never reaches a model from the harness.
+    """No evaluator-only prose appears in any model-visible prompt or scripted model output.
 
-    One known overlap is fixture wording: the scripted churn planner's hypothesis statements were
-    authored with the oracle's claim wording, so they reach later prompts as *model output*. Each
-    such match must be an oracle hypothesis claim that the scripted planner itself answered with.
-    The canary test proves the oracle's own claims are never forwarded.
+    Limits of this check: it looks for exact evaluator prose and SQL (oracle claims, definitions,
+    steps, reference SQL), so it detects copied text, not paraphrase. It does not look for expected
+    *values*: an answer that states a correct number computed from the data is the point of the
+    exercise, not evidence of leakage. The audit-hook guard and the canary test cover the oracle
+    files themselves.
     """
     assert graded.evaluator_texts
     prompts = [prompt for run in phase.runs for prompt in run.prompts]
-    assert prompts
-    leaked = [text for text in graded.evaluator_texts if any(text in p for p in prompts)]
+    outputs = [output for run in phase.runs for output in run.planner_outputs]
+    assert prompts and outputs
+    leaked = [
+        text for text in graded.evaluator_texts if any(text in item for item in prompts + outputs)
+    ]
+    assert leaked == []
+
+
+def test_eval2_rewords_only_its_local_copy_of_the_churn_hypotheses() -> None:
+    from tests.e2e.workflow_comparison_adapters import (
+        EVAL2_CHURN_HYPOTHESES,
+        eval2_churn_plan_response,
+    )
+    from tests.investigation_critique_fakes import churn_v7_raw
+
+    shared = churn_v7_raw()
+    local = json.loads(eval2_churn_plan_response())["plan"]
     oracle = json.loads(runner.ORACLE_PATH.read_text(encoding="utf-8"))
     claims = {item["claim"] for item in oracle["hypotheses"].values()}
-    planned = " ".join(output for run in phase.runs for output in run.planner_outputs)
-    for text in leaked:
-        assert text in claims and text in planned, text
+    assert [h["id"] for h in local["hypotheses"]] == [h["id"] for h in shared["hypotheses"]]
+    for mine, theirs in zip(local["hypotheses"], shared["hypotheses"], strict=True):
+        assert mine["statement"] == EVAL2_CHURN_HYPOTHESES[mine["id"]]
+        assert mine["statement"] not in claims
+        assert {k: v for k, v in mine.items() if k != "statement"} == {
+            k: v for k, v in theirs.items() if k != "statement"
+        }
+    assert local["tasks"] == shared["tasks"]
+    # The shared fixture keeps its wording: other suites' recorded results depend on it.
+    assert {h["statement"] for h in shared["hypotheses"]} & claims
 
 
 def test_injected_canaries_in_evaluator_only_fields_never_reach_a_model(
@@ -340,6 +363,76 @@ def test_not_routed_runs_fail_completion_and_are_otherwise_not_observable(
     assert modes["not_routed"] == len(NOT_ROUTED) * REPEATS
 
 
+def test_arm_a_policy_fallbacks_are_partial_and_other_runs_complete(
+    graded: runner.Graded,
+) -> None:
+    for grade in (g for g in graded.grades if g["arm"] == "A"):
+        completion = grade["dimensions"]["task_completion"]
+        if grade["case_id"] in NOT_ROUTED:  # the policy cases, where the hybrid query fell back
+            assert grade["failure_mode"] == "incomplete_execution"
+            assert completion == {"outcome": wc.FAIL, "reason": "partial_execution"}
+        else:
+            assert completion == {"outcome": wc.PASS, "reason": "answered"}
+
+
+def test_arm_b_october_values_are_credited_from_the_report_query_tables(
+    graded: runner.Graded,
+) -> None:
+    for grade in graded.grades:
+        if grade["case_id"] == OCTOBER_CASE and grade["arm"] == "B":
+            assert grade["counts"]["stated_correctly"] == grade["counts"]["expected_values"]
+            assert grade["counts"]["stated_in_table_only"] == grade["counts"]["expected_values"]
+            assert grade["dimensions"]["numeric_accuracy"]["outcome"] == wc.PASS
+
+
+def test_routing_reach_and_the_conditional_view_use_the_gate_selected_cases(
+    graded: runner.Graded,
+) -> None:
+    document = graded.document
+    reach = document["routing_reach"]
+    assert (reach["reached"], reach["runs"]) == (
+        len(ROUTED) * REPEATS,
+        len(COMPARED_CASES) * REPEATS,
+    )
+    assert reach["consistently_routed_cases"] == sorted(ROUTED)
+    for case_id in NOT_ROUTED:
+        assert reach["per_case"][case_id] == {"reached": 0, "runs": REPEATS}
+    conditional = document["conditional"]
+    assert conditional["cases"] == sorted(ROUTED) and conditional["representative"] is False
+    for arm in ("A", "B"):
+        assert conditional["arms"][arm]["runs"] == len(ROUTED) * REPEATS
+    assert document["compared"]["cases"] == sorted(COMPARED_CASES)
+    assert document["primary_result"] == "compared"
+
+
+def test_grade_deltas_report_changed_outcomes_and_ignore_new_count_fields(
+    graded: runner.Graded,
+) -> None:
+    after = runner.stable_grades(graded.grades)
+    before = json.loads(json.dumps(after))
+    target = next(g for g in before if g["case_id"] == OCTOBER_CASE and g["arm"] == "B")
+    target["dimensions"]["numeric_accuracy"] = {"outcome": wc.FAIL, "reason": "value_not_stated"}
+    for grade in before:
+        grade["counts"].pop("stated_in_both")
+    changes = runner.grade_deltas(before, after)
+    assert changes == [
+        {
+            "case_id": OCTOBER_CASE,
+            "arm": "B",
+            "repeat": target["repeat"],
+            "field": "numeric_accuracy",
+            "before": "FAIL:value_not_stated",
+            "after": "PASS:all_stated",
+        }
+    ]
+    assert runner.new_count_fields(before, after) == ["stated_in_both"]
+    rendered = runner.render_deltas(changes, "abc1234", ["stated_in_both"])
+    assert "FAIL:value_not_stated | PASS:all_stated | 1 |" in rendered
+    assert runner.grade_deltas(after, after) == []
+    with pytest.raises(ValueError, match="same runs"):
+        runner.grade_deltas(before[:-1], after)
+
+
 def test_denominators_cover_every_run_and_separate_the_four_outcomes(
     graded: runner.Graded,
 ) -> None:
@@ -394,8 +487,14 @@ def test_results_go_only_to_the_git_ignored_results_directory(
             check=False,
         )
         assert ignored.returncode == 0
-    paths = runner.write_results(graded.document, tmp_path)
-    assert [path.name for path in paths] == [runner.RESULTS_JSON, runner.RESULTS_SUMMARY]
+    paths = runner.write_results(graded.document, tmp_path, grades=graded.grades)
+    assert [path.name for path in paths] == [
+        runner.RESULTS_JSON,
+        runner.RESULTS_SUMMARY,
+        runner.RESULTS_GRADES,
+    ]
+    grades = json.loads(paths[2].read_text(encoding="utf-8"))["grades"]
+    assert len(grades) == len(graded.grades) and all("metering" not in g for g in grades)
     written = json.loads(paths[0].read_text(encoding="utf-8"))
     assert written["evidence"]["kind"] == "scripted"
     for run_text in (runner.load_public_cases()[case].question for case in COMPARED_CASES):
