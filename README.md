@@ -32,6 +32,7 @@ provider, so it demonstrates the product workflow and guardrails, not live-model
 | Run it locally | [Run it locally](#run-it-locally) · [Local container operations](docs/operations/local-containers.md) |
 | Reproduce the offline investigation demo | [Multi-agent investigations](#multi-agent-investigations) · [Investigation guide](docs/investigation.md) |
 | Explore architecture and decisions | [System overview](docs/architecture/system-overview.md) · [ADR index](docs/adr/README.md) |
+| Browse all documentation | [Documentation index](docs/README.md) |
 | Review evaluation and security evidence | [Evaluation methodology](docs/governance/evaluation.md) · [Threat model](docs/security/threat-model.md) · [Release readiness](docs/operations/release-readiness.md) |
 | Check limitations | [Boundaries, stated plainly](#boundaries-stated-plainly) · [What is not production-ready](docs/investigation.md#what-is-not-production-ready) |
 
