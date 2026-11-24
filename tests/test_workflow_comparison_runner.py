@@ -375,26 +375,28 @@ def test_arm_a_policy_fallbacks_are_partial_and_other_runs_complete(
             assert completion == {"outcome": wc.PASS, "reason": "answered"}
 
 
-def test_october_tables_headed_total_are_ambiguous_in_both_arms_and_prose_still_counts(
+def test_october_total_columns_are_read_from_their_executed_sum_of_revenue_in_both_arms(
     graded: runner.Graded,
 ) -> None:
-    # S1d: both arms show the October revenue under a column headed "total", which does not name
-    # the measure, so no table value is credited (ambiguous, not invented). Arm A's prose ties
-    # each value to its month and keeps its credit; arm B's report prose states no values.
+    # S1d provenance: both arms head the October revenue column "total", which alone names no
+    # measure. Each arm links the table to the statement that produced it (arm A: the message's
+    # executed SQL; arm B: the query evidence of the same id, SQL shown), and that statement
+    # computes the column as ROUND(SUM(revenue), 2), the evaluator's definition of revenue.
     for grade in graded.grades:
         if grade["case_id"] != OCTOBER_CASE:
             continue
         counts = grade["counts"]
-        assert counts["stated_in_table_only"] == counts["stated_in_both"] == 0
-        if grade["arm"] == "B":
-            assert counts["stated_correctly"] == 0
-            assert counts["ambiguous"] == counts["expected_values"]
+        assert counts["ambiguous"] == counts["conflicting"] == 0
+        if grade["arm"] == "B":  # the report prose states no values: credit is from tables only
+            assert counts["stated_correctly"] == counts["expected_values"] > 0
+            assert counts["stated_in_table_only"] == counts["stated_correctly"]
             assert grade["dimensions"]["numeric_accuracy"] == {
-                "outcome": wc.FAIL,
-                "reason": "ambiguous_value",
+                "outcome": wc.PASS,
+                "reason": "all_stated",
             }
-        else:
-            assert counts["stated_in_text_only"] == counts["stated_correctly"] > 0
+        else:  # arm A shows only the peak-month query; its prose ties each value to its month
+            assert counts["stated_in_both"] == counts["stated_correctly"] > 0
+            assert counts["stated_correctly"] < counts["expected_values"]
 
 
 def test_churn_report_measurements_keep_their_period_bound_credit(graded: runner.Graded) -> None:
@@ -431,7 +433,7 @@ def test_grade_deltas_report_changed_outcomes_and_ignore_new_count_fields(
     after = runner.stable_grades(graded.grades)
     before = json.loads(json.dumps(after))
     target = next(g for g in before if g["case_id"] == OCTOBER_CASE and g["arm"] == "B")
-    target["dimensions"]["numeric_accuracy"] = {"outcome": wc.PASS, "reason": "all_stated"}
+    target["dimensions"]["numeric_accuracy"] = {"outcome": wc.FAIL, "reason": "ambiguous_value"}
     for grade in before:
         grade["counts"].pop("stated_in_both")
     changes = runner.grade_deltas(before, after)
@@ -441,13 +443,13 @@ def test_grade_deltas_report_changed_outcomes_and_ignore_new_count_fields(
             "arm": "B",
             "repeat": target["repeat"],
             "field": "numeric_accuracy",
-            "before": "PASS:all_stated",
-            "after": "FAIL:ambiguous_value",
+            "before": "FAIL:ambiguous_value",
+            "after": "PASS:all_stated",
         }
     ]
     assert runner.new_count_fields(before, after) == ["stated_in_both"]
     rendered = runner.render_deltas(changes, "abc1234", ["stated_in_both"])
-    assert "PASS:all_stated | FAIL:ambiguous_value | 1 |" in rendered
+    assert "FAIL:ambiguous_value | PASS:all_stated | 1 |" in rendered
     assert runner.grade_deltas(after, after) == []
     with pytest.raises(ValueError, match="same runs"):
         runner.grade_deltas(before[:-1], after)

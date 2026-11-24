@@ -84,8 +84,24 @@ document = wc.build_document(
     planned_repeats=1,
 )
 wc.render_summary(document)
+# Reading a displayed column's meaning from its executed statement is pure too (S1d provenance).
+table_view = wc.observe_arm_a({
+    **message,
+    "answer": "",
+    "rows": [{"month": "2025-10", "total": 113432.96}],
+    "sql": 'SELECT substr(d, 1, 7) AS "month", ROUND(SUM(revenue), 2) AS total FROM t GROUP BY 1',
+})
+row_facts = [
+    wc.Fact("p.0", "p", "label", "2025-10", (), "p"),
+    wc.Fact(
+        "p.1", "p", "currency", Decimal("113432.96"), ("2025-10",), "p", metric="total_revenue"
+    ),
+]
+tolerances = wc.Tolerances(Decimal("0.0001"))
+table = [o.reason for o in wc.grade_facts(row_facts, "", tolerances, table_view.tables)]
 print(json.dumps({
     "numeric": grade["dimensions"]["numeric_accuracy"]["outcome"],
+    "table": table,
     "loaded": application_modules(),
 }))
 """
@@ -122,7 +138,7 @@ def test_importing_pure_evaluation_modules_loads_no_application_code(module: str
 
 def test_the_comparison_grader_runs_without_io_or_application_initialization() -> None:
     outcome = json.loads(_fresh(_GRADING_WITHOUT_IO))
-    assert outcome == {"numeric": "PASS", "loaded": []}
+    assert outcome == {"numeric": "PASS", "table": ["all_stated", "all_stated"], "loaded": []}
 
 
 def test_asking_for_a_runner_export_still_loads_the_runner() -> None:

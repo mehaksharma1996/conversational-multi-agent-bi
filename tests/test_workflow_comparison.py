@@ -423,6 +423,9 @@ def test_the_comparison_module_imports_no_application_or_investigation_code() ->
         "re",
         "statistics",
         "typing",
+        # The pinned SQL lexer (requirements.lock), used only to read a displayed column's
+        # executed expression; it is a library, not application code.
+        "sqlparse",
         "packages.evaluation.result_sets",
         "packages.evaluation.workflow_cases",
     }
@@ -1177,19 +1180,29 @@ CHURN = [*OVERALL, *SMB, APAC_Q2, MRR_Q1]
 
 
 def _both_arms(
-    facts: list[Fact], prose: str, table: DisplayedTable | None = None
+    facts: list[Fact], prose: str, table: DisplayedTable | None = None, sql: str | None = None
 ) -> dict[str, tuple[bool, str, str | None]]:
-    """Grade the same visible prose and table through both arms' observers; they must agree."""
+    """Grade the same visible prose and table through both arms' observers; they must agree.
+
+    ``sql``, when given, is the executed statement behind the table, linked the way each arm's
+    contract links it: arm A's message ``sql``, arm B's query evidence of the same id, SQL shown.
+    """
     rows = None
     if table is not None:
         rows = [dict(zip(table.columns, row, strict=True)) for row in table.rows]
-    message = _message(answer=prose, rows=rows)
+    message = _message(answer=prose, rows=rows, route="sql", sql=sql)
     evidence = _evidence(prose)
     query_tables = []
     if table is not None:
         query_tables = [
-            {"task_id": "t", "columns": list(table.columns), "rows": [list(r) for r in table.rows]}
+            {
+                "evidence_id": "ev_table",
+                "task_id": "t",
+                "columns": list(table.columns),
+                "rows": [list(r) for r in table.rows],
+            }
         ]
+        evidence["evidence"].append(_query_item(list(table.columns), sql))
     evidence["report"] = {
         "sections": [{"name": "executive_summary", "sentences": [_sentence(prose)]}],
         "citations": [],
@@ -1203,6 +1216,21 @@ def _both_arms(
         graded.append({o.fact_id: (o.stated, o.reason, o.source) for o in outcomes})
     assert graded[0] == graded[1]
     return graded[0]
+
+
+def _query_item(
+    columns: list[str], sql: str | None, *, evidence_id: str = "ev_table", state: str = "shown"
+) -> dict[str, Any]:
+    return {
+        "kind": "query",
+        "evidence_id": evidence_id,
+        "task_id": "t",
+        "attempt": 1,
+        "columns": columns,
+        "rows": [],
+        "sql": sql if state == "shown" else None,
+        "sql_state": state if sql is not None else "not_recorded",
+    }
 
 
 STATED_IN_TEXT = (True, "all_stated", "text")
@@ -1370,6 +1398,266 @@ def test_october_revenue_under_a_bare_total_header_is_ambiguous_but_revenue_coun
     # The product's own prose for the same row is tied by its from-to pair.
     prose = "From 2025-10 to 2025-11, total decreased from 113,432.96 to 112,727.46."
     assert _both_arms(facts, prose)["p.1"] == STATED_IN_TEXT
+
+
+# --- S1d provenance: a generic column read from the executed statement that produced it ------
+
+PEAK = [
+    Fact("p.0", "p", "label", "2025-10", (), "p"),
+    Fact("p.1", "p", "currency", Decimal("113432.96"), ("2025-10",), "p", metric="total_revenue"),
+]
+PEAK_ROW = ("2025-10", 113432.96)
+MONTH_TOTAL = ("month", "total")
+ESCALATIONS = [
+    Fact("e.0", "e", "label", "West", (), "e"),
+    Fact("e.1", "e", "count", Decimal(42), ("West",), "e", metric="escalation_count"),
+]
+
+
+def _peak_sql(expression: str, alias: str = "total", where: str = "") -> str:
+    return (
+        f'SELECT substr(transaction_date, 1, 7) AS "month", {expression} AS {alias} '
+        f'FROM uploaded_data {where}GROUP BY "month" ORDER BY {alias} DESC LIMIT 2'
+    )
+
+
+@pytest.mark.parametrize(
+    "expression",
+    ["ROUND(SUM(revenue), 2)", "SUM(revenue)", 'ROUND(SUM("revenue"))', "sum(Revenue)"],
+)
+def test_sum_of_revenue_as_total_is_revenue_in_both_arms(expression: str) -> None:
+    table = _table(MONTH_TOTAL, PEAK_ROW)
+    graded = _both_arms(PEAK, "", table, _peak_sql(expression))
+    assert graded == {"p.0": STATED_IN_TABLE, "p.1": STATED_IN_TABLE}
+    # A filter or a scalar subquery in WHERE does not change what the column computes.
+    filtered = _peak_sql(expression, where="WHERE region = (SELECT MIN(region) FROM t) ")
+    assert _both_arms(PEAK, "", table, filtered) == graded
+
+
+def test_count_as_total_is_a_count_never_revenue_and_never_a_specific_count() -> None:
+    sql = _peak_sql("COUNT(*)")
+    revenue = _both_arms(PEAK, "", _table(MONTH_TOTAL, PEAK_ROW), sql)
+    assert revenue["p.1"] == NOT_STATED  # a known count, not an unknown measure
+    # COUNT(*) does not say which rows were counted, so it cannot establish an escalation count.
+    counted = "SELECT region, COUNT(*) AS total FROM uploaded_data GROUP BY region"
+    escalations = _both_arms(ESCALATIONS, "", _table(("region", "total"), ("West", 42)), counted)
+    assert escalations == {"e.0": AMBIGUOUS, "e.1": AMBIGUOUS}
+
+
+def test_sum_of_another_column_as_total_is_not_revenue_in_both_arms() -> None:
+    graded = _both_arms(PEAK, "", _table(MONTH_TOTAL, PEAK_ROW), _peak_sql("SUM(quantity)"))
+    assert graded == {"p.0": NOT_STATED, "p.1": NOT_STATED}
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        None,  # no statement linked
+        _peak_sql("ROUND(SUM(revenue) * 1.0, 2)"),  # arithmetic
+        _peak_sql("SUM(CASE WHEN revenue > 0 THEN revenue ELSE 0 END)"),
+        _peak_sql("SUM(DISTINCT revenue)"),
+        _peak_sql("TOTAL(revenue)"),
+        _peak_sql("SUM(t.revenue)"),
+        _peak_sql("(SELECT SUM(revenue) FROM uploaded_data)"),
+        _peak_sql("SUM(revenue) OVER ()"),
+        "WITH m AS (SELECT * FROM uploaded_data) "
+        'SELECT substr(transaction_date, 1, 7) AS "month", SUM(revenue) AS total FROM m',
+        'SELECT substr(d, 1, 7) AS "month", SUM(revenue) AS total FROM a JOIN b ON a.k = b.k',
+        'SELECT substr(d, 1, 7) AS "month", SUM(revenue) AS total FROM (SELECT * FROM a)',
+        'SELECT substr(d, 1, 7) AS "month", SUM(revenue) AS total FROM a x',
+        'SELECT substr(d, 1, 7) AS "month", SUM(revenue) AS total FROM a UNION SELECT 1, 2',
+        'SELECT substr(d, 1, 7) AS "month", SUM(revenue) AS total FROM a; SELECT 1',
+        "SELECT * FROM monthly_totals",
+        'SELECT substr(d, 1, 7) AS "month", SUM(revenue) AS amount FROM a',  # names differ
+        'SELECT SUM(revenue) AS total, substr(d, 1, 7) AS "month" FROM a',  # order differs
+        "not a statement",
+    ],
+)
+def test_unread_or_unlinked_statements_leave_a_bare_total_ambiguous(sql: str | None) -> None:
+    graded = _both_arms(PEAK, "", _table(MONTH_TOTAL, PEAK_ROW), sql)
+    assert graded == {"p.0": AMBIGUOUS, "p.1": AMBIGUOUS}
+
+
+def test_the_expression_settles_correct_and_incorrect_aliases_in_both_arms() -> None:
+    row = PEAK_ROW
+    for alias in ("total_revenue", "revenue", '"Total Revenue"'):
+        header = alias.strip('"')
+        sql = _peak_sql("ROUND(SUM(revenue), 2)", alias=alias)
+        assert _both_arms(PEAK, "", _table(("month", header), row), sql)["p.1"] == STATED_IN_TABLE
+    # A header naming revenue over another column's sum is that other measure.
+    wrong = _peak_sql("SUM(quantity)", alias="total_revenue")
+    assert _both_arms(PEAK, "", _table(("month", "total_revenue"), row), wrong)["p.1"] == (
+        NOT_STATED
+    )
+    # A header naming another measure over the revenue sum misleads the reader: withheld.
+    misleading = _peak_sql("SUM(revenue)", alias="breaches")
+    graded = _both_arms(PEAK, "", _table(("month", "breaches"), row), misleading)
+    assert graded["p.1"] == AMBIGUOUS
+    # A measure with no defining expression is still read by its header alone.
+    counted = "SELECT region, COUNT(*) AS escalations FROM uploaded_data GROUP BY region"
+    graded = _both_arms(ESCALATIONS, "", _table(("region", "escalations"), ("West", 42)), counted)
+    assert graded["e.1"] == STATED_IN_TABLE
+
+
+def test_a_resolved_total_contradicts_and_never_credits_an_unrelated_column() -> None:
+    sql = _peak_sql("ROUND(SUM(revenue), 2)")
+    wrong = _both_arms(PEAK, "", _table(MONTH_TOTAL, ("2025-10", 112727.46)), sql)
+    assert wrong["p.1"] == CONFLICTING
+    # The expected number in a column computed from something else, or in another month's row,
+    # is never credited.
+    columns = ("month", "orders", "total")
+    unrelated = (
+        'SELECT substr(d, 1, 7) AS "month", COUNT(*) AS orders, SUM(quantity) AS total '
+        "FROM uploaded_data GROUP BY 1"
+    )
+    graded = _both_arms(PEAK, "", _table(columns, ("2025-10", 12, 113432.96)), unrelated)
+    assert graded["p.1"] == NOT_STATED
+    other_month = _table(MONTH_TOTAL, ("2025-11", 113432.96))
+    assert _both_arms(PEAK, "", other_month, sql)["p.1"] == NOT_STATED
+
+
+def _arm_a_table(**overrides: Any) -> wc.RunView:
+    message = _message(
+        answer="",
+        route="sql",
+        rows=[dict(zip(MONTH_TOTAL, PEAK_ROW, strict=True))],
+        sql=_peak_sql("ROUND(SUM(revenue), 2)"),
+    )
+    message.update(overrides)
+    return wc.observe_arm_a(message)
+
+
+def _arm_b_table(
+    item: dict[str, Any] | None = None, *, state: str = "available", same_report: bool = True
+) -> wc.RunView:
+    evidence = _evidence("")
+    evidence["evidence_state"] = state
+    report = {
+        "sections": [],
+        "citations": [],
+        "facts": [],
+        "tasks": [],
+        "query_tables": [
+            {
+                "evidence_id": "ev_table",
+                "task_id": "t",
+                "columns": list(MONTH_TOTAL),
+                "rows": [list(PEAK_ROW)],
+            }
+        ],
+    }
+    evidence["report"] = report
+    evidence["evidence"].append(
+        item
+        if item is not None
+        else _query_item(list(MONTH_TOTAL), _peak_sql("ROUND(SUM(revenue), 2)"))
+    )
+    investigation = _investigation(report=report)
+    return wc.observe_arm_b(investigation, evidence if same_report else None)
+
+
+def _peak_reasons(view: wc.RunView) -> list[str]:
+    outcomes = wc.grade_facts(PEAK, view.answer_text or "", TOL, view.tables)
+    return [outcome.reason for outcome in outcomes]
+
+
+def test_arm_a_trusts_only_the_statement_executed_for_its_rows() -> None:
+    assert _peak_reasons(_arm_a_table()) == ["all_stated", "all_stated"]
+    hybrid = _arm_a_table(route="hybrid")
+    assert _peak_reasons(hybrid) == ["all_stated", "all_stated"]
+    untrusted = [
+        _arm_a_table(status="pending_approval"),  # proposed, not executed
+        _arm_a_table(route="rag"),
+        _arm_a_table(provenance={"hybrid_fell_back_to_documents": True}),
+        _arm_a_table(sql=None),
+    ]
+    for view in untrusted:
+        assert _peak_reasons(view) == ["ambiguous_value", "ambiguous_value"]
+    # Answer text describing the column is never read as its meaning.
+    explained = _arm_a_table(sql=None, answer="The total column is the sum of revenue.")
+    assert _peak_reasons(explained) == ["ambiguous_value", "ambiguous_value"]
+
+
+def test_arm_b_trusts_only_shown_sql_of_the_same_evidence_in_the_same_read() -> None:
+    assert _peak_reasons(_arm_b_table()) == ["all_stated", "all_stated"]
+    sql = _peak_sql("ROUND(SUM(revenue), 2)")
+    columns = list(MONTH_TOTAL)
+    untrusted = [
+        _arm_b_table(_query_item(columns, sql, state="restricted")),
+        _arm_b_table(_query_item(columns, None)),  # not recorded
+        _arm_b_table(_query_item(columns, sql, evidence_id="ev_other")),
+        _arm_b_table(_query_item(["month", "amount"], sql)),  # columns differ
+        _arm_b_table(state="unavailable"),
+        _arm_b_table(same_report=False),  # the report alone carries no statement
+    ]
+    for view in untrusted:
+        assert _peak_reasons(view) == ["ambiguous_value", "ambiguous_value"]
+
+
+def test_arm_b_drops_an_evidence_id_listed_twice() -> None:
+    evidence = _evidence("")
+    report = {
+        "sections": [],
+        "citations": [],
+        "facts": [],
+        "tasks": [],
+        "query_tables": [
+            {
+                "evidence_id": "ev_table",
+                "task_id": "t",
+                "columns": list(MONTH_TOTAL),
+                "rows": [list(PEAK_ROW)],
+            }
+        ],
+    }
+    evidence["report"] = report
+    evidence["evidence"] += [
+        _query_item(list(MONTH_TOTAL), _peak_sql("ROUND(SUM(revenue), 2)")),
+        _query_item(list(MONTH_TOTAL), _peak_sql("SUM(quantity)")),
+    ]
+    view = wc.observe_arm_b(_investigation(report=report), evidence)
+    assert _peak_reasons(view) == ["ambiguous_value", "ambiguous_value"]
+
+
+@pytest.mark.parametrize(
+    ("sql", "columns", "expected"),
+    [
+        (
+            'SELECT substr(d, 1, 7) AS "month", ROUND(SUM(revenue), 2) AS total FROM t GROUP BY 1',
+            ("month", "total"),
+            (None, ("sum", "revenue")),
+        ),
+        (
+            "select category, count(*) as total from t;",
+            ("category", "total"),
+            (("column", "category"), ("count", "*")),
+        ),
+        (
+            "SELECT region, SUM(quantity) total FROM t",
+            ("region", "total"),
+            (("column", "region"), ("sum", "quantity")),
+        ),
+        ("SELECT month FROM t", ("month",), (("column", "month"),)),
+        ("SELECT [a], `b` FROM t", ("a", "b"), (("column", "a"), ("column", "b"))),
+        ("SELECT COUNT(revenue) AS total FROM t", ("total",), (None,)),
+        ("SELECT NULL AS total FROM t", ("total",), (None,)),
+        ("SELECT a, a FROM t", ("a", "a"), None),  # duplicate output names
+        ("SELECT a FROM", ("a",), None),
+        ("SELECT a FROM t WHERE (b = 1", ("a",), None),
+        ("DELETE FROM t", ("a",), None),
+    ],
+)
+def test_column_expressions_read_only_the_strict_statement_shape(
+    sql: str, columns: tuple[str, ...], expected: tuple[Any, ...] | None
+) -> None:
+    assert wc.column_expressions(sql, columns) == expected
+
+
+def test_measure_expressions_are_evaluator_defined_and_cover_no_count() -> None:
+    assert wc.METRIC_EXPRESSIONS == {"total_revenue": ("sum", "revenue")}
+    assert set(wc.METRIC_EXPRESSIONS) <= set(wc.METRIC_HEADERS)
+    with pytest.raises(ComparisonError, match="column expressions"):
+        DisplayedTable(("a", "b"), (), (None,))
 
 
 def test_a_fact_repeated_in_text_and_table_counts_once_as_both() -> None:

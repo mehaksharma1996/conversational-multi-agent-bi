@@ -44,6 +44,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
 
+import sqlparse
+from sqlparse import lexer as sql_lexer
+from sqlparse import tokens as sql_tokens
+
 from packages.evaluation.result_sets import compare_result_sets
 from packages.evaluation.workflow_cases import causal_markers_in
 
@@ -330,6 +334,20 @@ def _check_header_vocabulary() -> frozenset[str]:
 
 
 _KNOWN_HEADERS: Final = _check_header_vocabulary()
+
+# What a displayed column was computed with, read from the executed statement that produced it
+# (S1d provenance): ``("sum", column)``, ``("count", "*")`` or ``("column", column)``.
+ColumnExpression = tuple[str, str]
+
+# A measure written as the one executed expression that identifies it on its own (S1d provenance).
+# This is the evaluator's definition of the measure, not a reading of any expected value. Counts are
+# deliberately absent: ``COUNT(*)`` does not say which rows were counted, so a count column is read
+# by its header alone.
+METRIC_EXPRESSIONS: Final[dict[str, ColumnExpression]] = {
+    "total_revenue": ("sum", "revenue"),
+}
+if set(METRIC_EXPRESSIONS) - set(METRIC_HEADERS):
+    raise ComparisonError("A measure expression must name a defined measure.")
 
 
 @dataclass(frozen=True)
@@ -776,13 +794,25 @@ class FactOutcome:
 
 @dataclass(frozen=True)
 class DisplayedTable:
-    """A table as the user sees it: its column headers and its rows (held in memory only)."""
+    """A table as the user sees it: its column headers and its rows (held in memory only).
+
+    ``expressions`` holds, per column, what the executed statement computed it with, or ``None``
+    where that cannot be read; it is empty when no trustworthy statement is linked to the table.
+    """
 
     columns: tuple[str, ...]
     rows: tuple[tuple[Any, ...], ...] = field(repr=False, default=())
+    expressions: tuple[ColumnExpression | None, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.expressions and len(self.expressions) != len(self.columns):
+            raise ComparisonError("A table's column expressions must match its columns.")
 
     def header(self, position: int) -> str:
         return self.columns[position] if position < len(self.columns) else ""
+
+    def expression(self, position: int) -> ColumnExpression | None:
+        return self.expressions[position] if position < len(self.expressions) else None
 
 
 _MONTH_NAMES = _MONTHS.split("|")[:12]
@@ -886,6 +916,181 @@ def _header_meaning(header: Any, metric: str | None) -> str:
     return "other" if key in _KNOWN_HEADERS else "unknown"
 
 
+def _column_meaning(table: DisplayedTable, position: int, metric: str | None) -> str:
+    """A column's meaning for a fact: its header, settled by its executed expression where defined.
+
+    Where the measure has a defining expression and the column's executed expression was read, the
+    expression decides: a different expression is another measure, whatever the header says; the
+    same expression matches under a header that names the measure or nothing known ("total"), and
+    stays ``unknown`` under a header naming something else, which would mislead the reader.
+    Otherwise the header alone decides, as before.
+    """
+    named = _header_meaning(table.header(position), metric)
+    defined = METRIC_EXPRESSIONS.get(metric) if metric is not None else None
+    computed = table.expression(position)
+    if defined is None or computed is None:
+        return named
+    if computed != defined:
+        return "other"
+    return "unknown" if named == "other" else "match"
+
+
+# --- S1d provenance: reading a column's expression from the executed statement ---------------
+#
+# Only one statement shape is read: a single ``SELECT`` with no ``WITH``, ``DISTINCT``, set
+# operation or join, from one table named without an alias. A projection is read only when it is a
+# bare column, ``SUM(column)``, ``ROUND(SUM(column)[, digits])`` or ``COUNT(*)``; anything else
+# (a ``CASE``, a cast, arithmetic, a window, a subquery) is ``None``. The statement's output names
+# must equal the displayed columns, in order, or nothing is read for the table.
+
+_SQL_REFUSED_KEYWORD: Final = re.compile(
+    r"\b(?:WITH|UNION|INTERSECT|EXCEPT|JOIN|DISTINCT|OVER|WINDOW|NATURAL)\b", re.I
+)
+_SQL_AFTER_TABLE: Final = frozenset({"WHERE", "GROUP BY", "ORDER BY", "LIMIT", "HAVING"})
+_SQL_NOT_COLUMNS: Final = frozenset(
+    {"NULL", "TRUE", "FALSE", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "AS", "FROM"}
+)
+_SQL_WORD: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_SqlToken = tuple[Any, str]
+
+
+def _sql_identifier(token: _SqlToken) -> str | None:
+    """The name a token spells as an identifier, unquoted, or ``None``."""
+    kind, value = token
+    if kind in sql_tokens.Literal.String.Symbol or kind in sql_tokens.Name:
+        if len(value) >= 2 and value[0] + value[-1] in ('""', "``", "[]"):
+            inner = value[1:-1]
+            return inner.replace('""', '"') if value[0] == '"' else inner.replace("``", "`")
+        return value if _SQL_WORD.fullmatch(value) else None
+    if kind is sql_tokens.Keyword and _SQL_WORD.fullmatch(value):
+        return None if value.upper() in _SQL_NOT_COLUMNS else value
+    return None
+
+
+def _sql_split(tokens: Sequence[_SqlToken]) -> list[list[_SqlToken]] | None:
+    """``tokens`` split at top-level commas; ``None`` if their parentheses do not balance."""
+    parts: list[list[_SqlToken]] = [[]]
+    depth = 0
+    for token in tokens:
+        if token[1] == "(":
+            depth += 1
+        elif token[1] == ")":
+            depth -= 1
+            if depth < 0:
+                return None
+        if token[1] == "," and depth == 0:
+            parts.append([])
+        else:
+            parts[-1].append(token)
+    return parts if depth == 0 else None
+
+
+def _sql_call(tokens: Sequence[_SqlToken], function: str) -> list[list[_SqlToken]] | None:
+    """The arguments of ``function(...)`` when ``tokens`` are exactly that call."""
+    if len(tokens) < 3 or tokens[0][1].upper() != function or tokens[1][1] != "(":
+        return None
+    head = tokens[0][0]
+    if tokens[-1][1] != ")" or not (head in sql_tokens.Name or head in sql_tokens.Keyword):
+        return None
+    # The outer parentheses must enclose the whole argument list: "SUM(a) + (b)" splits as None.
+    arguments = _sql_split(tokens[2:-1])
+    return None if arguments is None or any(not part for part in arguments) else arguments
+
+
+def _sql_expression(tokens: Sequence[_SqlToken]) -> ColumnExpression | None:
+    if len(tokens) == 1:
+        name = _sql_identifier(tokens[0])
+        return ("column", name.casefold()) if name is not None else None
+    rounded = _sql_call(tokens, "ROUND")
+    if rounded is not None:
+        digits_ok = len(rounded) == 1 or (
+            len(rounded) == 2
+            and len(rounded[1]) == 1
+            and rounded[1][0][0] in sql_tokens.Literal.Number.Integer
+        )
+        inner = _sql_expression(rounded[0]) if digits_ok else None
+        return inner if inner is not None and inner[0] == "sum" else None
+    summed = _sql_call(tokens, "SUM")
+    if summed is not None:
+        if len(summed) == 1 and len(summed[0]) == 1:
+            name = _sql_identifier(summed[0][0])
+            return ("sum", name.casefold()) if name is not None else None
+        return None
+    counted = _sql_call(tokens, "COUNT")
+    if counted is not None and len(counted) == 1 and len(counted[0]) == 1:
+        return ("count", "*") if counted[0][0][0] in sql_tokens.Wildcard else None
+    return None
+
+
+def _sql_projection(item: Sequence[_SqlToken]) -> tuple[str | None, ColumnExpression | None]:
+    """One select-list item: its output name and its expression (either may be unreadable)."""
+    if len(item) >= 3 and item[-2][1].upper() == "AS":
+        return _sql_identifier(item[-1]), _sql_expression(item[:-2])
+    if len(item) >= 2 and item[-1][0] not in sql_tokens.Keyword and item[-2][1] == ")":
+        return _sql_identifier(item[-1]), _sql_expression(item[:-1])
+    expression = _sql_expression(item)
+    name = (
+        _sql_identifier(item[0]) if expression is not None and expression[0] == "column" else None
+    )
+    return name, expression
+
+
+def column_expressions(
+    sql: str, columns: Sequence[str]
+) -> tuple[ColumnExpression | None, ...] | None:
+    """Per displayed column, what ``sql`` computed it with, or ``None`` if the statement is unread.
+
+    ``sql`` must be the executed statement that produced exactly these columns; the caller decides
+    that from the response contract. Nothing here reads a model's explanation or an expected value.
+    """
+    try:
+        statements = [part for part in sqlparse.split(sql) if part.strip()]
+        if len(statements) != 1:
+            return None
+        tokens = [
+            (kind, value)
+            for kind, value in sql_lexer.tokenize(statements[0])
+            if kind not in sql_tokens.Text.Whitespace
+            and kind not in sql_tokens.Newline
+            and kind not in sql_tokens.Comment
+        ]
+    except Exception:  # noqa: BLE001 - an unreadable statement settles nothing
+        return None
+    if tokens and tokens[-1][1] == ";":
+        tokens.pop()
+    if not tokens or tokens[0][0] not in sql_tokens.DML or tokens[0][1].upper() != "SELECT":
+        return None
+    if any(
+        value == ";"
+        or kind in sql_tokens.Keyword.CTE
+        or (kind in sql_tokens.Keyword and _SQL_REFUSED_KEYWORD.search(value))
+        for kind, value in tokens
+    ):
+        return None
+    if _sql_split(tokens) is None:  # unbalanced parentheses anywhere
+        return None
+    depth, start = 0, 1
+    for index in range(1, len(tokens)):
+        depth += {"(": 1, ")": -1}.get(tokens[index][1], 0)
+        if depth == 0 and tokens[index][1].upper() == "FROM":
+            break
+    else:
+        return None
+    rest = tokens[index + 1 :]
+    if not rest or _sql_identifier(rest[0]) is None or rest[0][0] is sql_tokens.Keyword:
+        return None
+    if len(rest) > 1 and " ".join(rest[1][1].upper().split()) not in _SQL_AFTER_TABLE:
+        return None
+    items = _sql_split(tokens[start:index])
+    if items is None or any(not item for item in items):
+        return None
+    projections = [_sql_projection(item) for item in items]
+    names = [name.casefold() if name is not None else None for name, _ in projections]
+    if names != [str(column).casefold() for column in columns] or len(set(names)) != len(names):
+        return None
+    return tuple(expression for _, expression in projections)
+
+
 def _expected_labels(row_facts: Sequence[Fact]) -> set[str]:
     labels = {label for fact in row_facts for label in fact.context}
     labels |= {str(fact.expected) for fact in row_facts if fact.kind == "label"}
@@ -931,7 +1136,7 @@ def _table_states(
                 if not _row_holds_labels(row_facts, labels, row):
                     continue
                 meanings = [
-                    [_header_meaning(table.header(p), fact.metric) for p in range(len(row))]
+                    [_column_meaning(table, p, fact.metric) for p in range(len(row))]
                     for fact in numeric
                 ]
                 values = [[_cell_number(cell, fact.kind) for cell in row] for fact in numeric]
@@ -1614,6 +1819,19 @@ def observe_arm_a(message: Mapping[str, Any] | None) -> RunView:
     else:
         mode = "none"
     text = answer if isinstance(answer, str) and answer.strip() else None
+    provenance = message.get("provenance")
+    fell_back = (
+        isinstance(provenance, Mapping) and provenance.get("hybrid_fell_back_to_documents") is True
+    )
+    # ``sql`` is the executed statement behind ``rows`` only for a completed SQL or hybrid answer
+    # that did not fall back to documents (the orchestrator records it after execution succeeds).
+    statement = message.get("sql")
+    executed = (
+        status == "complete"
+        and route in ("sql", "hybrid")
+        and not fell_back
+        and isinstance(statement, str)
+    )
     result_sets: tuple[tuple[tuple[Any, ...], ...], ...] | None
     tables: tuple[DisplayedTable, ...] = ()
     if "rows" not in message:
@@ -1627,18 +1845,24 @@ def observe_arm_a(message: Mapping[str, Any] | None) -> RunView:
         result_sets = (tuple(tuple(row.values()) for row in rows),)
         if rows:
             columns = tuple(str(key) for key in rows[0])
+            expressions = (
+                column_expressions(statement, columns)
+                if executed and isinstance(statement, str)
+                else None
+            )
             tables = (
                 DisplayedTable(
-                    columns, tuple(tuple(row.get(column) for column in columns) for row in rows)
+                    columns,
+                    tuple(tuple(row.get(column) for column in columns) for row in rows),
+                    expressions or (),
                 ),
             )
     citations: tuple[bool, bool] | None = None
-    provenance = message.get("provenance")
     if isinstance(provenance, Mapping) and isinstance(message.get("sources"), list):
         invalid = sum(int(provenance.get(name) or 0) for name in _ARM_A_INVALID_PROVENANCE)
         citations = (len(message["sources"]) > 0, invalid == 0)
     not_executed: tuple[str, ...] = ()
-    if isinstance(provenance, Mapping) and provenance.get("hybrid_fell_back_to_documents") is True:
+    if fell_back:
         not_executed = (QUERY_NOT_EXECUTED,)
     return RunView(
         "A",
@@ -1717,14 +1941,24 @@ def observe_arm_b(
     tables: tuple[DisplayedTable, ...] = ()
     not_executed: tuple[str, ...] = ()
     if report is not None:
-        tables = tuple(
-            DisplayedTable(
-                tuple(str(column) for column in table.get("columns", [])),
-                tuple(tuple(row) for row in table.get("rows", [])),
+        statements = _executed_statements(evidence, report)
+        shown: list[DisplayedTable] = []
+        for table in report.get("query_tables", []):
+            if not isinstance(table, Mapping) or not table.get("rows"):
+                continue
+            columns = tuple(str(column) for column in table.get("columns", []))
+            linked = statements.get(table.get("evidence_id"))
+            expressions = (
+                column_expressions(linked[1], columns)
+                if linked is not None and linked[0] == columns
+                else None
             )
-            for table in report.get("query_tables", [])
-            if isinstance(table, Mapping) and table.get("rows")
-        )
+            shown.append(
+                DisplayedTable(
+                    columns, tuple(tuple(row) for row in table.get("rows", [])), expressions or ()
+                )
+            )
+        tables = tuple(shown)
         if any(
             isinstance(task, Mapping)
             and task.get("kind") in _ARM_B_QUERY_TASKS
@@ -1742,6 +1976,33 @@ def observe_arm_b(
         tables=tables,
         not_executed=not_executed,
     )
+
+
+def _executed_statements(
+    evidence: Mapping[str, Any] | None, report: Mapping[str, Any]
+) -> dict[Any, tuple[tuple[str, ...], str]]:
+    """Per query evidence id: its columns and the statement the gateway executed for it.
+
+    Only from an evidence response whose report is the one graded (one digest-checked read), whose
+    evidence is ``available`` and whose SQL is ``shown``; an identifier listed twice is dropped.
+    """
+    if not isinstance(evidence, Mapping) or evidence.get("report") is not report:
+        return {}
+    items = evidence.get("evidence")
+    if evidence.get("evidence_state") != "available" or not isinstance(items, list):
+        return {}
+    found: dict[Any, tuple[tuple[str, ...], str]] = {}
+    repeated: set[Any] = set()
+    for item in items:
+        if not isinstance(item, Mapping) or item.get("kind") != "query":
+            continue
+        key, sql = item.get("evidence_id"), item.get("sql")
+        if not isinstance(key, str) or item.get("sql_state") != "shown" or not isinstance(sql, str):
+            continue
+        if key in found:
+            repeated.add(key)
+        found[key] = (tuple(str(column) for column in item.get("columns", [])), sql)
+    return {key: value for key, value in found.items() if key not in repeated}
 
 
 def _report_text(report: Mapping[str, Any]) -> str | None:
