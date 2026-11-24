@@ -1653,6 +1653,101 @@ def test_column_expressions_read_only_the_strict_statement_shape(
     assert wc.column_expressions(sql, columns) == expected
 
 
+@pytest.mark.parametrize("header", ["total", "sum", "value", "amount", "Total", "AMOUNT"])
+def test_only_generic_headers_take_their_meaning_from_the_executed_sql(header: str) -> None:
+    alias = f'"{header}"'
+    table = _table(("month", header), PEAK_ROW)
+    revenue = _both_arms(PEAK, "", table, _peak_sql("ROUND(SUM(revenue), 2)", alias=alias))
+    assert revenue == {"p.0": STATED_IN_TABLE, "p.1": STATED_IN_TABLE}
+    counted = _both_arms(PEAK, "", table, _peak_sql("COUNT(*)", alias=alias))
+    assert counted == {"p.0": NOT_STATED, "p.1": NOT_STATED}
+    # Without a trusted statement the generic header names nothing: ambiguous, as in S1d.
+    assert _both_arms(PEAK, "", table)["p.1"] == AMBIGUOUS
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "gross_profit",
+        "profit",
+        "cost",
+        "quantity",
+        "orders",
+        "discount",
+        "avg_order_value",
+        "monthly_total",
+        "total_sales",
+    ],
+)
+@pytest.mark.parametrize("expression", ["ROUND(SUM(revenue), 2)", "SUM(quantity)", "COUNT(*)"])
+def test_a_non_generic_unknown_header_stays_ambiguous_whatever_the_sql_computes(
+    header: str, expression: str
+) -> None:
+    table = _table(("month", header), PEAK_ROW)
+    graded = _both_arms(PEAK, "", table, _peak_sql(expression, alias=header))
+    assert graded == {"p.0": AMBIGUOUS, "p.1": AMBIGUOUS}
+
+
+def test_a_header_naming_another_measure_is_never_credited_by_the_sql() -> None:
+    for header in ("breaches", "transactions", "escalation_count", "region"):
+        table = _table(("month", header), PEAK_ROW)
+        same = _both_arms(PEAK, "", table, _peak_sql("SUM(revenue)", alias=header))
+        assert same["p.1"] == AMBIGUOUS, header  # the display contradicts the computation
+        other = _both_arms(PEAK, "", table, _peak_sql("SUM(quantity)", alias=header))
+        assert other["p.1"] == NOT_STATED, header
+
+
+@pytest.mark.parametrize("header", ["total", "amount"])
+def test_a_generic_header_without_trusted_sql_is_ambiguous_in_each_arm(header: str) -> None:
+    rows = [dict(zip(("month", header), PEAK_ROW, strict=True))]
+    sql = _peak_sql("ROUND(SUM(revenue), 2)", alias=header)
+    for overrides in (
+        {"sql": None},
+        {"status": "pending_approval"},
+        {"provenance": {"hybrid_fell_back_to_documents": True}},
+    ):
+        view = _arm_a_table(rows=rows, **{"sql": sql, **overrides})
+        assert _peak_reasons(view) == ["ambiguous_value", "ambiguous_value"], overrides
+    columns = ["month", header]
+    for item in (
+        _query_item(columns, sql, state="restricted"),  # hidden from the caller
+        _query_item(columns, None),  # not recorded
+        _query_item(columns, sql, evidence_id="ev_other"),  # linked to another table
+    ):
+        evidence = _evidence("")
+        report = {
+            "sections": [],
+            "citations": [],
+            "facts": [],
+            "tasks": [],
+            "query_tables": [
+                {
+                    "evidence_id": "ev_table",
+                    "task_id": "t",
+                    "columns": columns,
+                    "rows": [list(PEAK_ROW)],
+                }
+            ],
+        }
+        evidence["report"] = report
+        evidence["evidence"].append(item)
+        view = wc.observe_arm_b(_investigation(report=report), evidence)
+        assert _peak_reasons(view) == ["ambiguous_value", "ambiguous_value"]
+
+
+def test_generic_headers_are_a_small_fixed_list_apart_from_every_known_header() -> None:
+    assert wc.GENERIC_HEADERS == {"total", "sum", "value", "amount"}
+    measures = {header for group in wc.METRIC_HEADERS.values() for header in group}
+    assert not wc.GENERIC_HEADERS & (measures | wc.KNOWN_OTHER_HEADERS)
+
+
+def test_the_answer_definition_states_sql_provenance_and_its_filter_limit() -> None:
+    text = wc.VISIBLE_ANSWER_DEFINITION
+    assert "generic header" in text and "trusted executed statement" in text
+    assert "filter and population equivalence is not established" in text
+    assert not wc.content_problems({"visible_answer": text})
+
+
 def test_measure_expressions_are_evaluator_defined_and_cover_no_count() -> None:
     assert wc.METRIC_EXPRESSIONS == {"total_revenue": ("sum", "revenue")}
     assert set(wc.METRIC_EXPRESSIONS) <= set(wc.METRIC_HEADERS)

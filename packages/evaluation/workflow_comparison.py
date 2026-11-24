@@ -190,10 +190,14 @@ VISIBLE_ANSWER_DEFINITION: Final = (
     "by position. A matching value with no clear tie is ambiguous, and a value explicitly tied "
     "to its context that holds another period's or population's expected value of the same "
     "measure is a contradiction. In a table, a value counts only when one row holds its whole "
-    "expected row under column headers naming each value's measure; an unrecognised header is "
-    "ambiguous and another measure's column never counts. A value with no expected row is never "
-    "credited from a table cell. A value shown in both places counts once; a contradiction in "
-    "either place is never outweighed."
+    "expected row and each value sits under a column whose measure is known: from a displayed "
+    "header that names the measure, or, for a generic header such as total, from the trusted "
+    "executed statement that produced the table, when it computes the evaluator's definition of "
+    "the measure. Any other unrecognised header is ambiguous, and another measure's column never "
+    "counts. Reading the executed statement establishes only what a column computes, not which "
+    "rows it covers: filter and population equivalence is not established. A value with no "
+    "expected row is never credited from a table cell. A value shown in both places counts once; "
+    "a contradiction in either place is never outweighed."
 )
 COMPLETION_DEFINITION: Final = (
     "A run is complete when it shows an answer and the product reports no unexecuted step the "
@@ -284,7 +288,8 @@ FACT_KINDS: Final = ("rate", "currency", "count", "label")
 # first header of each set is the column name in the evaluator's own reference query; the others
 # are a short fixed list of synonyms. Headers are compared after lower-casing and joining words with
 # underscores. One set serves both arms. A header in no set is unknown: a value under it is never
-# credited, because its meaning cannot be told from the display.
+# credited, because its meaning cannot be told from the display. The one exception is a generic
+# header (``GENERIC_HEADERS``), whose meaning a trusted executed statement may supply.
 METRIC_HEADERS: Final[dict[str, frozenset[str]]] = {
     "churn_rate": frozenset({"churn_rate"}),
     "mrr_lost": frozenset({"mrr_lost", "lost_mrr"}),
@@ -322,6 +327,13 @@ KNOWN_OTHER_HEADERS: Final = frozenset(
 )
 
 
+# Headers that name no measure at all: the only headers whose meaning a table's trusted executed
+# statement may supply. They stay unknown (ambiguous) when no such statement is read. A header that
+# is in no set ("monthly_total", "gross_profit") stays ambiguous whatever the statement computes,
+# because the reader cannot tell what it shows and it may name a measure this vocabulary lacks.
+GENERIC_HEADERS: Final = frozenset({"total", "sum", "value", "amount"})
+
+
 def _check_header_vocabulary() -> frozenset[str]:
     seen: set[str] = set()
     for headers in METRIC_HEADERS.values():
@@ -330,6 +342,8 @@ def _check_header_vocabulary() -> frozenset[str]:
         seen |= headers
     if seen & KNOWN_OTHER_HEADERS:
         raise ComparisonError("A measure header cannot also be a known non-measure header.")
+    if GENERIC_HEADERS & (seen | KNOWN_OTHER_HEADERS):
+        raise ComparisonError("A generic header cannot also be a known header.")
     return frozenset(seen | KNOWN_OTHER_HEADERS)
 
 
@@ -917,22 +931,38 @@ def _header_meaning(header: Any, metric: str | None) -> str:
 
 
 def _column_meaning(table: DisplayedTable, position: int, metric: str | None) -> str:
-    """A column's meaning for a fact: its header, settled by its executed expression where defined.
+    """A column's meaning for a fact: its displayed header first, its executed expression second.
 
-    Where the measure has a defining expression and the column's executed expression was read, the
-    expression decides: a different expression is another measure, whatever the header says; the
-    same expression matches under a header that names the measure or nothing known ("total"), and
-    stays ``unknown`` under a header naming something else, which would mislead the reader.
-    Otherwise the header alone decides, as before.
+    The executed expression (read only from a trusted statement, and only for a measure that has a
+    defining expression) is consulted in two cases and never adds credit beyond them:
+
+    - a header naming the fact's measure matches only if the expression agrees, and is another
+      measure if it does not (``SUM(quantity) AS total_revenue`` earns nothing);
+    - a generic header (:data:`GENERIC_HEADERS`) takes the expression's meaning
+      (``SUM(revenue) AS total`` matches, ``COUNT(*) AS total`` is another measure).
+
+    A header naming another measure or a non-measure is never credited: with the defining
+    expression under it, it is ``unknown``, because the display contradicts the computation. Any
+    other header stays ``unknown`` whatever the expression ("gross_profit", "monthly_total").
+
+    Limitation: the expression says what a column computes, not which rows it covers. Filters,
+    grouping and population are not compared, so this never establishes that a column covers the
+    expected period or population; only the row's displayed labels and its exact value do.
     """
-    named = _header_meaning(table.header(position), metric)
+    header = table.header(position)
+    named = _header_meaning(header, metric)
     defined = METRIC_EXPRESSIONS.get(metric) if metric is not None else None
     computed = table.expression(position)
     if defined is None or computed is None:
         return named
-    if computed != defined:
-        return "other"
-    return "unknown" if named == "other" else "match"
+    agrees = computed == defined
+    if named == "match":
+        return "match" if agrees else "other"
+    if named == "other":
+        return "unknown" if agrees else "other"
+    if _header_key(header) in GENERIC_HEADERS:
+        return "match" if agrees else "other"
+    return "unknown"
 
 
 # --- S1d provenance: reading a column's expression from the executed statement ---------------
@@ -941,7 +971,9 @@ def _column_meaning(table: DisplayedTable, position: int, metric: str | None) ->
 # operation or join, from one table named without an alias. A projection is read only when it is a
 # bare column, ``SUM(column)``, ``ROUND(SUM(column)[, digits])`` or ``COUNT(*)``; anything else
 # (a ``CASE``, a cast, arithmetic, a window, a subquery) is ``None``. The statement's output names
-# must equal the displayed columns, in order, or nothing is read for the table.
+# must equal the displayed columns, in order, or nothing is read for the table. The ``WHERE``,
+# ``GROUP BY`` and ``HAVING`` clauses are deliberately not read: a column's expression says what it
+# computes, never which rows it covers, so no filter or population equivalence is established.
 
 _SQL_REFUSED_KEYWORD: Final = re.compile(
     r"\b(?:WITH|UNION|INTERSECT|EXCEPT|JOIN|DISTINCT|OVER|WINDOW|NATURAL)\b", re.I
