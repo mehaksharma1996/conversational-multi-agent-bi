@@ -599,12 +599,9 @@ def retail_run(res: Resources, case_id: str, raw: dict[str, Any], **kwargs: Any)
     )
 
 
-def investigation_top_region_fulfillment(
-    res: Resources, sql: dict[str, str] | None = None
-) -> ScenarioRun:
-    """Rank regions, read the rule, count the leader's breaches: dependent steps, in order."""
-    case_id = "investigation-top-region-fulfillment"
-    raw = {
+def top_region_fulfillment_plan() -> dict[str, Any]:
+    """The scripted planner's plan for the top-region case (shared with EVAL-2's API runner)."""
+    return {
         "schema_version": 1,
         "objective": "Count the top revenue region's transactions at the escalation rule.",
         "sub_questions": ["Which region leads on revenue?", "What does the rule say?"],
@@ -620,17 +617,12 @@ def investigation_top_region_fulfillment(
             ),
         ],
     }
-    llm = scripted(sql or RETAIL_SQL, answer=_RETAIL_ANSWER)
-    run = retail_run(res, case_id, raw, llm=llm)
-    run.references = {"count": res.retail_cases[case_id]["expected_rows"]}
-    return _finish(run)
 
 
-def investigation_review_category_rate(res: Resources) -> ScenarioRun:
-    """Read all three rules, rank categories, compare the leader's rate with the whole dataset."""
-    case_id = "investigation-review-category-rate"
+def review_category_rate_plan() -> dict[str, Any]:
+    """The scripted planner's plan for the review-rate case (shared with EVAL-2's API runner)."""
     fields = ["category", "discount_rate", "gross_margin_rate", "fulfillment_days"]
-    raw = {
+    return {
         "schema_version": 1,
         "objective": "Compare the top breaching category's rate with the dataset's rate.",
         "sub_questions": ["What are the review rules?", "Which category breaches most?"],
@@ -640,16 +632,11 @@ def investigation_review_category_rate(res: Resources) -> ScenarioRun:
             _sql_task("rate", "Breach rate of the top category.", fields, "ranking"),
         ],
     }
-    run = retail_run(res, case_id, raw)
-    run.references = {"rate": res.retail_cases[case_id]["expected_rows"]}
-    return _finish(run)
 
 
-def investigation_october_peak_explanation(res: Resources) -> ScenarioRun:
-    """A why-question the data cannot answer: descriptive facts, and the cause stays untestable."""
-    case_id = "investigation-october-peak-explanation"
-    case = res.retail_cases[case_id]
-    raw = {
+def october_peak_plan() -> dict[str, Any]:
+    """The scripted planner's plan for the October case (shared with EVAL-2's API runner)."""
+    return {
         "schema_version": 2,
         "objective": "Describe the October 2025 revenue peak without claiming a cause.",
         "sub_questions": ["Which month peaked, by how much?", "What contributed most?"],
@@ -672,12 +659,40 @@ def investigation_october_peak_explanation(res: Resources) -> ScenarioRun:
             }
         ],
     }
-    # The same scripted output under the objective wording this plan uses.
-    sql = {
-        **RETAIL_SQL,
-        "Revenue per month, highest first": RETAIL_SQL["Revenue per month"],
-    }
-    run = retail_run(res, case_id, raw, llm=scripted(sql))
+
+
+# The same scripted output under the objective wording the October plan uses.
+OCTOBER_SQL: dict[str, str] = {
+    **RETAIL_SQL,
+    "Revenue per month, highest first": RETAIL_SQL["Revenue per month"],
+}
+
+
+def investigation_top_region_fulfillment(
+    res: Resources, sql: dict[str, str] | None = None
+) -> ScenarioRun:
+    """Rank regions, read the rule, count the leader's breaches: dependent steps, in order."""
+    case_id = "investigation-top-region-fulfillment"
+    raw = top_region_fulfillment_plan()
+    llm = scripted(sql or RETAIL_SQL, answer=_RETAIL_ANSWER)
+    run = retail_run(res, case_id, raw, llm=llm)
+    run.references = {"count": res.retail_cases[case_id]["expected_rows"]}
+    return _finish(run)
+
+
+def investigation_review_category_rate(res: Resources) -> ScenarioRun:
+    """Read all three rules, rank categories, compare the leader's rate with the whole dataset."""
+    case_id = "investigation-review-category-rate"
+    run = retail_run(res, case_id, review_category_rate_plan())
+    run.references = {"rate": res.retail_cases[case_id]["expected_rows"]}
+    return _finish(run)
+
+
+def investigation_october_peak_explanation(res: Resources) -> ScenarioRun:
+    """A why-question the data cannot answer: descriptive facts, and the cause stays untestable."""
+    case_id = "investigation-october-peak-explanation"
+    case = res.retail_cases[case_id]
+    run = retail_run(res, case_id, october_peak_plan(), llm=scripted(OCTOBER_SQL))
     facts = {item["id"]: item["expected_rows"] for item in case["descriptive_facts"]}
     run.references = {
         "peak": facts["peak-and-runner-up-month"],

@@ -35,13 +35,26 @@ from tests.investigation_hypothesis_fakes import CITED_ANSWER, HYPOTHESIS_SQL, c
 from tests.test_investigation_sql_gateway import ScriptedSQL
 
 ROOT = Path(__file__).resolve().parents[1]
-ORACLE = json.loads((ROOT / "evals" / "investigation" / "v1" / "oracle.json").read_text("utf-8"))
+_ORACLE_PATH = ROOT / "evals" / "investigation" / "v1" / "oracle.json"
 NARRATIVE_MARKER = "INVESTIGATION REPORT NARRATIVE"
 NARRATIVE_MAX_INPUT = 12_000
 _MEASUREMENT = re.compile(r"^- (\w+) \((h\d+)\): .*evidence (ev_[0-9a-f]{32})$", re.M)
 _DOCUMENT = re.compile(r"^- (ev_[0-9a-f]{32}) \((\w+);", re.M)
 
 Narrative = str | Callable[[str], str]
+
+
+def __getattr__(name: str) -> Any:
+    """``ORACLE`` is the evaluator-only oracle, read on first use by a grading test only.
+
+    Importing these scripted adapters must not read it (EVAL-2, #147): the comparison runner
+    imports them while evaluator-only files are guarded, before any run.
+    """
+    if name == "ORACLE":
+        oracle = json.loads(_ORACLE_PATH.read_text("utf-8"))
+        globals()["ORACLE"] = oracle
+        return oracle
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 @dataclass(eq=False)
