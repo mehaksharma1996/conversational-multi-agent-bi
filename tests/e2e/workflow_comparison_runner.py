@@ -30,6 +30,13 @@ Results go to ``evals/results/`` (git-ignored): ``workflow-comparison.json``,
 ``--compare-with <earlier grades>`` also writes ``workflow-comparison-delta.md``: every outcome,
 reason, failure mode, and count that changed, per case and arm. The module entry point re-execs
 from a temporary working directory with dotenv loading disabled.
+
+S2 judge mode (``--judge scripted``; off by default) asks an advisory judge about each run after
+both arms have finished and *before* any evaluator-only file is read, under the same file, network,
+and live-client guards. The judge sees only what each arm showed the user
+(``packages.evaluation.comparison_judge``), never the arm. Its results go to their own file,
+``workflow-comparison-judge.json``, and a separate section of the summary; the deterministic
+document and grades are the same with the judge on or off. Only scripted judges exist in S2.
 """
 
 from __future__ import annotations
@@ -59,6 +66,7 @@ RESULTS_JSON = "workflow-comparison.json"
 RESULTS_SUMMARY = "workflow-comparison.md"
 RESULTS_GRADES = "workflow-comparison-grades.json"
 RESULTS_DELTA = "workflow-comparison-delta.md"
+RESULTS_JUDGE = "workflow-comparison-judge.json"
 
 CHURN_PUBLIC_PATH = ROOT / "evals" / "investigation" / "v1" / "public_cases.json"
 RETAIL_CASES_PATH = ROOT / "evals" / "baseline" / "v2" / "investigation_cases.json"
@@ -607,6 +615,122 @@ def grade_runs(phase: RunPhase) -> Graded:
     return Graded(document, grades, texts)
 
 
+# --- the advisory judge (S2) ----------------------------------------------------------------------
+
+
+@dataclass
+class JudgePhase:
+    """The judge's records for every run, taken before any evaluator-only file was read."""
+
+    records: list[dict[str, Any]]
+    prompts: list[str]
+    identity: Any
+    blocked_opens: list[str]
+    network_hosts: list[str]
+    live_client_attempts: list[str]
+    questions: list[str] = field(default_factory=list)
+
+
+def judge_packet_for(run: ArmRun) -> Any:
+    """What the judge may see for one run: the user-visible answer, or why there is none."""
+    from packages.evaluation import comparison_judge as cj
+
+    if run.arm == "A":
+        return cj.packet_arm_a(run.question_sent, run.message)
+    if run.route != "investigation":
+        return cj.NotJudged("not_routed")
+    return cj.packet_arm_b(run.question_sent, run.investigation, run.evidence)
+
+
+class _RecordingTransport:
+    """Keeps every prompt sent to the judge (in memory) for the leak check."""
+
+    def __init__(self, transport: Any) -> None:
+        self._transport = transport
+        self.prompts: list[str] = []
+
+    @property
+    def identity(self) -> Any:
+        return self._transport.identity
+
+    def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return str(self._transport.complete(prompt))
+
+
+def judge_arms(phase: RunPhase, transport: Any) -> JudgePhase:
+    """Ask the judge about every run, under the evaluator-only, network, and client guards.
+
+    It reads the runs' responses only; it changes nothing in them and nothing in the application.
+    """
+    from packages.evaluation import comparison_judge as cj
+    from tests.e2e.workflow_baseline_runner import _record_network
+
+    if phase.blocked_opens or phase.live_client_attempts or phase.network_hosts:
+        raise RuntimeError("a guard tripped during the runs; the runs are not judged")
+    identity = transport.identity
+    if not isinstance(identity, cj.JudgeIdentity):
+        raise TypeError("a judge transport must state its identity")
+    recording = _RecordingTransport(transport)
+    records: list[dict[str, Any]] = []
+    with EvaluatorOnlyGuard(EVALUATOR_ONLY_PATHS) as guard:
+        with _record_network() as network, no_live_clients() as attempts:
+            for run in phase.runs:
+                outcome = cj.judge_packet(recording, judge_packet_for(run))
+                records.append(
+                    cj.judged_record(
+                        case_id=run.case_id,
+                        role="compared",
+                        arm=run.arm,
+                        repeat=run.repeat,
+                        judge_kind=identity.kind,
+                        outcome=outcome,
+                    )
+                )
+    remote = [host for host in network if not _is_loopback(host)]
+    return JudgePhase(
+        records,
+        recording.prompts,
+        identity,
+        list(guard.blocked),
+        remote,
+        list(attempts),
+        sorted({run.question_sent for run in phase.runs}),
+    )
+
+
+def judge_document(graded: Graded, judged: JudgePhase) -> dict[str, Any]:
+    """The advisory judge document, built after grading and kept apart from it.
+
+    Refuses to build when a guard tripped while judging or when any evaluator-only text reached a
+    judge prompt.
+    """
+    from packages.evaluation import comparison_judge as cj
+    from tests.e2e.workflow_comparison_adapters import ARM_A_MODEL, ARM_B_MODEL
+
+    if judged.blocked_opens or judged.live_client_attempts or judged.network_hosts:
+        raise RuntimeError("a guard tripped while judging; the judge results are not reported")
+    leaked = [text for text in graded.evaluator_texts if any(text in p for p in judged.prompts)]
+    if leaked:
+        raise RuntimeError("evaluator-only text reached a judge prompt; nothing is reported")
+    return cj.build_judge_document(
+        judged.records,
+        graded.grades,
+        identity=judged.identity,
+        comparison_evidence_kind=graded.document["evidence"]["kind"],
+        generator_models={"arm_a": ARM_A_MODEL, "arm_b": ARM_B_MODEL},
+        provenance={
+            "harness": "tests.e2e.workflow_comparison_runner",
+            "judge_phase": "after_runs_before_oracle",
+            "judge_prompts": len(judged.prompts),
+            "evaluator_only_opens_while_judging": len(judged.blocked_opens),
+            "network_hosts_while_judging": len(judged.network_hosts),
+            "live_client_attempts_while_judging": len(judged.live_client_attempts),
+        },
+        sensitive=[*graded.evaluator_texts, *judged.questions],
+    )
+
+
 def stable_grades(grades: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Per-run grades without timing, so two scripted runs of the same code compare equal."""
     return [{key: value for key, value in grade.items() if key != "metering"} for grade in grades]
@@ -616,21 +740,31 @@ def write_results(
     document: Mapping[str, Any],
     results_dir: Path | None = None,
     grades: Sequence[Mapping[str, Any]] | None = None,
+    judge: Mapping[str, Any] | None = None,
 ) -> list[Path]:
-    """Write the document, its summary, and (optionally) the per-run grades: results dir only."""
+    """Write the document, its summary, and (optionally) the per-run grades and the advisory judge
+    document: results dir only. The deterministic document is written the same either way; the
+    judge gets its own file and a separate section appended to the summary."""
+    from packages.evaluation.comparison_judge import render_judge_summary
     from packages.evaluation.workflow_comparison import content_problems, render_summary
 
     target = results_dir if results_dir is not None else RESULTS_DIR
     target.mkdir(parents=True, exist_ok=True)
     paths = [target / RESULTS_JSON, target / RESULTS_SUMMARY]
     paths[0].write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    paths[1].write_text(render_summary(document), encoding="utf-8")
+    summary = render_summary(document)
+    if judge is not None:
+        summary += "\n" + render_judge_summary(judge)
+    paths[1].write_text(summary, encoding="utf-8")
     if grades is not None:
         body = {"grades": stable_grades(grades)}
         if content_problems(body):
             raise RuntimeError("per-run grades would carry content")
         paths.append(target / RESULTS_GRADES)
-        paths[2].write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        paths[-1].write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if judge is not None:
+        paths.append(target / RESULTS_JUDGE)
+        paths[-1].write_text(json.dumps(judge, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return paths
 
 
@@ -736,11 +870,26 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="earlier per-run grades (JSON) to report outcome changes against",
     )
+    parser.add_argument(
+        "--judge",
+        choices=("off", "scripted"),
+        default="off",
+        help="advisory judge mode (S2: scripted only; a live judge is not available)",
+    )
     args = parser.parse_args(argv)
+    from packages.evaluation.comparison_judge import require_offline_mode
+
+    require_offline_mode(args.judge)
     with tempfile.TemporaryDirectory(prefix="eval2-") as directory:
         phase = run_arms(Path(directory), repeats=args.repeats, case_ids=args.cases)
+    judged = None
+    if args.judge == "scripted":
+        from tests.e2e.workflow_comparison_judge_script import CannedStructuralJudge
+
+        judged = judge_arms(phase, CannedStructuralJudge())  # before the oracle is read
     graded = grade_runs(phase)
-    paths = write_results(graded.document, grades=graded.grades)
+    judge = judge_document(graded, judged) if judged is not None else None
+    paths = write_results(graded.document, grades=graded.grades, judge=judge)
     if args.compare_with is not None:
         earlier = json.loads(args.compare_with.read_text(encoding="utf-8"))
         current = stable_grades(graded.grades)

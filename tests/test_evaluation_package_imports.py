@@ -107,6 +107,40 @@ print(json.dumps({
 """
 
 
+_JUDGING_WITHOUT_IO = """
+import builtins, io, json, socket
+import packages.evaluation.comparison_judge as cj
+
+def refuse(*args, **kwargs):
+    raise RuntimeError("I/O attempted")
+
+builtins.open = refuse
+io.open = refuse
+socket.socket = refuse
+socket.create_connection = refuse
+
+message = {"role": "assistant", "answer": "It was 7.1%.", "rows": [{"rate": 0.071}], "sources": []}
+packet = cj.packet_arm_a("What was the rate?", message)
+prompt = cj.build_prompt(packet)
+
+class Scripted:
+    identity = cj.JudgeIdentity(kind="scripted", provider="probe", model="probe", version="1")
+    def complete(self, text):
+        dims = {name: {"status": "rated", "rating": 4, "issues": [], "evidence": ["P1"]}
+                for name in cj.DIMENSION_NAMES}
+        return json.dumps({"rubric_version": cj.RUBRIC_VERSION, "packet_id": packet.packet_id,
+                           "decision": "assessed", "dimensions": dims})
+
+outcome = cj.judge_packet(Scripted(), packet)
+print(json.dumps({"status": outcome.status, "loaded": application_modules()}))
+"""
+
+
+def test_the_comparison_judge_runs_without_io_or_application_initialization() -> None:
+    outcome = json.loads(_fresh(_JUDGING_WITHOUT_IO))
+    assert outcome == {"status": "assessed", "loaded": []}
+
+
 def _fresh(code: str) -> str:
     environment = {**os.environ, "PYTHON_DOTENV_DISABLED": "1"}
     result = subprocess.run(
@@ -125,6 +159,7 @@ def _fresh(code: str) -> str:
     [
         "packages.evaluation",
         "packages.evaluation.workflow_comparison",
+        "packages.evaluation.comparison_judge",
         "packages.evaluation.result_sets",
         "packages.evaluation.workflow_cases",
     ],

@@ -72,6 +72,24 @@ Known biases, which is why the output is calibration statistics and not a qualit
 are sensitive to prompt wording and score anchors, may prefer their own model family, and vary between runs. Ten labelled items give very wide uncertainty; treat the numbers as a
 reason to look at specific answers, not as a measurement. Do not point the judge at private data.
 
+### EVAL-2 comparison judge (rubric 2.0.0)
+
+`packages/evaluation/comparison_judge.py` is the EVAL-2 (#147) S2 judge for the workflow comparison. Rubric
+`eval2-comparison-judge` 2.0.0 succeeds rubric 1.0.0 without changing it: seven dimensions (relevance and task
+completion, sub-question coverage, numerical consistency, citation support, unsupported claims, causal overstatement,
+speculation and irrelevance), each rated 1-4 against written anchors or marked `insufficient_evidence`, with a fixed
+list of issue codes and references to the parts of the answer and evidence it relied on. The judge sees only what the
+product showed the user (answer prose and tables, the sources shown with the answer, arm B's displayed report facts),
+never the arm, SQL, verification flags, identifiers, or any evaluator-only value, and the data enters the prompt as one
+JSON value between digest-bearing markers. A reply that is not exactly the contract (malformed JSON, a missing or extra
+field, an unsupported rating, an unknown issue code or reference), a refusal, or a timeout is *unavailable*, never a
+pass; a run with nothing shown (not routed, no response) is *not applicable*, never a zero. Results go to their own
+document (`evals/results/workflow-comparison-judge.json`) beside the unchanged deterministic one, with disagreements
+reported and never resolved. S2 has scripted judges only (`--judge scripted` on
+`tests.e2e.workflow_comparison_runner`); a live judge is refused until S3 is approved. Rubric 2.0.0 is not calibrated:
+that needs human labels for its seven dimensions and a live judge. A different provider or model name is not recorded as
+independence.
+
 ## Retrieval metrics
 
 `retrieval_cases.json` holds question-to-evidence labels. Evidence is a group of case-insensitive terms that must all appear in a

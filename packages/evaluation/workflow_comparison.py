@@ -2549,7 +2549,9 @@ _FIXED_PROSE = frozenset(
 )
 
 
-def content_problems(document: Any, sensitive: Iterable[str] = ()) -> list[str]:
+def content_problems(
+    document: Any, sensitive: Iterable[str] = (), *, allowed_prose: Iterable[str] = ()
+) -> list[str]:
     """Why ``document`` is not content-free; empty when it is.
 
     Every string (keys included) must be this module's fixed prose, a safe identifier token, or a
@@ -2557,7 +2559,11 @@ def content_problems(document: Any, sensitive: Iterable[str] = ()) -> list[str]:
     caller names (questions, answers, oracle values, canaries). Sensitive strings shorter than
     :data:`MIN_SENSITIVE_LENGTH` are refused rather than searched: a value like ``2`` appears in
     identifiers by chance, and grades hold no copied values by construction (tested).
+
+    ``allowed_prose`` adds another module's own fixed sentences (the S2 judge document's
+    definitions); they are still searched for forbidden markers and sensitive strings.
     """
+    fixed = _FIXED_PROSE | frozenset(allowed_prose)
     sensitive = list(sensitive)
     if any(len(s) < MIN_SENSITIVE_LENGTH for s in sensitive):
         raise ComparisonError("Sensitive strings must be distinctive (at least 4 characters).")
@@ -2580,7 +2586,7 @@ def content_problems(document: Any, sensitive: Iterable[str] = ()) -> list[str]:
     def visit_string(text: str, path: str, provenance: bool) -> None:
         if not text:
             return
-        allowed = text in _FIXED_PROSE or _SAFE_TOKEN.match(text) is not None
+        allowed = text in fixed or _SAFE_TOKEN.match(text) is not None
         if provenance and _SAFE_PROVENANCE.match(text):
             allowed = True
         if not allowed:
